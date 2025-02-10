@@ -7,7 +7,7 @@ import kotlin.reflect.KClass
 
 
 @Serializable
-abstract class StockData(
+data class StockData(
     @SerialName("日期")
     val date: String,          // 使用 String 类型处理日期格式，可后续按需转换
     @SerialName("开盘")

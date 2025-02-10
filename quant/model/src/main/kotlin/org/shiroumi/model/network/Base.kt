@@ -22,7 +22,7 @@ interface ModelTypeBridge<T : Entity<T>> : KPropertyReader {
         val factory =
             targetClass.companionObject?.objectInstance ?: throw Exception("database type must have a Entity.Factory")
         val o: Entity<T> = (factory as Entity.Factory<T>)()
-        (factory as Entity.Factory<T>) entity@{
+        factory entity@{
             inProperties.forEach { ip ->
                 val op = outProperties[ip.name]
                 (op as? KMutableProperty<T>)?.setter?.call(o, ip.readFrom(this@ModelTypeBridge))

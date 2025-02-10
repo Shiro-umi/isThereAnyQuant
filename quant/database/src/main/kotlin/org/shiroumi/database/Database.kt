@@ -3,6 +3,7 @@ package org.shiroumi.database
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import org.ktorm.database.Database
+import org.shiroumi.configs.BuildConfigs
 
 // database instance
 val commonDb = Database.connect(Schema.Common.connectionPool)
@@ -20,8 +21,8 @@ val Schema.connectionPool: HikariDataSource
     get() = HikariDataSource(
         HikariConfig().apply {
             jdbcUrl = "jdbc:mysql://192.168.31.125:3306/$value?allowMultiQueries=true"
-            username = "remote"
-            password = "Zhouzheng941206."
+            username = BuildConfigs.DATABASE_USERNAME
+            password = BuildConfigs.DATABASE_PASSWORD
             driverClassName = "com.mysql.cj.jdbc.Driver"
 
             maximumPoolSize = 10

@@ -1,3 +1,8 @@
+import java.util.Properties
+import kotlin.apply
+import kotlin.collections.component1
+import kotlin.collections.component2
+
 plugins {
     kotlin("jvm")
 }

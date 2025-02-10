@@ -37,7 +37,7 @@ fun createRetrofit(): Retrofit {
     }
 
     return Retrofit.Builder()
-        .baseUrl("http://127.0.0.1:2000/api/public/")
+        .baseUrl("http://192.168.31.125:2000/api/public/")
         .client(
             OkHttpClient.Builder()
                 .addInterceptor(LoggingInterceptor()) // 可选，添加日志拦截器

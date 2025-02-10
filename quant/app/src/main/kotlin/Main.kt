@@ -3,6 +3,7 @@ package org.shiroumi
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import datasource.updateSymbol
+import org.shiroumi.datasource.updateTradingDate
 import kotlin.system.exitProcess
 
 // vm entry
@@ -14,7 +15,8 @@ fun main() {
 
 // application entry
 suspend fun startApplication() = coroutineScope {
-    // update all symbols
-    updateSymbol()
-    // update all
+//    updateSymbol() // update all symbols
+    updateTradingDate()
+    // todo update all
+
 }
