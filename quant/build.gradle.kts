@@ -1,5 +1,3 @@
-import java.util.Properties
-
 plugins {
     kotlin("jvm") version "2.1.0"
 }
@@ -11,8 +9,10 @@ repositories {
     mavenCentral()
 }
 
-dependencies {
-    testImplementation(kotlin("test"))
+buildscript {
+    dependencies {
+        classpath(kotlin("gradle-plugin", version = "2.1.0"))
+    }
 }
 
 tasks.test {

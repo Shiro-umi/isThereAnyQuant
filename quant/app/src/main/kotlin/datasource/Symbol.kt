@@ -15,7 +15,9 @@ suspend fun updateSymbol() = coroutineScope {
     launch(Dispatchers.IO) {
         symbolSeq.run symbol@{
             val symbols = map { it.code }.toSet()
-            akApi.getStockSymbol().map { it.convert() }.forEach { symbol ->
+            akApi.getStockSymbol().map {
+                it.convert()
+            }.forEach { symbol ->
                 if (symbol.code in symbols) return@forEach
                 add(Symbol {
                     code = symbol.code

@@ -1,7 +1,4 @@
-import java.util.Properties
-import kotlin.apply
-import kotlin.collections.component1
-import kotlin.collections.component2
+@file:Suppress("VulnerableLibrariesLocal")
 
 plugins {
     kotlin("jvm")
@@ -33,4 +30,7 @@ tasks.test {
 }
 kotlin {
     jvmToolchain(17)
+    sourceSets.main {
+        kotlin.srcDir("build/generated/ksp/main/kotlin")
+    }
 }

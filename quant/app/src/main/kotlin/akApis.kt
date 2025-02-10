@@ -1,8 +1,8 @@
 package org.shiroumi
 
-import org.shiroumi.model.network.StockData
-import org.shiroumi.model.network.Symbol
-import org.shiroumi.model.network.TradingDate
+import org.shiroumi.generated.dataclass.Candle
+import org.shiroumi.generated.dataclass.Symbol
+import org.shiroumi.generated.dataclass.TradingDate
 import org.shiroumi.network.api
 import retrofit2.http.GET
 import retrofit2.http.Query
@@ -22,9 +22,9 @@ interface AkApi {
     @GET("stock_zh_a_hist")
     suspend fun getStockHist(
         @Query("symbol") symbol: String,
-        @Query("period")  period: String = "daily", // 'daily', 'weekly', 'monthly'
+        @Query("period") period: String = "daily", // 'daily', 'weekly', 'monthly'
         @Query("start_date") start: String = "start_date", // eg: 20250101
         @Query("end_date") end: String = "end_date",
         @Query("adjust") limit: String = "hfq"
-    ): List<StockData>
+    ): List<Candle>
 }

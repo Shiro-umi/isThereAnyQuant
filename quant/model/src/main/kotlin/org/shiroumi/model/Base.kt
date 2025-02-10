@@ -1,4 +1,4 @@
-package org.shiroumi.model.network
+package org.shiroumi.model
 
 import org.ktorm.entity.Entity
 import kotlin.reflect.KClass
@@ -19,16 +19,16 @@ interface ModelTypeBridge<T : Entity<T>> : KPropertyReader {
             outProperties[f.name] = f
             f.isAccessible = true
         }
-        val factory =
-            targetClass.companionObject?.objectInstance ?: throw Exception("database type must have a Entity.Factory")
-        val o: Entity<T> = (factory as Entity.Factory<T>)()
-        factory entity@{
-            inProperties.forEach { ip ->
-                val op = outProperties[ip.name]
-                (op as? KMutableProperty<T>)?.setter?.call(o, ip.readFrom(this@ModelTypeBridge))
+        val f = targetClass.companionObject?.objectInstance as? Entity.Factory<T>
+            ?: throw Exception("database type must have a Entity.Factory")
+        return f().run {
+            f entity@{
+                inProperties.forEach { ip ->
+                    val op = outProperties[ip.name]
+                    (op as? KMutableProperty<T>)?.setter?.call(this, ip.readFrom(this@ModelTypeBridge))
+                }
             }
         }
-        return o as T
     }
 }
 
