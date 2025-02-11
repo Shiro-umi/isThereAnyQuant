@@ -36,19 +36,6 @@ abstract class CandleTable(tableName: String) : Table<Candle>(tableName) {
     val changeAmount = double("change_amount").bindTo { c -> c.changeAmount }
     @KtormAssignmentsInclude
     val turnoverRate = double("turnover_rate").bindTo { c -> c.turnoverRate }
-
-    fun AssignmentsBuilder.set(table: CandleTable, new: Candle) {
-        set(table.open, new.open)
-        set(table.close, new.close)
-        set(table.high, new.high)
-        set(table.low, new.low)
-        set(table.volume, new.volume)
-        set(table.turnover, new.turnover)
-        set(table.turnoverRate, new.turnoverRate)
-        set(table.amplitude, new.amplitude)
-        set(table.changePercent, new.changePercent)
-        set(table.changeAmount, new.changeAmount)
-    }
 }
 
 // candle seq of target table
