@@ -5,6 +5,7 @@ import kotlin.collections.component2
 
 plugins {
     kotlin("jvm")
+    id("com.google.devtools.ksp") version "2.1.0-1.0.29"
 }
 
 group = "org.shiroumi"
@@ -16,6 +17,8 @@ repositories {
 
 dependencies {
     implementation(project(":model"))
+    implementation(project(":ksp"))
+    ksp(project(":ksp"))
     api(libs.ktorm.core)
     api(libs.ktorm.mysql)
     api(libs.jdbc)
@@ -25,20 +28,20 @@ dependencies {
     implementation("com.zaxxer:HikariCP:5.1.0")
 }
 
-tasks.test {
-    useJUnitPlatform()
-}
 kotlin {
     jvmToolchain(17)
 }
 
 sourceSets.main {
-    println(layout.buildDirectory.dir("generated/sources/kotlin/main").get().asFile.absolutePath)
     kotlin.srcDir(layout.buildDirectory.dir("generated/sources/kotlin/main").get().asFile.absolutePath)
 }
 
 tasks.named("compileKotlin") {
     dependsOn("generateLocalProperties")
+}
+
+gradle.projectsEvaluated {
+    project.tasks.findByName("kspKotlin")!!.dependsOn("generateLocalProperties")
 }
 
 val localProperties = Properties().apply {

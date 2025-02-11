@@ -1,10 +1,13 @@
 package org.shiroumi
 
+import datasource.updateStockCandles
 import datasource.updateSymbol
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import org.shiroumi.datasource.updateTradingDate
 import kotlin.system.exitProcess
+
+val cpuCores = Runtime.getRuntime().availableProcessors()
 
 // vm entry
 fun main() {
@@ -17,6 +20,5 @@ fun main() {
 suspend fun startApplication() = coroutineScope {
     updateSymbol()
     updateTradingDate()
-    // todo update all
-
+    updateStockCandles()
 }

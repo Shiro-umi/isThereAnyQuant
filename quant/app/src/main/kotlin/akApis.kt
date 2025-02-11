@@ -1,5 +1,7 @@
 package org.shiroumi
 
+import org.shiroumi.database.str
+import org.shiroumi.database.today
 import org.shiroumi.generated.dataclass.Candle
 import org.shiroumi.generated.dataclass.Symbol
 import org.shiroumi.generated.dataclass.TradingDate
@@ -23,8 +25,8 @@ interface AkApi {
     suspend fun getStockHist(
         @Query("symbol") symbol: String,
         @Query("period") period: String = "daily", // 'daily', 'weekly', 'monthly'
-        @Query("start_date") start: String = "start_date", // eg: 20250101
-        @Query("end_date") end: String = "end_date",
+        @Query("start_date") start: String? = "20000001", // eg: 20250101
+        @Query("end_date") end: String? = today.str,
         @Query("adjust") limit: String = "hfq"
     ): List<Candle>
 }

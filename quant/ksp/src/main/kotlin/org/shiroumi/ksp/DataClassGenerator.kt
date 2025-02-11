@@ -21,7 +21,6 @@ annotation class BridgeIgnore()
 
 class BridgeClassProcessor(private val env: SymbolProcessorEnvironment) : SymbolProcessor {
     override fun process(resolver: Resolver): List<KSAnnotated> {
-        env.logger.warn("BridgeClassProcessor.process")
         val symbols = resolver.getSymbolsWithAnnotation(DataClassBridge::class.qualifiedName!!)
         val ret = mutableListOf<KSAnnotated>()
         symbols.toList().forEach {
@@ -36,12 +35,11 @@ class BridgeClassProcessor(private val env: SymbolProcessorEnvironment) : Symbol
 
 class BridgeClassProcessorProvider : SymbolProcessorProvider {
     override fun create(environment: SymbolProcessorEnvironment): SymbolProcessor {
-        environment.logger.warn("BridgeClassProcessorProvider.create")
         return BridgeClassProcessor(environment)
     }
 }
 
-internal class Visitor(val env: SymbolProcessorEnvironment) : KSVisitorVoid() {
+private class Visitor(val env: SymbolProcessorEnvironment) : KSVisitorVoid() {
 
     private val outputPackage = "org.shiroumi.generated.dataclass"
 

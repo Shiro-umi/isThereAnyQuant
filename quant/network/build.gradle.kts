@@ -21,9 +21,6 @@ dependencies {
     implementation(libs.guava)
 }
 
-tasks.test {
-    useJUnitPlatform()
-}
 kotlin {
     jvmToolchain(17)
 }

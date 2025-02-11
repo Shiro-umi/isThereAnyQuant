@@ -1,1 +1,2 @@
 org.shiroumi.ksp.BridgeClassProcessorProvider
+org.shiroumi.ksp.AssignmentsBuilderSetProcessorProvider
