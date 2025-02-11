@@ -20,6 +20,8 @@ import org.shiroumi.database.table.tradingDateSeq
 import org.shiroumi.database.today
 import org.shiroumi.generated.assignments.setCandle
 import org.shiroumi.model.database.Symbol
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 // update all stock candles
 suspend fun updateStockCandles() = coroutineScope {
@@ -33,7 +35,7 @@ suspend fun updateStockCandles() = coroutineScope {
         val endTd = if (today.str == td.last().date) td.last().date else td[td.size - 2].date
 
         // for each symbols
-        with(Semaphore(cpuCores*2)) {
+        with(Semaphore(cpuCores * 5)) {
             val action: suspend (Symbol) -> Unit = { symbol ->
                 withPermit { getStockHist(symbol, endTd) }
             }
@@ -69,7 +71,13 @@ private suspend fun getStockHist(
     }
     stockDb.bulkInsert(table) insert@{
         candles.forEach { candle ->
-            this@insert.item { ta -> setCandle(ta, candle.convert()) }
+            this@insert.item { ta ->
+                setCandle(ta, candle.convert { propertyName, origin ->
+                    if (propertyName != "date") return@convert origin
+                    else LocalDateTime.parse((origin as String), DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                        .format(DateTimeFormatter.ofPattern("yyyyMMdd"))
+                })
+            }
         }
     }
 }

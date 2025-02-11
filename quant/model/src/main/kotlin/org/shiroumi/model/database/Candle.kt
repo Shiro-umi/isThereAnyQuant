@@ -3,6 +3,8 @@ package org.shiroumi.model.database
 import org.ktorm.entity.Entity
 import org.shiroumi.ksp.BridgeSerialName
 import org.shiroumi.ksp.DataClassBridge
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 @DataClassBridge
 interface Candle : Entity<Candle> {

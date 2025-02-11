@@ -12,7 +12,7 @@ import kotlin.reflect.jvm.isAccessible
 @Suppress("UNCHECKED_CAST")
 interface ModelTypeBridge<T : Entity<T>> : KPropertyReader {
     val targetClass: KClass<T>
-    fun convert(): T {
+    fun convert(action: ((propertyName: String, origin: Any) -> Any)? = null): T {
         val inProperties = this::class.memberProperties.onEach { f -> f.isAccessible = true }
         val outProperties = hashMapOf<String, KProperty1<out Any, *>>()
         targetClass.memberProperties.map { f ->
@@ -25,7 +25,11 @@ interface ModelTypeBridge<T : Entity<T>> : KPropertyReader {
             f entity@{
                 inProperties.forEach { ip ->
                     val op = outProperties[ip.name]
-                    (op as? KMutableProperty<T>)?.setter?.call(this, ip.readFrom(this@ModelTypeBridge))
+                    val originValue = ip.readFrom(this@ModelTypeBridge)
+                    (op as? KMutableProperty<T>)?.setter?.call(
+                        this,
+                        action?.invoke(ip.name, originValue) ?: originValue
+                    )
                 }
             }
         }
