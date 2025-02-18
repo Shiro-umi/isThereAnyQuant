@@ -1,6 +1,5 @@
 package org.shiroumi.database.table
 
-import org.ktorm.dsl.AssignmentsBuilder
 import org.ktorm.entity.EntitySequence
 import org.ktorm.entity.sequenceOf
 import org.ktorm.schema.Table
@@ -66,7 +65,9 @@ private fun createCandleTableIfNotExists(tableName: String) {
             `amplitude` DOUBLE NOT NULL,
             `change_percent` DOUBLE NOT NULL,
             `change_amount` DOUBLE NOT NULL,
-            `turnover_rate` DOUBLE NOT NULL);
+            `turnover_rate` DOUBLE NOT NULL,
+            INDEX(`date`)
+            );
     """.trimIndent()
     stockDb.useConnection { conn ->
         conn.prepareStatement(sql).execute()

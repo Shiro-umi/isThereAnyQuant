@@ -25,16 +25,5 @@ val Schema.connectionPool: HikariDataSource
             username = BuildConfigs.DATABASE_USERNAME
             password = BuildConfigs.DATABASE_PASSWORD
             driverClassName = "com.mysql.cj.jdbc.Driver"
-
-            maximumPoolSize = 5500
-            minimumIdle = 5500
-            connectionTimeout = 30000 // 30秒
-            idleTimeout = 600000 // 10分钟
-            maxLifetime = 1800000 // 30分钟
-            connectionTestQuery = "SELECT 1"
-
-            addDataSourceProperty("cachePrepStmts", "true")
-            addDataSourceProperty("prepStmtCacheSize", "250")
-            addDataSourceProperty("prepStmtCacheSqlLimit", "2048")
         }
     )

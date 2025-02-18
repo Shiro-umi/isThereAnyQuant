@@ -18,7 +18,7 @@ fun main() {
 
 // application entry
 suspend fun startApplication() = coroutineScope {
-    updateSymbol()
-    updateTradingDate()
+//    updateSymbol()
+//    updateTradingDate()
     updateStockCandles()
 }
