@@ -11,6 +11,7 @@ import okhttp3.ResponseBody
 import retrofit2.Converter
 import retrofit2.Retrofit
 import java.lang.reflect.Type
+import java.util.concurrent.TimeUnit
 
 
 @OptIn(ExperimentalSerializationApi::class)
@@ -40,12 +41,13 @@ fun createRetrofit(): Retrofit {
         .baseUrl("http://192.168.31.125:2000/api/public/")
         .client(
             OkHttpClient.Builder()
-                .addInterceptor(LoggingInterceptor()) // 可选，添加日志拦截器
+                .connectTimeout(3, TimeUnit.SECONDS)
+                .readTimeout(5, TimeUnit.SECONDS)
+                .writeTimeout(5, TimeUnit.SECONDS)
+//                .addInterceptor(LoggingInterceptor()) // 可选，添加日志拦截器
                 .build()
         )
-        // 先添加 String 转换器，优先级高于 JSON
         .addConverterFactory(stringConverterFactory)
-        // 添加 JSON 转换器（处理 application/json）
         .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
         .build()
 }

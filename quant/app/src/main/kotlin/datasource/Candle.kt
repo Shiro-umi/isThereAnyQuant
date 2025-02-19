@@ -1,11 +1,15 @@
 package datasource
 
-import kotlinx.coroutines.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import org.ktorm.dsl.*
 import org.ktorm.entity.filter
+import org.ktorm.entity.map
 import org.ktorm.entity.toList
 import org.ktorm.support.mysql.bulkInsert
 import org.shiroumi.akApi
@@ -18,6 +22,7 @@ import org.shiroumi.database.table.tradingDateSeq
 import org.shiroumi.database.today
 import org.shiroumi.generated.assignments.setCandle
 import org.shiroumi.model.database.Symbol
+import org.shiroumi.printProgressBar
 import java.net.SocketTimeoutException
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -25,6 +30,7 @@ import java.time.format.DateTimeFormatter
 
 @Volatile
 var updateCount: Int = 0
+var toUpdateCount: Int = 0
 
 // update all stock candles
 suspend fun updateStockCandles() = coroutineScope {
@@ -39,8 +45,10 @@ suspend fun updateStockCandles() = coroutineScope {
         val endTd = if (today.str == td.last().date) td.last().date else td[td.size - 2].date
 
         val channel: Channel<Symbol> = Channel(cpuCores)
+        val symbols = symbolSeq.map { it }
+        toUpdateCount = symbols.size
         launch {
-            for (symbol in symbolSeq) {
+            for (symbol in symbols) {
                 channel.send(symbol)
             }
         }
@@ -51,11 +59,14 @@ suspend fun updateStockCandles() = coroutineScope {
                     withPermit {
                         try {
                             getStockHist(symbol, endTd)
-                            println("update succeed:  ${symbol.code}, ")
                         } catch (_: SocketTimeoutException) {
                             println("timeout: ${symbol.code}")
                             delay(2000)
                             channel.send(symbol)
+                            toUpdateCount++
+                        } finally {
+                            updateCount++
+                            printProgressBar(toUpdateCount, updateCount)
                         }
                     }
                 }
