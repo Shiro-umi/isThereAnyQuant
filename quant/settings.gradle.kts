@@ -7,7 +7,7 @@ pluginManagement {
 
 rootProject.name = "quant"
 
-include("app")
+include("ktor-server")
 include("network")
 include("model")
 include("database")
