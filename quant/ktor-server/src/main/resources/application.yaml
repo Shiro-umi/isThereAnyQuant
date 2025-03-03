@@ -1,0 +1,6 @@
+ktor:
+    application:
+        modules:
+            - org.shiroumi.ktor.module.RoutingKt.ktorRouting
+    deployment:
+        port: 9870
