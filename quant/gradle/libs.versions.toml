@@ -22,13 +22,16 @@ ktor-server = [
     "ktor-server-websocket",
     "ktor-server-core",
     "ktor-server-netty",
-    "ktorm-core",
-    "ktorm-mysql"
+    "ktor-network"
 ]
 ktor-client = [
     "ktor-client-cio",
     "ktor-client-core",
     "ktor-client-websocket"
+]
+ktorm = [
+    "ktorm-core",
+    "ktorm-mysql"
 ]
 
 [libraries]
@@ -50,6 +53,7 @@ ktor-server-netty = { module = "io.ktor:ktor-server-netty", version.ref = "ktor-
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor-version" }
 ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor-version" }
 ktor-client-websocket = { module = "io.ktor:ktor-client-websockets", version.ref = "ktor-version" }
+ktor-network = { module = "io.ktor:ktor-network", version.ref = "ktor-version" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback-version" }
 ktor-server-config-yaml = { module = "io.ktor:ktor-server-config-yaml", version.ref = "ktor-version" }
 

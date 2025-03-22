@@ -1,6 +1,6 @@
 package org.shiroumi.trading
 
-abstract class Trader {
+class Trader {
 
     /**
      * account, contains holding & balance

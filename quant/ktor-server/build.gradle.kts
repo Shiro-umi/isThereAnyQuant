@@ -25,11 +25,12 @@ dependencies {
     implementation(project(":database"))
     implementation(kotlin("stdlib"))
     implementation(kotlin("reflect"))
-    api(libs.kotlin.coroutines.core)
-    api(libs.kotlin.serialization.json)
-    api(libs.kotlin.datetime)
-    api(libs.retrofit)
+    implementation(libs.kotlin.coroutines.core)
+    implementation(libs.kotlin.serialization.json)
+    implementation(libs.kotlin.datetime)
+    implementation(libs.retrofit)
     implementation(libs.bundles.ktor.server)
+    implementation(libs.bundles.ktorm)
 }
 
 tasks.test {

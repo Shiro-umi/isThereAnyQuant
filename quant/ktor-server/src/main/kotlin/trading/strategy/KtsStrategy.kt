@@ -1,17 +1,17 @@
 package org.shiroumi.trading.strategy
 
 abstract class KtsStrategy(
-    private val path: String,
+    private val fileName: String,
     private val port: Int,
 ) : AbsStrategy {
 
     override val script: Script = Script(
         type = ScriptType.Kts,
-        path = path,
+        fileName = fileName,
         port = port
     )
 
-    override fun loadScript(fileName: String) {
+    override fun loadScript() {
         // todo compile kts script
     }
 }
