@@ -2,7 +2,8 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/backingtest/backingtest.iml" filepath="$PROJECT_DIR$/backingtest/backingtest.iml" />
+      <module fileurl="file://$PROJECT_DIR$/py_backtest/py_backtest.iml" filepath="$PROJECT_DIR$/py_backtest/py_backtest.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/quant.iml" filepath="$PROJECT_DIR$/.idea/quant.iml" />
     </modules>
   </component>
 </project>
