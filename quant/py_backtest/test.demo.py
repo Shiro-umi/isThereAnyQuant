@@ -1,64 +1,68 @@
+import os
 import socket as pysocket
 import sys
 import threading
-import os
 import time
+import json
+
+protocol = None
 
 
-def send_messages(socket):
-    try:
+class SocketManager:
+    event: threading.Event | None = None
+
+    def __init__(self):
+        self.socket = pysocket.socket(pysocket.AF_INET, pysocket.SOCK_STREAM)
+        try:
+            self.socket.connect(('127.0.0.1', int(sys.argv[1])))
+            print(f"server connected f{('127.0.0.1', int(sys.argv[1]))}")
+            t_looper = threading.Thread(target=self.looper)
+            t_looper.daemon = True
+            t_looper.start()
+            while True:
+                if not t_looper.is_alive():
+                    break
+                time.sleep(1)
+        finally:
+            self.socket.close()
+            sys.exit(0)
+
+    def looper(self):
         while True:
-            msg = input("input your msg, 'exit' to exit: ")
-            if msg.lower() == 'exit':
-                break
-            try:
-                socket.sendall(f"{msg}\n".encode('utf-8'))
-            except (BrokenPipeError, ConnectionResetError):
-                print("connection closed by server")
-                break
-    except KeyboardInterrupt:
-        pass
-    finally:
-        socket.close()
-        sys.exit(0)
+            data = self.socket.recv(1024).decode('utf-8')
+            print(f"\n response from server: {data}")
+            if not self.event:
+                json_data = json.loads(data)
+                cmd = json_data['cmd']
+                params = json_data['params']
+                getattr(test, cmd.replace('.', '_'))(cmd, params)
+                pass
+            else:
+                setattr(self.event, "result", data)
+                self.event.set()
+
+    def call_remote(self, cmd, params="{}") -> str:
+        self.event = threading.Event()
+        self.socket.send(json.dumps({"cmd": cmd, "params": params}).encode('utf-8'))
+        self.event.wait()
+        result = getattr(self.event, "result")
+        self.event = None
+        return result
+
+    def call_remote_async(self, cmd, params):
+        self.socket.send(json.dumps({"cmd": cmd, "params": params}).encode('utf-8'))
 
 
-def receive_messages(socket):
-    try:
-        while True:
-            data = socket.recv(sys.maxsize)
-            if not data:
-                print("\n connection closed by server")
-                socket.close()
-                os._exit(0)
-            print(f"\n response from server: {data.decode('utf-8')}")
-    except (ConnectionResetError, OSError):
-        print("\n connection reset.")
-        socket.close()
-        os._exit(0)
+class Protocol:
+    def __init__(self):
+        self.sm = SocketManager()
+        self.sm.call_remote_async(
+            cmd = "status.client.standby",
+            params = test.init(protocol)
+        )
 
 
 if __name__ == "__main__":
-    client_socket = pysocket.socket(pysocket.AF_INET, pysocket.SOCK_STREAM)
-    try:
-        server_address = ('127.0.0.1', sys.argv[1])
-        client_socket.connect(server_address)
-        print(f"server connected {server_address}")
-        send_thread = threading.Thread(target=send_messages, args=(client_socket,))
-        send_thread.daemon = True
-        send_thread.start()
-        receive_thread = threading.Thread(target=receive_messages, args=(client_socket,))
-        receive_thread.daemon = True
-        receive_thread.start()
-        while True:
-            if not send_thread.is_alive() or not receive_thread.is_alive():
-                break
-            time.sleep(1)
+    import test
 
-    except ConnectionRefusedError:
-        print("socket connection refused")
-    except KeyboardInterrupt:
-        print("\n user key interrupted")
-    finally:
-        client_socket.close()
-        sys.exit(0)
+    Protocol()

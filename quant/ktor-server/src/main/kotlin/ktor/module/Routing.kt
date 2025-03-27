@@ -3,10 +3,9 @@ package org.shiroumi.ktor.module
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
 import io.ktor.server.plugins.contentnegotiation.*
-import io.ktor.server.request.receive
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import org.shiroumi.trading.BackTesting
+import org.shiroumi.trading.Trading
 
 fun Application.ktorRouting() {
     install(ContentNegotiation) {
@@ -18,7 +17,7 @@ fun Application.ktorRouting() {
         }
         post("/backtest") {
             println("request: /backtest")
-            BackTesting("fileName").initialize()
+            Trading("fileName").initialize(Trading.Type.Backtesting)
         }
     }
 }

@@ -23,6 +23,8 @@ dependencies {
     implementation(project(":network"))
     implementation(project(":model"))
     implementation(project(":database"))
+    implementation(project(":global"))
+    implementation(project(":trading"))
     implementation(kotlin("stdlib"))
     implementation(kotlin("reflect"))
     implementation(libs.kotlin.coroutines.core)

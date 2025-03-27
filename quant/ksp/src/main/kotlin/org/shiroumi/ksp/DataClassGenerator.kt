@@ -27,7 +27,7 @@ class BridgeClassProcessor(private val env: SymbolProcessorEnvironment) : Symbol
             if (!it.validate())
                 ret.add(it)
             else
-                it.accept(Visitor(env), Unit)
+                it.accept(BridgeVisitor(env), Unit)
         }
         return ret
     }
@@ -39,7 +39,7 @@ class BridgeClassProcessorProvider : SymbolProcessorProvider {
     }
 }
 
-private class Visitor(val env: SymbolProcessorEnvironment) : KSVisitorVoid() {
+private class BridgeVisitor(val env: SymbolProcessorEnvironment) : KSVisitorVoid() {
 
     private val outputPackage = "org.shiroumi.generated.dataclass"
 
