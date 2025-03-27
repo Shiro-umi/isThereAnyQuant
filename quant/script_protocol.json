@@ -1,0 +1,64 @@
+{
+  "status": {
+    "client": [
+      {
+        "cmd": "status.client.standby",
+        "description": "Let schedular server know the todo list",
+        "params": {
+          "todo": "json_array"
+        }
+      }
+    ],
+    "server": [
+      {
+        "cmd": "status.server.exit",
+        "description": "Server exit"
+      }
+    ]
+  },
+  "trading": {
+    "client": [
+      {
+        "cmd": "trading.client.account",
+        "description": "Get account info",
+        "callback": {
+          "cmd": "trading.client.account.callback",
+          "params": {
+            "total_balance": "float",
+            "holding_stocks": "json_array"
+          }
+        }
+      },
+      {
+        "cmd": "trading.client.buy",
+        "description": "Buy a stock",
+        "params": {
+          "code": "string",
+          "percent": "float"
+        },
+        "callback": {
+          "cmd": "trading.client.buy.callback",
+          "params": {
+            "succeed": "boolean",
+            "reason": "string"
+          }
+        }
+      },
+      {
+        "cmd": "trading.client.sell",
+        "description": "Sell a stock",
+        "params": {
+          "code": "string",
+          "percent": "float"
+        },
+        "callback": {
+          "cmd": "trading.client.sell.callback",
+          "params": {
+            "succeed": "boolean",
+            "reason": "string"
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "status": {
+    "client": [
+      {
+        "cmd": "standby",
+        "description": "Let schedular server know the todo list",
+        "params": {
+          "type": "list",
+          "subtype": "string"
+        },
+        "callback": null
+      },
+      {
+        "cmd": "next",
+        "description": "Tell server continue next task",
+        "params": null,
+        "callback": null
+      }
+    ],
+    "server": [
+      {
+        "cmd": "exit",
+        "description": "Server exit",
+        "params": null,
+        "callback": null
+      }
+    ]
+  },
+  "trading": {
+    "client": [
+      {
+        "cmd": "account",
+        "description": "Client ask for account info",
+        "params": null,
+        "callback": {
+          "cmd": "account_cb",
+          "description": "Server return account info",
+          "params": {
+            "account_info": {
+              "total_balance": {
+                "type": "double",
+                "default": 0.0
+              },
+              "holdings": {
+                "type": "list",
+                "subtype": {
+                  "stock_holdings": {
+                    "code": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "balance": {
+                      "type": "double",
+                      "default": 0.0
+                    },
+                    "profit": {
+                      "type": "double",
+                      "default": 0.0
+                    }
+                  }
+                }
+              },
+              "global_profit": {
+                "type": "double",
+                "default": 0.0
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}
