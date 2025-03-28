@@ -2,60 +2,69 @@
   "status": {
     "client": [
       {
-        "cmd": "status.client.standby",
+        "cmd": "standby",
         "description": "Let schedular server know the todo list",
         "params": {
-          "todo": "json_array"
-        }
+          "type": "list",
+          "subtype": "string"
+        },
+        "callback": null
+      },
+      {
+        "cmd": "next",
+        "description": "Tell server continue next task",
+        "params": null,
+        "callback": null
       }
     ],
     "server": [
       {
-        "cmd": "status.server.exit",
-        "description": "Server exit"
+        "cmd": "exit",
+        "description": "Server exit",
+        "params": null,
+        "callback": null
       }
     ]
   },
   "trading": {
     "client": [
       {
-        "cmd": "trading.client.account",
-        "description": "Get account info",
+        "cmd": "account",
+        "description": "Client ask for account info",
+        "params": null,
         "callback": {
-          "cmd": "trading.client.account.callback",
+          "cmd": "account_cb",
+          "description": "Server return account info",
           "params": {
-            "total_balance": "float",
-            "holding_stocks": "json_array"
-          }
-        }
-      },
-      {
-        "cmd": "trading.client.buy",
-        "description": "Buy a stock",
-        "params": {
-          "code": "string",
-          "percent": "float"
-        },
-        "callback": {
-          "cmd": "trading.client.buy.callback",
-          "params": {
-            "succeed": "boolean",
-            "reason": "string"
-          }
-        }
-      },
-      {
-        "cmd": "trading.client.sell",
-        "description": "Sell a stock",
-        "params": {
-          "code": "string",
-          "percent": "float"
-        },
-        "callback": {
-          "cmd": "trading.client.sell.callback",
-          "params": {
-            "succeed": "boolean",
-            "reason": "string"
+            "account_info": {
+              "total_balance": {
+                "type": "double",
+                "default": 0.0
+              },
+              "holdings": {
+                "type": "list",
+                "subtype": {
+                  "stock_holdings": {
+                    "code": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "balance": {
+                      "type": "double",
+                      "default": 0.0
+                    },
+                    "profit": {
+                      "type": "double",
+                      "default": 0.0
+                    }
+                  }
+                }
+              },
+              "global_profit": {
+                "type": "double",
+                "default": 0.0
+              }
+            }
           }
         }
       }

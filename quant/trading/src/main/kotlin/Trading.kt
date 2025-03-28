@@ -15,6 +15,9 @@ import kotlinx.serialization.json.Json
 import org.shiroumi.Trader
 import org.shiroumi.protocol.ProtocolDecoder
 import org.shiroumi.protocol.handleProtocol
+import org.shiroumi.trading.schedular.Schedular
+import org.shiroumi.trading.schedular.SchedularType
+import org.shiroumi.trading.schedular.threadLocalSchedular
 import protocol.model.Protocol
 import strategy.AbsStrategy
 import strategy.PyStrategy
@@ -52,6 +55,7 @@ class Trading(
         val selectorManager = SelectorManager(Dispatchers.IO)
         val serverSocket = aSocket(selectorManager).tcp().bind("127.0.0.1", socketPort)
         println("Server is listening at ${serverSocket.localAddress}")
+        threadLocalSchedular.set(Schedular(SchedularType.Backtesting))
         while (true) {
             val socket = serverSocket.accept()
             launch {

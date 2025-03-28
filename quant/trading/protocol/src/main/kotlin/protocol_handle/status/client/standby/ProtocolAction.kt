@@ -8,6 +8,8 @@ import protocol.model.Protocol
  */
 fun action(protocol: status.client.standby): Protocol? {
     // todo register todo-protocol-list to schedular
+//    threadLocalSchedular.get().***
+
     return null
 }
 
