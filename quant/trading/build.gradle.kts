@@ -15,6 +15,7 @@ dependencies {
     implementation(project("backtesting"))
     implementation(project("protocol"))
     implementation(project(":global"))
+    implementation(project("schedule"))
     implementation(libs.kotlin.coroutines.core)
     implementation(libs.kotlin.serialization.json)
     implementation(libs.bundles.ktor.client)

@@ -2,15 +2,6 @@
   "status": {
     "client": [
       {
-        "cmd": "standby",
-        "description": "Let schedular server know the todo list",
-        "params": {
-          "type": "list",
-          "subtype": "string"
-        },
-        "callback": null
-      },
-      {
         "cmd": "next",
         "description": "Tell server continue next task",
         "params": null,
@@ -18,6 +9,19 @@
       }
     ],
     "server": [
+      {
+        "cmd": "startup",
+        "description": "Server exit",
+        "params": null,
+        "callback": {
+          "cmd": "standby",
+          "description": "Let schedular server know the todo list",
+          "params": {
+            "type": "list",
+            "subtype": "string"
+          }
+        }
+      },
       {
         "cmd": "exit",
         "description": "Server exit",

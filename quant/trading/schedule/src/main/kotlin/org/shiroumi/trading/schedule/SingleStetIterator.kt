@@ -1,4 +1,4 @@
-package org.shiroumi.trading.schedular
+package org.shiroumi.trading.schedule
 
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow

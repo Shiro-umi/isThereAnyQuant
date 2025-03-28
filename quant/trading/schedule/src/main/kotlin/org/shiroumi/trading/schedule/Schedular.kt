@@ -1,4 +1,4 @@
-package org.shiroumi.trading.schedular
+package org.shiroumi.trading.schedule
 
 class Schedular(val type: SchedularType) : SingleStepIterator() {
 

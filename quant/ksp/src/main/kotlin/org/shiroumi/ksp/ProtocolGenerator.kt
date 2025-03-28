@@ -55,9 +55,9 @@ private class ProtocolVisitor(val env: SymbolProcessorEnvironment) : KSVisitorVo
                 (element as JsonArray).forEach { element ->
                     element as JsonObject
                     val callbackName = element.extractJsonObject("callback")?.let {
-                        return@let it.processProtocol(category, caller, classDeclaration)
+                        return@let it.processProtocol("callback", category, caller, classDeclaration)
                     }
-                    element.processProtocol(category, caller, classDeclaration, callbackName)
+                    element.processProtocol("caller", category, caller, classDeclaration, callbackName)
                 }
             }
         }
@@ -89,10 +89,10 @@ val $fileName = Json {
     serializersModule = SerializersModule {
         polymorphic(Protocol::class) {
             ${
-                detectedProtocol.joinToString("\n            ") { protocol ->
-                            "subclass(${protocol.cmd}::class)   // ${protocol.description}"
-                }
+            detectedProtocol.joinToString("\n            ") { protocol ->
+                "subclass(${protocol.cmd}::class)   // ${protocol.description}"
             }
+        }
         }
     }
 }
@@ -101,11 +101,12 @@ fun handleProtocol(
     p: Protocol
 ) = when (p) {
     ${
-        detectedProtocol.filter { protocol -> protocol.isClientProtocol }
-            .joinToString("\n    ") { protocol ->
-                "is ${protocol.cmd} -> protocol_handle.${protocol.cmd}.action(p)"
-            }
-    }
+            detectedProtocol
+//                .filter { protocol -> protocol.isClientProtocol }
+                .joinToString("\n    ") { protocol ->
+                    "is ${protocol.cmd} -> protocol_handle.${protocol.cmd}.action(p)"
+                }
+        }
     else -> Unit
 }
         """.trimIndent().toByteArray()
@@ -114,8 +115,7 @@ fun handleProtocol(
     }
 
     private fun JsonObject.processParams(
-        category: String,
-        caller: String,
+        packageName: String,
         classDeclaration: KSClassDeclaration,
     ): String? {
         entries.firstOrNull { (k, _) -> k == "type" }?.run {
@@ -125,13 +125,13 @@ fun handleProtocol(
         }
         val paramName = entries.first().key
         val param = entries.first().value as JsonObject
-        val packageName = "$category.$caller.model"
+        val packageName = if ("model" !in packageName) "$packageName.model" else packageName
         val fields = mutableListOf<ParamsDef>()
         param.forEach { (fieldName, value) ->
             value as JsonObject
             val type: String = value.extractField("type")!!
             val subtype: JsonObject? = value.extractJsonObject("subtype")
-            val subtypeName = subtype?.processParams(category, caller, classDeclaration)
+            val subtypeName = subtype?.processParams(packageName, classDeclaration)
             val default: String? = value.extractField("default")
             fields.add(ParamsDef(fieldName, type, subtype, subtypeName, default))
         }
@@ -177,16 +177,17 @@ data class $paramName(
 
 
     private fun JsonObject.processProtocol(
+        parentName: String,
         category: String,
         caller: String,
         classDeclaration: KSClassDeclaration,
         callbackName: String? = null
     ): String? {
-        val packageName = "$category.$caller"
+        val packageName = "$category.${if (parentName == "callback") caller.callerInverse else caller}"
         val fileName = extractField("cmd")
         val description = extractField("description")
         val params = extractJsonObject("params")?.let {
-            return@let it.processParams(category, caller, classDeclaration)
+            return@let it.processParams(packageName, classDeclaration)
         }
 
         val file = env.codeGenerator.createNewFile(
@@ -207,7 +208,7 @@ class $fileName : Protocol() {
     override val cmd: String = "$packageName.$fileName"
     override val description: String = "$description"
     ${if (!params.isNullOrBlank()) "var params: ${if (!params.isBaseKotlinType) "$packageName.model." else ""}$params? = null" else ""}
-    ${if (!callbackName.isNullOrBlank()) "val callback: $packageName.$callbackName = $packageName.$callbackName()" else ""}
+    ${if (!callbackName.isNullOrBlank()) "val callback: $category.${caller.callerInverse}.$callbackName = $category.${caller.callerInverse}.$callbackName()" else ""}
 }  
         """.trimIndent().toByteArray()
         file.write(content)
@@ -218,7 +219,7 @@ class $fileName : Protocol() {
                 description = "$description",
             )
         )
-        return if (fileName.endsWith("_cb")) fileName else null
+        return if (parentName == "callback") fileName else null
     }
 
     fun JsonObject.extractField(key: String): String? {
@@ -237,6 +238,13 @@ class $fileName : Protocol() {
     val String.isBaseKotlinType: Boolean
         get() = contains("Int") || contains("Long") || contains("Float") ||
                 contains("Double") || contains("Boolean") || contains("String") || contains("List")
+
+    val String.callerInverse: String
+        get() = when (this) {
+            "server" -> "client"
+            "client" -> "server"
+            else -> this
+        }
 
     data class ParamsDef(
         val name: String,
