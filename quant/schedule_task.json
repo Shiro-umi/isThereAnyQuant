@@ -1,0 +1,16 @@
+[
+  {
+    "jobName": "logTask",
+    "cronExpression": "* * * * * ?",
+    "jobClass": "org.shiroumi.trading.schedule.task.LogTask",
+    "parameters": {
+      "logMsg": "log."
+    }
+  },
+  {
+    "jobName": "dailyTask",
+    "cronExpression": "0 * * * * ?",
+    "jobClass": "org.shiroumi.trading.schedule.task.DailyTask",
+    "parameters": {}
+  }
+]

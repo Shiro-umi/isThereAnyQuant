@@ -56,6 +56,7 @@ ktor-client-websocket = { module = "io.ktor:ktor-client-websockets", version.ref
 ktor-network = { module = "io.ktor:ktor-network", version.ref = "ktor-version" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback-version" }
 ktor-server-config-yaml = { module = "io.ktor:ktor-server-config-yaml", version.ref = "ktor-version" }
+quartz-scheduler = { module = "org.quartz-scheduler:quartz" , version = "2.5.0"}
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm" }

@@ -16,6 +16,9 @@ repositories {
 
 dependencies {
     implementation(libs.kotlin.coroutines.core)
+    api(libs.kotlin.serialization.json)
+    api (libs.quartz.scheduler)
+
 }
 
 kotlin {
