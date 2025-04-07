@@ -80,34 +80,58 @@ package $packageName
 import protocol.model.*
 import kotlinx.serialization.json.*
 import kotlinx.serialization.modules.*
+import kotlinx.serialization.SerializationException
 
-val $fileName = Json {
+private val $fileName = Json {
     ignoreUnknownKeys = true
     encodeDefaults = true
     prettyPrint = true
-    classDiscriminator = "cmd"
     serializersModule = SerializersModule {
         polymorphic(Protocol::class) {
             ${
             detectedProtocol.joinToString("\n            ") { protocol ->
                 "subclass(${protocol.cmd}::class)   // ${protocol.description}"
             }
-        }
+            }
         }
     }
 }
 
 fun handleProtocol(
+    protocolJson: String
+) = ProtocolDecoder.decodeFromString<Protocol>(protocolJson).let { p ->
+    when (p) {
+        ${
+            detectedProtocol
+                .joinToString("\n        ") { protocol ->
+                    "is ${protocol.cmd} -> protocol_handle.${protocol.cmd}.action(p)"
+                }
+        }
+        else -> null
+    }
+} 
+
+fun serializeProtocol(
     p: Protocol
 ) = when (p) {
     ${
             detectedProtocol
-//                .filter { protocol -> protocol.isClientProtocol }
                 .joinToString("\n    ") { protocol ->
-                    "is ${protocol.cmd} -> protocol_handle.${protocol.cmd}.action(p)"
+                    "is ${protocol.cmd} -> $fileName.encodeToString<${protocol.cmd}>(p)"
                 }
         }
     else -> Unit
+}
+
+@Suppress("USELESS_IS_CHECK")
+fun getSerializer(cmd: String) = when (cmd) {
+    ${
+            detectedProtocol
+                .joinToString("\n    ") { protocol ->
+                    "\"${protocol.cmd}\" -> ${protocol.cmd}.serializer()"
+                }
+        }
+    else -> throw SerializationException("Unknown command: ${"\$cmd"}")
 }
         """.trimIndent().toByteArray()
         file.write(content)
@@ -141,6 +165,8 @@ fun handleProtocol(
             fileName = paramName
         )
         val content = """
+@file:Suppress("RemoveRedundantQualifierName", "PropertyName", "ClassName")
+
 package $packageName
 
 import protocol.model.*
@@ -202,7 +228,6 @@ import protocol.model.*
 import kotlinx.serialization.*
 
 @Serializable
-@SerialName("$fileName")
 @Polymorphic
 class $fileName : Protocol() {
     override val cmd: String = "$packageName.$fileName"

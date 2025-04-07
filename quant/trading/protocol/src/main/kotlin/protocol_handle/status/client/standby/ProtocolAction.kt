@@ -8,6 +8,7 @@ import org.shiroumi.trading.schedule.threadLocalSchedular
  * @param protocol status.client.standby
  */
 fun action(protocol: status.client.standby): Protocol? {
+    println("cmd: status.client.standby received")
     // todo register todo-protocol-list to schedular
     val schedular = threadLocalSchedular.get()
     val cmds = protocol.params ?: throw Exception("No tasks provided!")
@@ -22,5 +23,4 @@ fun action(protocol: status.client.standby): Protocol? {
     return null
 }
 
-//private fun String.action
 

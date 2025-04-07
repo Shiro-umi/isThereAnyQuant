@@ -68,6 +68,7 @@ object JobManager {
     }
 
     private fun scheduleJob(config: JobConfig) {
+        @Suppress("UNCHECKED_CAST")
         val job = JobBuilder.newJob(Class.forName(config.jobClass) as Class<Job>)
             .withIdentity(config.jobName)
             .usingJobData(JobDataMap(config.parameters))

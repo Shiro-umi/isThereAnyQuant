@@ -1,3 +1,5 @@
+@file:Suppress("unused")
+
 package org.shiroumi.trading.schedule.task
 
 import org.quartz.Job

@@ -6,22 +6,17 @@
         "description": "Tell server continue next task",
         "params": null,
         "callback": null
+      },
+      {
+        "cmd": "standby",
+        "description": "Let schedular server know the todo list",
+        "params": {
+          "type": "list",
+          "subtype": "string"
+        }
       }
     ],
     "server": [
-      {
-        "cmd": "startup",
-        "description": "Server exit",
-        "params": null,
-        "callback": {
-          "cmd": "standby",
-          "description": "Let schedular server know the todo list",
-          "params": {
-            "type": "list",
-            "subtype": "string"
-          }
-        }
-      },
       {
         "cmd": "exit",
         "description": "Server exit",
@@ -71,6 +66,25 @@
             }
           }
         }
+      },
+      {
+        "cmd": "buy",
+        "description": "Buy a stock",
+        "params": {
+          "type": "string",
+          "subtype": {
+            "code": "string"
+          }
+        },
+        "callback": null
+      }
+    ],
+    "server": [
+      {
+        "cmd": "do_at_9_25",
+        "description": "do_at_9_25",
+        "params": null,
+        "callback": null
       }
     ]
   }

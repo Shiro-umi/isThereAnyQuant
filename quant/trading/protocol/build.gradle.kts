@@ -11,6 +11,10 @@ repositories {
     mavenCentral()
 }
 
+sourceSets.main {
+    java.srcDirs("build/generated/ksp")
+}
+
 dependencies {
     implementation(project(":global"))
     implementation(project(":ksp"))

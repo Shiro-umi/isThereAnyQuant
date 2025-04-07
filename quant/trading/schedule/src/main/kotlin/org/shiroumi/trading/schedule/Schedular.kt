@@ -8,8 +8,11 @@ class Schedular(val type: SchedularType) : SingleStepIterator() {
 }
 
 sealed class SchedularType {
-    data object Trading : SchedularType()
+    data object Trading : SchedularType() {
+//        fun get() =
+    }
     data object Backtesting : SchedularType()
+
 }
 
 /**

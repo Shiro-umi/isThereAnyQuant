@@ -1,13 +1,14 @@
-protocol = None
+socket = None
 account = None
 
+def init(s):
+    socket = s
+    # account = socket.call_remote_sync("trading.client.account", ["trading.client.account"])
+    # print(f"[sync] account: {account}")
+    socket.call_remote("status.client.standby", ["trading.server.do_at_9_25"])
 
-def init(proto):
-    protocol = proto
-    account = protocol.call_remote("trading.client.account")
-    print(f"[sync] account: {account}")
-    return ["trading.client.account"]
+def status_client_standby():
+    print(f"[async] startup {socket}")
 
-
-def trading_client_account_callback(account_info):
-    print(f"[async] account: {account_info}")
+def do_at_9_25():
+    print("[async] do at 9_25")
