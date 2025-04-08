@@ -97,7 +97,7 @@ private val $fileName = Json {
     }
 }
 
-fun handleProtocol(
+suspend fun handleProtocol(
     protocolJson: String
 ) = ProtocolDecoder.decodeFromString<Protocol>(protocolJson).let { p ->
     when (p) {
@@ -111,7 +111,7 @@ fun handleProtocol(
     }
 } 
 
-fun serializeProtocol(
+suspend fun serializeProtocol(
     p: Protocol
 ) = when (p) {
     ${

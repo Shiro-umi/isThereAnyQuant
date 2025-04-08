@@ -22,6 +22,12 @@
         "description": "Server exit",
         "params": null,
         "callback": null
+      },
+      {
+        "cmd": "error",
+        "description": "Server internal exception",
+        "params": null,
+        "callback": null
       }
     ]
   },
@@ -83,6 +89,12 @@
       {
         "cmd": "do_at_9_25",
         "description": "do_at_9_25",
+        "params": null,
+        "callback": null
+      },
+      {
+        "cmd": "do_at_9_30",
+        "description": "do_at_9_30",
         "params": null,
         "callback": null
       }

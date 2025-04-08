@@ -2,6 +2,7 @@ import json
 import queue
 import socket as pysocket
 import threading
+import time
 from time import sleep
 import sys
 
@@ -19,7 +20,7 @@ class ReceiveLooper:
     def looper(self):
         print("receiver looper started")
         while 1:
-            sleep(1)
+            print("loop")
             data = self.socket.recv(1024).decode('utf-8')
             print(f"received: {data}")
             if data == 'error! \n':
@@ -28,6 +29,7 @@ class ReceiveLooper:
             self.on_receive_data(data)
 
     def on_receive_data(self, data):
+        print("on_receive_data: " + str(time.time()))
         event = None
         if self.threading_event_provider:
             event = self.threading_event_provider()
@@ -40,8 +42,9 @@ class ReceiveLooper:
             try:
                 json_data = json.loads(data)
                 cmd = json_data['cmd']
-                params = json_data['params']
-                getattr(test, cmd.replace('.', '_'))(cmd, params)
+                params = json_data.get('params', None)
+                print(f"call_from_remote, cmd: {cmd}, params: {params}")
+                getattr(test, cmd.replace('.', '_'))(sm, cmd, params)
             except Exception as e:
                 print(e)
 
@@ -91,11 +94,10 @@ class SocketManager:
         self.event = None
         return result
 
+sm = SocketManager()
 
 if __name__ == "__main__":
     import test
-
-    sm = SocketManager()
     print("started")
     test.init(sm)
     while 1:
