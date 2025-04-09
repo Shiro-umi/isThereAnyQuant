@@ -1,5 +1,3 @@
-package org.shiroumi.trading
-
 import io.ktor.network.selector.*
 import io.ktor.network.sockets.*
 import io.ktor.utils.io.*

@@ -1,8 +1,10 @@
 package org.shiroumi.trading.schedule
 
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import org.shiroumi.supervisorScope
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
@@ -22,7 +24,6 @@ abstract class SingleStepIterator {
      */
     fun <T> registerTasks(tasks: Flow<SingleStepTask<T>>) = supervisorScope.launch {
         println("$tag: registerTasks")
-        val workerContext = coroutineContext
         runBlocking {
             tasks.collect { task ->
                 suspendCoroutine { cont ->
@@ -42,16 +43,18 @@ abstract class SingleStepIterator {
     }
 }
 
+/**
+ * Single-step task
+ * each task defins an action in one day
+ *
+ * @param sendingChannel when action is done, use this to send
+ */
 data class SingleStepTask<T>(
-//    private val coroutineContext: CoroutineContext,
     private val sendingChannel: Channel<T>,
     private val action: suspend (Channel<T>) -> Unit
 ) {
     suspend fun executeWithContext() {
         println("SingleStepIterator, task invoked")
         action(sendingChannel)
-//        withContext(coroutineContext) {
-//            println("SingleStepIterator, task invoked")
-//        }
     }
 }

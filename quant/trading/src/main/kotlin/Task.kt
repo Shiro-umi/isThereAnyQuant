@@ -1,5 +1,3 @@
-package org.shiroumi.trading
-
 import org.shiroumi.trading.schedule.JobManager
 
 object Task {

@@ -1,9 +1,7 @@
 package org.shiroumi.trading.socket
 
-import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.shiroumi.protocol.handleProtocol
 import org.shiroumi.protocol.serializeProtocol
@@ -33,11 +31,9 @@ class ProtocolSocketManager : SocketManager<Protocol>() {
     }
 
     override suspend fun onReceiveData(received: String) {
-//        println("onReceiveData time: ${System.currentTimeMillis()}")
         val (sendingChannel, sendingProtocol) = withContext(context = Dispatchers.socket) {
             threadLocalSendingChannel.get() to handleProtocol(received)
         }
-//        println("onReceiveData handled time: ${System.currentTimeMillis()}")
         sendingProtocol?.let { sendingChannel.send(it) }
     }
 
