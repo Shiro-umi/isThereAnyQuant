@@ -18,6 +18,7 @@ suspend fun action(protocol: status.client.standby): Protocol? {
     val serverCmds: List<String> = cmds.filter { "client" !in it }.also {
         if (it.size < cmds.size) println("scheduled tasks contains client's cmd, ignored.")
     }
+//        .toMutableList().apply { add("status.server.exit") }
     val actions = serverCmds.map { cmd ->
         SingleStepTask(sendingChannel = threadLocalSendingChannel.get()) { channel ->
             println("action execute: $cmd")
@@ -26,6 +27,7 @@ suspend fun action(protocol: status.client.standby): Protocol? {
             mtd.isAccessible = true
             val sendingProtocol = Class.forName(cmd).constructors.first().newInstance() as Protocol
             mtd.invoke(null, sendingProtocol)
+            println("arguments: ${mtd.parameters.toList()}")
             channel.send(sendingProtocol)
             println("threadLocalSendFlow emitted $protocol")
         }

@@ -69,8 +69,10 @@ class SocketManager:
             cmd = json_data['cmd']
             params = json_data.get('params', None)
             print(f"call_from_remote, cmd: {cmd}, params: {params}")
-            self.on_receive(cmd, params)
-            # getattr(self.script, cmd.replace('.', '_'))(self, cmd, params)
+            if cmd == "status.server.exit":
+                self.running = False
+            else:
+                self.on_receive(cmd, params)
 
     def query(self, cmd, params, timeout=5):
         with self.condition:
@@ -78,8 +80,5 @@ class SocketManager:
             self.condition.wait(timeout)
             return self.result_queue.get()
 
-    def shutdown(self):
-        self.running = False
-        self.sending_thread.join()
-        self.receiving_thread.join()
+    def close(self):
         self.sock.close()

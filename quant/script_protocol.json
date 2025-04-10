@@ -2,6 +2,12 @@
   "status": {
     "client": [
       {
+        "cmd": "exit",
+        "description": "Client exit",
+        "params": null,
+        "callback": null
+      },
+      {
         "cmd": "next",
         "description": "Tell server continue next task",
         "params": null,

@@ -1,6 +1,5 @@
 package org.shiroumi.trading.schedule
 
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
@@ -29,7 +28,9 @@ abstract class SingleStepIterator {
                 suspendCoroutine { cont ->
                     continuation = cont
                     println("$tag: task $task ready to execute")
-                    runBlocking { task.executeWithContext() }
+                    runBlocking {
+                        task.executeWithContext()
+                    }
                 }
             }
         }
@@ -37,7 +38,6 @@ abstract class SingleStepIterator {
 
     suspend fun nextStep() {
         println("SingleStepIterator, nextStep()")
-        if (continuation == null) throw CancellationException()
         continuation?.resume(Unit)
         continuation = null
     }

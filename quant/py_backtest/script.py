@@ -14,4 +14,3 @@ def trading_server_do_at_9_30(context, cmd, params):
     print("[async] do at 9_30")
     context.reply("status.client.next")
 
-    

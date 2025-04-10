@@ -7,6 +7,9 @@ import io.ktor.utils.io.CancellationException
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import org.shiroumi.supervisorScope
+import socket_main
+import threadLocalJob
+import java.lang.Thread.sleep
 import java.util.concurrent.Executors
 import kotlin.coroutines.CoroutineContext
 
@@ -49,11 +52,20 @@ abstract class SocketManager<T> {
      */
     abstract suspend fun prepare(): Channel<T>
 
-    private suspend fun ServerSocket.startLooper() {
-        while (true) {
-            val socket = accept().also { println("$tag: Accepted connection from ${it.remoteAddress}") }
-            socket.startSendingLooper(buffer = withContext(Dispatchers.socket) { prepare() })
-            socket.startReceivingLooper()
+    private fun ServerSocket.startLooper() = runBlocking{
+        val job = supervisorScope.launch {
+            while (true) {
+                val socket = accept().also { println("$tag: Accepted connection from ${it.remoteAddress}") }
+                socket.startSendingLooper(buffer = withContext(Dispatchers.socket) { prepare() })
+                socket.startReceivingLooper()
+            }
+        }
+        withContext(Dispatchers.socket_main) {
+            threadLocalJob.set(job)
+        }
+        while (job.isActive) {
+            println("check job active")
+            sleep(1000)
         }
     }
 
@@ -65,7 +77,6 @@ abstract class SocketManager<T> {
         launch(context = Dispatchers.IO + combinedCoroutineExceptionHandler) {
             for (t in buffer) {
                 channel.writeStringUtf8("${onSendData(t)}\n")
-                println("on send protocol time: ${System.currentTimeMillis()}")
             }
         }
     }

@@ -1,4 +1,5 @@
 from socket_manager import SocketManager
+import threading
 
 class Context:
     def __init__(self, script):
@@ -14,5 +15,8 @@ class Context:
     def query(self, cmd, params = '', timeout=5):
         return self._sm.query(cmd, params, timeout)
 
-    def on_receive(self, cmd, params):
+    def on_receive(self, cmd, params = ''):
         getattr(self._script, cmd.replace('.', '_'))(self, cmd, params)
+
+    def start(self):
+        threading.Thread(target = lambda : self._script.init(self)).start()
