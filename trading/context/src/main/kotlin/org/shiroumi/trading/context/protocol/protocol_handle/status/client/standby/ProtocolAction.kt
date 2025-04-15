@@ -28,8 +28,7 @@ fun action(context: Context, protocol: status.client.standby): Protocol? {
             println("threadLocalSendFlow emitted $protocol")
         }
     }.asFlow()
-
-    runBlocking { context.stepIterator.submitTasks(actions) }
+    runBlocking { context.iterator.submitTasks(actions) }
     return null
 }
 
