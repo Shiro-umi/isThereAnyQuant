@@ -17,6 +17,7 @@
             <option value="$PROJECT_DIR$/trading" />
             <option value="$PROJECT_DIR$/trading/account" />
             <option value="$PROJECT_DIR$/trading/backtesting" />
+            <option value="$PROJECT_DIR$/trading/context" />
             <option value="$PROJECT_DIR$/trading/protocol" />
             <option value="$PROJECT_DIR$/trading/schedule" />
           </set>

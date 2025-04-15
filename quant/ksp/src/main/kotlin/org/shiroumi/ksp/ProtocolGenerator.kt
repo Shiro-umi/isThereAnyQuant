@@ -77,10 +77,11 @@ private class ProtocolVisitor(val env: SymbolProcessorEnvironment) : KSVisitorVo
         val content = """
 package $packageName
 
-import protocol.model.*
+import org.shiroumi.trading.context.protocol.model.*
 import kotlinx.serialization.json.*
 import kotlinx.serialization.modules.*
 import kotlinx.serialization.SerializationException
+import org.shiroumi.trading.context.Context
 
 private val $fileName = Json {
     ignoreUnknownKeys = true
@@ -98,13 +99,14 @@ private val $fileName = Json {
 }
 
 suspend fun handleProtocol(
+    context: Context,
     protocolJson: String
 ) = ProtocolDecoder.decodeFromString<Protocol>(protocolJson).let { p ->
     when (p) {
         ${
             detectedProtocol
                 .joinToString("\n        ") { protocol ->
-                    "is ${protocol.cmd} -> protocol_handle.${protocol.cmd}.action(p)"
+                    "is ${protocol.cmd} -> org.shiroumi.trading.context.protocol.protocol_handle.${protocol.cmd}.action(context = context, protocol = p)"
                 }
         }
         else -> null
@@ -169,7 +171,7 @@ fun getSerializer(cmd: String) = when (cmd) {
 
 package $packageName
 
-import protocol.model.*
+import org.shiroumi.trading.context.protocol.model.*
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -224,7 +226,7 @@ data class $paramName(
         val content = """
 package $packageName
 
-import protocol.model.*
+import org.shiroumi.trading.context.protocol.model.*
 import kotlinx.serialization.*
 
 @Serializable

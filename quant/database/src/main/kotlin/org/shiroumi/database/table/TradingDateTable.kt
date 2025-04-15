@@ -16,20 +16,18 @@ private const val TableName: String = "trading_date"
 // symbol table def
 object TradingDateTable : Table<TradingDate>(TableName) {
     val date = varchar("date").bindTo { t -> t.date }
-}
 
+    fun <T> query(block: (source: QuerySource) -> List<T>): List<T> {
+        createTradingDateTableIfNotExists()
+        return block(commonDb.from(this))
+    }
+}
 // candle seq of target table
 val tradingDateSeq: EntitySequence<TradingDate, out TradingDateTable>
     get() {
         createTradingDateTableIfNotExists()
         return commonDb.sequenceOf(TradingDateTable)
     }
-
-
-fun <T> TradingDateTable.query(block: (source: QuerySource) -> List<T>): List<T> {
-    createTradingDateTableIfNotExists()
-    return block(commonDb.from(this))
-}
 
 fun TradingDateTable.bulkInsert(block: BulkInsertStatementBuilder<TradingDateTable>.() -> Unit) {
     commonDb.bulkInsert(this, block)

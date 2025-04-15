@@ -1,9 +1,8 @@
-package org.shiroumi
-
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.SupervisorJob
+
+val cpuCores = Runtime.getRuntime().availableProcessors()
 
 fun printProgressBar(total: Int, current: Int) = if (total == 0) {
     println("\r[....................] 0/0 (0%)")

@@ -4,8 +4,6 @@ import io.ktor.server.netty.*
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 
-val cpuCores = Runtime.getRuntime().availableProcessors()
-
 // vm entry
 fun main() {
     // startup

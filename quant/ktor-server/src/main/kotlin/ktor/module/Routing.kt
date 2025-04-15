@@ -6,7 +6,7 @@ import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import Task
-import Trading
+//import Trading
 
 fun Application.ktorRouting() {
     install(ContentNegotiation) {
@@ -18,7 +18,7 @@ fun Application.ktorRouting() {
         }
         post("/backtest") {
             println("request: /backtest")
-            Trading("fileName").initialize(Trading.Type.Backtesting)
+//            Trading("fileName").initialize(Trading.Type.Backtesting)
         }
         get("/task_init") {
             try {

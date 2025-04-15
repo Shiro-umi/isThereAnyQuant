@@ -11,9 +11,7 @@ repositories {
 }
 
 dependencies {
-    implementation(project("account"))
     implementation(project("backtesting"))
-    implementation(project("protocol"))
     implementation(project(":global"))
     implementation(project("schedule"))
     implementation(libs.kotlin.coroutines.core)
