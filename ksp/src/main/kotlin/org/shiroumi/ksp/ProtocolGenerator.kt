@@ -86,14 +86,14 @@ import org.shiroumi.trading.context.Context
 private val $fileName = Json {
     ignoreUnknownKeys = true
     encodeDefaults = true
-    prettyPrint = true
+//    prettyPrint = true
     serializersModule = SerializersModule {
         polymorphic(Protocol::class) {
             ${
             detectedProtocol.joinToString("\n            ") { protocol ->
                 "subclass(${protocol.cmd}::class)   // ${protocol.description}"
             }
-            }
+        }
         }
     }
 }
@@ -102,11 +102,12 @@ suspend fun handleProtocol(
     context: Context,
     protocolJson: String
 ) = ProtocolDecoder.decodeFromString<Protocol>(protocolJson).let { p ->
+    p.accept("protocol received")
     when (p) {
         ${
             detectedProtocol
                 .joinToString("\n        ") { protocol ->
-                    "is ${protocol.cmd} -> org.shiroumi.trading.context.protocol.protocol_handle.${protocol.cmd}.action(context = context, protocol = p)"
+                    "is ${protocol.cmd} -> org.shiroumi.trading.context.protocol.handle.${protocol.cmd}.action(context = context, protocol = p)"
                 }
         }
         else -> null
@@ -231,7 +232,8 @@ import kotlinx.serialization.*
 
 @Serializable
 @Polymorphic
-class $fileName : Protocol() {
+class $fileName() : Protocol() {
+    override val className: String = "$fileName"
     override val cmd: String = "$packageName.$fileName"
     override val description: String = "$description"
     ${if (!params.isNullOrBlank()) "var params: ${if (!params.isBaseKotlinType) "$packageName.model." else ""}$params? = null" else ""}

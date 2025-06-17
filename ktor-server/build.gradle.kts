@@ -1,9 +1,9 @@
 @file:Suppress("VulnerableLibrariesLocal")
 
 plugins {
-    kotlin("jvm")
+    alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ktor)
-    kotlin("plugin.serialization") version "2.1.0"
 }
 
 group = "org.shiroumi"

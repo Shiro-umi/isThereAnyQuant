@@ -1,5 +1,7 @@
 package org.shiroumi.trading.context.socket
 
+import Logger
+import asDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
@@ -7,9 +9,7 @@ import org.shiroumi.protocol.handleProtocol
 import org.shiroumi.protocol.serializeProtocol
 import org.shiroumi.trading.context.Context
 import org.shiroumi.trading.context.protocol.model.Protocol
-import org.shiroumi.trading.context.protocol.threadLocalSendingChannel
 import status.server.error
-import kotlin.concurrent.getOrSet
 import kotlin.coroutines.CoroutineContext
 
 /**
@@ -18,31 +18,43 @@ import kotlin.coroutines.CoroutineContext
  */
 class ProtocolSocketManager(
     val context: Context,
-) : SocketManager<Protocol>() {
+) : SocketManager<Protocol>(), Logger {
 
-    private val tag: String = "ProtocolSocketManager"
+    override val className: String = "ProtocolSocketManager"
+
+    private val sendingChannel: Channel<Protocol> = Channel()
+
+    private val Dispatchers.protocolRecv by lazy {
+        "socket_protocol_recv".asDispatcher
+    }
+
+    private val Dispatchers.protocolSend by lazy {
+        "socket_protocol_send".asDispatcher
+    }
 
     override val exceptionHandlers: List<suspend (CoroutineContext, Throwable) -> Unit> = listOf { _, _ ->
-        threadLocalSendingChannel.get().send(element = error())
+        sendingChannel.send(element = error())
     }
 
     override suspend fun prepare(): Channel<Protocol> {
-        return threadLocalSendingChannel.getOrSet { Channel() }
+        return sendingChannel
     }
 
     override suspend fun onReceiveData(received: String) {
-        val (sendingChannel, sendingProtocol) = withContext(context = Dispatchers.socket) {
-            threadLocalSendingChannel.get() to handleProtocol(context = context, protocolJson = received)
+        info("onReceiveData: $received")
+        withContext(Dispatchers.protocolRecv) {
+            val result = handleProtocol(context = context, protocolJson = received) ?: return@withContext
+            sendingChannel.send(element = result)
         }
-        sendingProtocol?.let { sendingChannel.send(it) }
     }
 
     override suspend fun onSendData(sending: Protocol): String {
-        println("$tag: protocol: ${sending.cmd} ready to write.")
+        info("protocol: ${serializeProtocol(sending)} ready to write.")
         return "${serializeProtocol(sending)}"
     }
 
-    suspend fun sendProtocol(sending: Protocol) = withContext(context = Dispatchers.socket) {
-        threadLocalSendingChannel.get().send(element = sending)
+    suspend fun sendProtocol(sending: Protocol) {
+        info("send protocol: $sending")
+        sendingChannel.send(element = sending)
     }
 }

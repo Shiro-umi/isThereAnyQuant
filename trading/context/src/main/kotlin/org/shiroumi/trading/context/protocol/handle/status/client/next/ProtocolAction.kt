@@ -1,4 +1,4 @@
-package org.shiroumi.trading.context.protocol.protocol_handle.status.client.next
+package org.shiroumi.trading.context.protocol.handle.status.client.next
 
 import org.shiroumi.trading.context.Context
 import org.shiroumi.trading.context.protocol.model.Protocol

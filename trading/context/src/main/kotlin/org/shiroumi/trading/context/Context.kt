@@ -5,6 +5,8 @@ import org.shiroumi.trading.context.stepiterator.TradingDateIterator
 
 class Context {
 
+    var tradingDate: String = ""
+
     /**
      * account, contains holding & balance
      * use this to buy or sell
@@ -21,5 +23,5 @@ class Context {
      * trading date iterator
      * 2d iterator, tradingDate[[ actions ]]
      */
-    val iterator: TradingDateIterator = TradingDateIterator()
+    val iterator: TradingDateIterator = TradingDateIterator(context = this)
 }

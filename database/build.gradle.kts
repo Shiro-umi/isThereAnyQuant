@@ -1,6 +1,6 @@
 plugins {
-    kotlin("jvm")
-    id("com.google.devtools.ksp") version "2.1.0-1.0.29"
+    alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.kotlin.ksp)
 }
 
 group = "org.shiroumi"

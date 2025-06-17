@@ -1,35 +1,24 @@
 package org.shiroumi.trading.context.socket
 
+import asDispatcher
 import io.ktor.network.selector.*
 import io.ktor.network.sockets.*
 import io.ktor.utils.io.*
-import kotlinx.coroutines.channels.Channel
-import supervisorScope
-import socket_main
-import threadLocalJob
-import java.lang.Thread.sleep
-import java.util.concurrent.Executors
-import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExecutorCoroutineDispatcher
-import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
+import supervisorScope
+import java.lang.Thread.sleep
+import kotlin.coroutines.CoroutineContext
 
 abstract class SocketManager<T> {
 
     private val tag = "SocketManager"
 
     private val selectorManager = SelectorManager(Dispatchers.IO)
-
-    val Dispatchers.socket: ExecutorCoroutineDispatcher by lazy {
-        Executors.newSingleThreadExecutor { r ->
-            Thread(r, "socket_working_thread").apply { isDaemon = true }
-        }.asCoroutineDispatcher()
-    }
 
     open val exceptionHandlers: List<suspend (CoroutineContext, Throwable) -> Unit> = listOf()
 
@@ -62,15 +51,11 @@ abstract class SocketManager<T> {
         val job = supervisorScope.launch {
             while (true) {
                 val socket = accept().also { println("$tag: Accepted connection from ${it.remoteAddress}") }
-                socket.startSendingLooper(buffer = withContext(Dispatchers.socket) { prepare() })
+                socket.startSendingLooper(buffer = prepare())
                 socket.startReceivingLooper()
             }
         }
-        withContext(Dispatchers.socket_main) {
-            threadLocalJob.set(job)
-        }
         while (job.isActive) {
-            println("check job active")
             sleep(1000)
         }
     }
@@ -80,7 +65,7 @@ abstract class SocketManager<T> {
         buffer: Channel<T>
     ) = supervisorScope.launch {
         val channel = openWriteChannel(autoFlush = true)
-        launch(context = Dispatchers.IO + combinedCoroutineExceptionHandler) {
+        launch(context = "socket_sending_looper".asDispatcher + combinedCoroutineExceptionHandler) {
             for (t in buffer) {
                 channel.writeStringUtf8("${onSendData(t)}\n")
             }
@@ -89,7 +74,7 @@ abstract class SocketManager<T> {
 
     private fun AReadable.startReceivingLooper() = supervisorScope.launch {
         val channel = openReadChannel()
-        launch(context = Dispatchers.IO + combinedCoroutineExceptionHandler) {
+        launch(context = "socket_receiving_looper".asDispatcher + combinedCoroutineExceptionHandler) {
             while (true) {
                 onReceiveData(channel.readUTF8Line() ?: continue)
             }

@@ -4,7 +4,7 @@ import kotlin.collections.component1
 import kotlin.collections.component2
 
 plugins {
-    kotlin("jvm")
+    alias(libs.plugins.kotlin.jvm)
 }
 
 group = "org.shiroumi"

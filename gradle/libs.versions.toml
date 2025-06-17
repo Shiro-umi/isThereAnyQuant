@@ -2,8 +2,8 @@
 # https://docs.gradle.org/current/userguide/platforms.html#sub::toml-dependencies-format
 
 [versions]
+kotlin = "2.2.0-Beta2"
 guava = "33.0.0-jre"
-junit-jupiter = "5.10.2"
 ktorm = "4.1.1"
 kotlin-coroutines = "1.10.1"
 kotlin-serialization = "1.8.0"
@@ -56,9 +56,10 @@ ktor-client-websocket = { module = "io.ktor:ktor-client-websockets", version.ref
 ktor-network = { module = "io.ktor:ktor-network", version.ref = "ktor-version" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback-version" }
 ktor-server-config-yaml = { module = "io.ktor:ktor-server-config-yaml", version.ref = "ktor-version" }
-quartz-scheduler = { module = "org.quartz-scheduler:quartz" , version = "2.5.0"}
+quartz-scheduler = { module = "org.quartz-scheduler:quartz", version = "2.5.0" }
 
 [plugins]
-kotlin-jvm = { id = "org.jetbrains.kotlin.jvm" }
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 ktor = { id = "io.ktor.plugin", version.ref = "ktor-version" }
-kotlin-plugin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+kotlin-ksp = { id = "com.google.devtools.ksp", version = "2.2.0-Beta2-2.0.1"}

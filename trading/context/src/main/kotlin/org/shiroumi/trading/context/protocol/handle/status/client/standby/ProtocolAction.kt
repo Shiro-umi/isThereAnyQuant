@@ -1,4 +1,4 @@
-package org.shiroumi.trading.context.protocol.protocol_handle.status.client.standby
+package org.shiroumi.trading.context.protocol.handle.status.client.standby
 
 import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.runBlocking
@@ -9,27 +9,28 @@ import org.shiroumi.trading.context.protocol.model.Protocol
  * Actual protocol-action
  * @param protocol status.client.standby
  */
-fun action(context: Context, protocol: status.client.standby): Protocol? {
+fun action(context: Context, protocol: status.client.standby): Protocol? = runBlocking {
     println("cmd: status.client.standby received")
 
     val cmds = protocol.params ?: throw Exception("No tasks provided!")
     val serverCmds: List<String> = cmds.filter { "client" !in it }.also {
         if (it.size < cmds.size) println("scheduled tasks contains client's cmd, ignored.")
     }
-    val actions = serverCmds.map { cmd ->
+    val actions: List<suspend () -> Unit> = serverCmds.map { cmd ->
         suspend {
-            println("action execute: $cmd")
-            val cls = Class.forName("protocol_handle.$cmd.ProtocolActionKt")
+            val cls = Class.forName("org.shiroumi.trading.context.protocol.handle.$cmd.ProtocolActionKt")
             val mtd = cls.methods.filter { it.name == "action" }[0]
             mtd.isAccessible = true
             val sendingProtocol = Class.forName(cmd).constructors.first().newInstance() as Protocol
-            mtd.invoke(null, sendingProtocol)
-            context.socketManager.sendProtocol(sendingProtocol)
-            println("threadLocalSendFlow emitted $protocol")
+            val resProtocol = mtd.invoke(null, context, sendingProtocol)
+            (resProtocol as? Protocol)?.let {
+                context.socketManager.sendProtocol(resProtocol)
+            }
+            Unit
         }
-    }.asFlow()
-    runBlocking { context.iterator.submitTasks(actions) }
-    return null
+    }
+    context.iterator.submitTasks(actions)
+    null
 }
 
 

@@ -6,4 +6,4 @@ import org.shiroumi.trading.context.protocol.model.Protocol
 /**
  * ThreadLocal for sending msg to socket positive
  */
-val threadLocalSendingChannel: ThreadLocal<Channel<Protocol>> = ThreadLocal()
+val threadLocalSendingChannel1: ThreadLocal<Channel<Protocol>> = ThreadLocal()

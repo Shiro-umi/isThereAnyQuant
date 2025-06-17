@@ -1,7 +1,7 @@
 plugins {
-    kotlin("jvm")
-    kotlin("plugin.serialization") version "2.1.0"
-    id("com.google.devtools.ksp") version "2.1.0-1.0.29"
+    alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.kotlin.ksp)
 }
 
 group = "org.shiroumi"
@@ -26,6 +26,7 @@ dependencies {
     implementation(libs.kotlin.coroutines.core)
     implementation(libs.ktorm.core)
     implementation(libs.ktorm.mysql)
+    @Suppress("VulnerableLibrariesLocal", "RedundantSuppression")
     api(libs.jdbc)
 }
 

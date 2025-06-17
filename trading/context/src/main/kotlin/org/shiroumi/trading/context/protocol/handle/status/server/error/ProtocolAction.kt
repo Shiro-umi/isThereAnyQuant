@@ -1,4 +1,4 @@
-package org.shiroumi.trading.context.protocol.protocol_handle.status.server.error
+package org.shiroumi.trading.context.protocol.handle.status.server.error
 
 import org.shiroumi.trading.context.Context
 import org.shiroumi.trading.context.protocol.model.Protocol

@@ -1,6 +1,5 @@
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.*
+import java.util.concurrent.Executors
 
 val cpuCores = Runtime.getRuntime().availableProcessors()
 
@@ -22,3 +21,8 @@ fun printProgressBar(total: Int, current: Int) = if (total == 0) {
 }
 
 val supervisorScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+val String.asDispatcher: ExecutorCoroutineDispatcher
+    get() = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "thread_dispatcher_$this").apply { isDaemon = true }
+    }.asCoroutineDispatcher()

@@ -1,5 +1,6 @@
 package org.shiroumi.trading.context.protocol.model
 
+import Logger
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonContentPolymorphicSerializer
@@ -14,7 +15,7 @@ import org.shiroumi.protocol.getSerializer
  */
 @BaseProtocol
 @Serializable(with = ProtocolSerializer::class)
-abstract class Protocol {
+abstract class Protocol : Logger {
     abstract val cmd: String
     abstract val description: String
 }

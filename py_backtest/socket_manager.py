@@ -1,84 +1,200 @@
-import socket
-import queue
-import threading
+import asyncio
+from asyncio import CancelledError
 import json
 
+from log import logger
 
 class SocketManager:
-    def __init__(self, host, port, on_receive):
-        self.on_receive = on_receive
-        self.host = host
-        self.port = port
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.connect((self.host, self.port))
+    def __init__(self, host, port, msg_handler, context, on_connected):
+        self._host = host
+        self._port = port
+        self._msg_handler = msg_handler
+        self._context = context
+        self._on_connected = on_connected
+        self._send_queue = asyncio.Queue()  # send queue
+        self._script_queue = asyncio.Queue()  # script queue
+        self._future_queue = asyncio.Queue() # query future queue
+        self._reader = None
+        self._writer = None
+        self._tasks = []
+        self.shutdown_event = asyncio.Event()
 
-        # threading queue
-        self.send_queue = queue.Queue()
-        self.result_queue = queue.Queue()
-        self.running = True
+    async def _connect(self):
+        try:
+            logger.info(f"connecting {self._host}:{self._port}...")
+            self._reader, self._writer = await asyncio.open_connection(self._host, self._port)
+            logger.info(f"connected. reader: {self._reader}, writer: {self._writer}")
+            self._tasks.append(asyncio.create_task(self._sender_looper(), name="_sender_looper"))
+            self._tasks.append(asyncio.create_task(self._receiver_looper(), name="_receiver_looper"))
+            self._tasks.append(asyncio.create_task(self._script_looper(), name="_script_looper"))
+            await self._on_connected(self._context, self)
+            for task in self._tasks:
+                await task
+        except ConnectionRefusedError:
+            logger.error(f"connection refused")
+            raise
+        except Exception as e:
+            logger.error(f"connection failed: {e}")
+            raise
 
-        # threading sync
-        self.lock = threading.Lock()
-        self.condition = threading.Condition()
-
-        # threading
-        self.receiving_thread = threading.Thread(target=self._receiving_looper)
-        self.sending_thread = threading.Thread(target=self._sending_looper)
-        self.receiving_thread.start()
-        self.sending_thread.start()
-
-    # looper for send msg
-    def _sending_looper(self):
-        while self.running:
+    async def close(self):
+        logger.info("closing...")
+        self.shutdown_event.set()  # notify loopers shutdown
+        if self._writer:
             try:
-                data = self.send_queue.get(timeout=0.5)
-                with self.lock:
-                    self.sock.send(f"{json.dumps(data)}\n".encode('utf-8'))
-
-                with self.condition:
-                    self.condition.wait()
-            except queue.Empty:
-                continue
+                if not self._writer.is_closing():
+                    self._writer.close()
+                    await self._writer.wait_closed()
+                logger.info("exit writer.")
             except Exception as e:
-                print(f"exception occurred during sending msg: {str(e)}")
-                self.running = False
+                logger.error(f"exception occurs when closing writer: {e}")
+        self._writer = None
+        self._reader = None
+        # cancel all tasks
+        for task in self._tasks:
+            if not task.done():
+                task.cancel()
+        results = await asyncio.gather(*self._tasks, return_exceptions=True)
+        for i, result in enumerate(results):
+            task_name = self._tasks[i].get_name()  # 获取任务名称
+            if isinstance(result, asyncio.CancelledError):
+                logger.info(f"{task_name} cancelled")
+            elif isinstance(result, Exception):
+                logger.error(f"{task_name} exception occurs during cancellation: {result}")
+        self._tasks = []  # 清空任务列表
+        logger.info("socket closed。")
 
-    # looper for receive msg
-    def _receiving_looper(self):
-        while self.running:
-            try:
-                data = self.sock.recv(1024).decode('utf-8')
-                if not data:
+    async def _handle_disconnect(self):
+        logger.warning("connection lost, cleaning up...")
+        await self.close()
+
+    async def _sender_looper(self):
+        logger.info("_sender: sender_looper started")
+        try:
+            while not self.shutdown_event.is_set():
+                try:
+                    # get msg_to_send from send_queue. check _shutdown_event every 1 sec.
+                    message_dict = await asyncio.wait_for(self._send_queue.get(), timeout=1.0)
+                    if not self._writer:
+                        logger.error("sender: not connected, drop")
+                        self._send_queue.task_done()
+                        continue
+
+                    msg = json.dumps(message_dict)
+                    msg_bytes = (msg + '\n').encode('utf-8')
+
+                    logger.info(f"sender: sending msg {msg.strip()}")
+                    self._writer.write(msg_bytes)
+                    await self._writer.drain()  # wait for writer clear
+                    self._send_queue.task_done()
+                except asyncio.TimeoutError:
+                    continue  # check _shutdown_event
+                except (ConnectionError, BrokenPipeError, ConnectionResetError) as e:
+                    logger.error(f"sender: error occurs, stoping.. \\n {e}")
+                    await self._handle_disconnect()
                     break
+                except Exception as e:
+                    logger.error(f"sender: unexpected error occurs：{e}", exc_info=True)
+                    await asyncio.sleep(0.1)
+        except CancelledError:
+            logger.warning("_sender_looper cancelled")
+        finally:
+            logger.warning("_sender_looper closed")
 
-                self.result_queue.put(json.loads(data))
-                with self.condition:
-                    self.condition.notify_all()
-            except ConnectionResetError:
-                print("connection reset.")
-                self.running = False
-            except Exception as e:
-                print(f"exception occurred during receiving msg:: {str(e)}")
-                self.running = False
+    async def _receiver_looper(self):
+        logger.info("_receiver_looper started")
+        try:
+            while not self.shutdown_event.is_set():
+                if not self._reader:
+                    if self.shutdown_event.is_set(): break
+                    await asyncio.sleep(0.5)
+                    continue
+                try:
+                    # read msg from _reader. check _shutdown_event every 1 sec.
+                    line_bytes = await asyncio.wait_for(self._reader.readline(), timeout=1.0)
+                    logger.warning("_receiver_looper read_lines")
 
-    def reply(self, cmd, params, timeout=5):
-        with self.condition:
-            self.send_queue.put({"cmd": cmd, "params": params})
-            self.condition.wait(timeout)
-            json_data = self.result_queue.get()
-            cmd = json_data['cmd']
-            params = json_data.get('params', None)
-            print(f"call_from_remote, cmd: {cmd}, params: {params}")
-            if cmd == "status.server.exit":
-                self.running = False
-            else:
-                self.on_receive(cmd, params)
+                    if not line_bytes:  # EOF
+                        logger.info("receiver: connection closed by remote.")
+                        await self._handle_disconnect()
+                        break
 
-    def query(self, cmd, params, timeout=5):
-        with self.condition:
-            self.send_queue.put({"cmd": cmd, "params": params})
-            self.condition.wait(timeout)
-            return self.result_queue.get()
+                    line_json = line_bytes.decode('utf-8').strip()
+                    logger.info(f"receiver: msg received {line_json}")
 
-    def close(self):
-        self.sock.close()
+                    try:
+                        message_dict = json.loads(line_json)
+                    except json.JSONDecodeError:
+                        logger.warning(f"receiver: error occurs during json decoding, {line_json}")
+                        continue
+
+                    if not self._future_queue.empty():
+                        future: asyncio.Future = await self._future_queue.get()
+                        future.set_result(message_dict)
+                    else :
+                        # script working msg queue
+                        await self._script_queue.put(message_dict)
+
+                except asyncio.TimeoutError:
+                    continue
+                except (ConnectionError, asyncio.IncompleteReadError, BrokenPipeError, ConnectionResetError) as e:
+                    logger.error(f"receiver: connection error occurs {e}")
+                    await self._handle_disconnect()
+                    break
+                except Exception as e:
+                    logger.error(f"receiver: unexpected error occurs：{e}", exc_info=True)
+                    await self._handle_disconnect()
+                    await asyncio.sleep(0.1)
+        except asyncio.CancelledError:
+            logger.info("receiver: looper cancelled.")
+        finally:
+            logger.info("receiver: looper stoped")
+
+    async def _script_looper(self):
+        try:
+            while not self.shutdown_event.is_set():
+                try:
+                    msg_dict = await asyncio.wait_for(self._script_queue.get(), timeout=1.0)
+                    logger.info(f"msg_handler：received {msg_dict}")
+                    try:
+                        await self._msg_handler(msg_dict['cmd'], msg_dict.get('params', ''))
+                    except Exception as e:
+                        logger.error(f"msg_handler: error occurs during handling msg {e}", exc_info=True)
+                    finally:
+                        self._script_queue.task_done()
+                except asyncio.TimeoutError:
+                    continue
+        except asyncio.CancelledError:
+            logger.info("msg_handler: looper cancelled.")
+        finally:
+            logger.info("msg_handler: looper stopped.")
+
+    async def start(self):
+        await self._connect()
+
+    async def reply(self, payload: dict):
+        logger.info(f"send_msg: msg put to _send_queue {payload}")
+        if not self._writer:
+            logger.error("send_msg: not connected, abort.")
+            raise ConnectionError("not connected")
+        await self._send_queue.put(payload)
+
+    async def query(self, payload: dict, timeout: float = 10.0):
+        if not self._writer:
+            logger.error("query_msg: not connected, abort.")
+            raise ConnectionError("not connected")
+        future = asyncio.get_event_loop().create_future()  # create a future
+        await self._future_queue.put(future)
+        await self._send_queue.put(payload)
+        logger.debug(f"query_msg: msg put to _send_queue {payload}")
+        try:
+            # wait future response
+            response_payload = await asyncio.wait_for(future, timeout=timeout)
+            logger.debug(f"query_msg: response received {response_payload}")
+            return response_payload
+        except asyncio.TimeoutError:
+            logger.warning(f"query_msg: timeout.")
+            raise
+        except (ConnectionError, asyncio.CancelledError) as e:
+            logger.error(f"query_msg: query cancelled, {e}")
+            raise
