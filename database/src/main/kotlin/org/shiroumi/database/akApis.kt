@@ -1,30 +1,59 @@
 package org.shiroumi.database
 
-import org.shiroumi.generated.dataclass.Candle
-import org.shiroumi.generated.dataclass.Symbol
-import org.shiroumi.generated.dataclass.TradingDate
-import org.shiroumi.network.api
-import retrofit2.http.GET
-import retrofit2.http.Query
+import kotlinx.serialization.json.Json
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.shiroumi.configs.BuildConfigs
+import org.shiroumi.network.tushare
+import retrofit2.http.Body
+import retrofit2.http.POST
 
-val akApi: AkApi by api()
 
-// AkShare api def
-interface AkApi {
-    @GET("tool_trade_date_hist_sina")
-    suspend fun getTradingDate(): List<TradingDate>
+val tushare: TuShareApi by tushare()
 
-    // sh sz bj code-name
-    @GET("stock_info_a_code_name")
-    suspend fun getStockSymbol(): List<Symbol>
+interface TuShareApi {
 
-    // sh sz bj history candles<daily>
-    @GET("stock_zh_a_hist")
-    suspend fun getStockHist(
-        @Query("symbol") symbol: String,
-        @Query("period") period: String = "daily", // 'daily', 'weekly', 'monthly'
-        @Query("start_date") start: String? = "20000001", // eg: 20250101
-        @Query("end_date") end: String? = today.str,
-        @Query("adjust") limit: String = "hfq"
-    ): List<Candle>
+    @POST("/")
+    suspend fun query(@Body body: RequestBody?): String
+}
+
+val tushareParams: TushareParams
+    get() = TushareParams()
+
+class TushareParams {
+
+    private var def: Def = Def()
+
+    class Def {
+        lateinit var apiName: String
+        val token: String = BuildConfigs.TUSHARE_TOKEN
+        var params: Map<String, String> = emptyMap()
+    }
+
+    fun ofApi(apiName: String): TushareParams {
+        def.apiName = apiName
+        return this
+    }
+
+    fun carriesParam(params: Map<String, String>): TushareParams {
+        def.params = params
+        return this
+    }
+
+    fun toJsonBody(): RequestBody {
+        val params = mutableMapOf(
+            "api_name" to def.apiName,
+            "token" to def.token,
+        ).apply { putAll(params) }
+        return Json.encodeToString(params).toRequestBody(contentType = "application/json".toMediaType())
+    }
+}
+
+internal val params: MutableMap<String, String>
+    get() = mutableMapOf("token" to BuildConfigs.TUSHARE_TOKEN)
+
+suspend fun TuShareApi.getStockBasic(params: Map<String, String>? = null): String {
+    val params = tushareParams.ofApi("stock_basic").carriesParam(params ?: mapOf()).toJsonBody()
+    return query(params)
 }

@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit
 
 
 @OptIn(ExperimentalSerializationApi::class)
-fun createRetrofit(): Retrofit {
+fun createRetrofit(baseUrl: String): Retrofit {
     // 配置 JSON 序列化（忽略未知字段）
     val json = Json {
         ignoreUnknownKeys = true
@@ -38,13 +38,13 @@ fun createRetrofit(): Retrofit {
     }
 
     return Retrofit.Builder()
-        .baseUrl("http://192.168.31.125:2000/api/public/")
+        .baseUrl(baseUrl)
         .client(
             OkHttpClient.Builder()
                 .connectTimeout(3, TimeUnit.SECONDS)
                 .readTimeout(5, TimeUnit.SECONDS)
                 .writeTimeout(5, TimeUnit.SECONDS)
-//                .addInterceptor(LoggingInterceptor()) // 可选，添加日志拦截器
+                .addInterceptor(LoggingInterceptor()) // 可选，添加日志拦截器
                 .build()
         )
         .addConverterFactory(stringConverterFactory)
@@ -56,7 +56,8 @@ fun createRetrofit(): Retrofit {
 class LoggingInterceptor : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
-        println("Request: ${request.url}")
+        println("Request: ${request.url}, method: ${request.method}, body: ${request.body?.contentType()}")
+
         return chain.proceed(request)
     }
 }

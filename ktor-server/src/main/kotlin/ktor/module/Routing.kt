@@ -29,12 +29,12 @@ fun Application.ktorRouting() {
             }
         }
         get("/task_list") {
-            try {
-                val jobs = Task.getActiveJobs()
-                call.respond(mapOf("res" to jobs.toString()))
-            } catch (e: Exception) {
-                call.respond(mapOf("res" to "fail"))
-            }
+//            try {
+//                val jobs = Task.getActiveJobs()
+//                call.respond(mapOf("res" to jobs.toString()))
+//            } catch (e: Exception) {
+//                call.respond(mapOf("res" to "fail"))
+//            }
         }
         get("/task_standby") {
             try {
