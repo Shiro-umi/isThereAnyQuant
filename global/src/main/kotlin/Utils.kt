@@ -3,7 +3,7 @@ import java.util.concurrent.Executors
 
 val cpuCores = Runtime.getRuntime().availableProcessors()
 
-fun printProgressBar(total: Int, current: Int) = if (total == 0) {
+fun printProgressBar(current: Int, total: Int) = if (total == 0) {
     println("\r[....................] 0/0 (0%)")
 } else {
     // 计算完成百分比
@@ -17,7 +17,7 @@ fun printProgressBar(total: Int, current: Int) = if (total == 0) {
     (completedChars..19).forEach { _ ->
         print(".")
     }
-    print("] " + current + "/" + total + " (" + (percent * 100).toInt() + "%)")
+    println("] " + current + "/" + total + " (" + (percent * 100).toInt() + "%)")
 }
 
 val supervisorScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

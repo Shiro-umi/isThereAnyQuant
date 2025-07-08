@@ -1,3 +1,5 @@
+import kotlin.reflect.KProperty
+
 const val RED = "\u001B[31m"
 const val GREEN = "\u001B[32m"
 const val YELLOW = "\u001B[33m"
@@ -17,4 +19,20 @@ interface Logger {
     fun warning(content: String) = println("$YELLOW[WARNING] [$className] $content$RESET")
 
     fun notify(content: String) = println("$PURPLE[NOTIFY] [$className] $content$RESET")
+}
+
+abstract class LoggerDelegate {
+
+    abstract val clsName: String
+
+    operator fun getValue(
+        thisRef: Any?,
+        property: KProperty<*>,
+    ): Logger = object : Logger {
+        override val className: String = clsName
+    }
+}
+
+fun logger(className: String) = object : LoggerDelegate() {
+    override val clsName: String = className
 }

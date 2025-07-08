@@ -1,10 +1,13 @@
 package org.shiroumi.database
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.shiroumi.configs.BuildConfigs
+import org.shiroumi.network.BaseTushare
 import org.shiroumi.network.tushare
 import retrofit2.http.Body
 import retrofit2.http.POST
@@ -15,8 +18,16 @@ val tushare: TuShareApi by tushare()
 interface TuShareApi {
 
     @POST("/")
-    suspend fun query(@Body body: RequestBody?): String
+    suspend fun query(@Body body: RequestBody?): BaseTushare
 }
+
+suspend fun TuShareApi.getStockBasic() = query(tushareParams.ofApi("stock_basic").toJsonBody())
+
+suspend fun TuShareApi.getAdjFactor(tsCode: String) =
+    query(tushareParams.ofApi("adj_factor").carriesParam(mapOf("ts_code" to tsCode)).toJsonBody())
+
+suspend fun TuShareApi.getDailyCandles(tsCode: String) =
+    query(tushareParams.ofApi("daily").carriesParam(mapOf("ts_code" to tsCode)).toJsonBody())
 
 val tushareParams: TushareParams
     get() = TushareParams()
@@ -42,18 +53,13 @@ class TushareParams {
     }
 
     fun toJsonBody(): RequestBody {
-        val params = mutableMapOf(
-            "api_name" to def.apiName,
-            "token" to def.token,
-        ).apply { putAll(params) }
+        val params = buildJsonObject {
+            put("api_name", JsonPrimitive(def.apiName))
+            put("token", JsonPrimitive(def.token))
+            put("params", buildJsonObject {
+                def.params.forEach { k, v -> put(k, JsonPrimitive(v)) }
+            })
+        }
         return Json.encodeToString(params).toRequestBody(contentType = "application/json".toMediaType())
     }
-}
-
-internal val params: MutableMap<String, String>
-    get() = mutableMapOf("token" to BuildConfigs.TUSHARE_TOKEN)
-
-suspend fun TuShareApi.getStockBasic(params: Map<String, String>? = null): String {
-    val params = tushareParams.ofApi("stock_basic").carriesParam(params ?: mapOf()).toJsonBody()
-    return query(params)
 }

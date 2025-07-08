@@ -1,116 +1,109 @@
-package datasource
+package org.shiroumi.database.datasource
 
 import cpuCores
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
-import org.ktorm.dsl.*
-import org.ktorm.dsl.eq
-import org.ktorm.entity.filter
-import org.ktorm.entity.map
+import logger
+import org.ktorm.entity.clear
 import org.ktorm.entity.toList
 import org.ktorm.support.mysql.bulkInsert
-import org.shiroumi.database.tushare
+import org.shiroumi.database.getAdjFactor
+import org.shiroumi.database.getDailyCandles
 import org.shiroumi.database.stockDb
-import org.shiroumi.database.str
+import org.shiroumi.database.table.candleSeq
 import org.shiroumi.database.table.candleTable
-import org.shiroumi.database.table.symbolSeq
-import org.shiroumi.database.table.tradingDateSeq
-import org.shiroumi.database.today
+import org.shiroumi.database.table.stockBasicSeq
+import org.shiroumi.database.tushare
 import org.shiroumi.generated.assignments.setCandle
-import org.shiroumi.model.database.Symbol
+import org.shiroumi.model.database.Candle
 import printProgressBar
-import java.net.SocketTimeoutException
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
+import supervisorScope
+import kotlin.concurrent.atomics.AtomicInt
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 
 
-@Volatile
-var updateCount: Int = 0
-var toUpdateCount: Int = 0
+private val logger by logger("updateDailyCandles")
 
-// update all stock candles
-//suspend fun updateStockCandles() = coroutineScope {
-//    launch(Dispatchers.IO) {
-//        updateCount = 0
-//        // calculate last trading date
-//        val td = tradingDateSeq.filter { entitySeq ->
-//            entitySeq.date lessEq today.str
-//        }.filter { entitySeq ->
-//            entitySeq.date greater today.minusDays(5).str
-//        }.toList()
-//        val endTd = if (today.str == td.last().date) td.last().date else td[td.size - 2].date
-//
-//        val channel: Channel<Symbol> = Channel(cpuCores)
-//        val symbols = symbolSeq.map { it }
-//        toUpdateCount = symbols.size
-//        launch {
-//            for (symbol in symbols) {
-//                channel.send(symbol)
-//            }
-//        }
-//        with(Semaphore(1)) {
-//            // for each symbols
-//            for (symbol in channel) {
-//                delay(500)
-//                launch(Dispatchers.IO) {
-//                    withPermit {
-//                        try {
-//                            getStockHist(symbol, endTd)
-//                        } catch (_: SocketTimeoutException) {
-//                            println("timeout: ${symbol.code}")
-//                            delay(2000)
-//                            channel.send(symbol)
-//                            toUpdateCount++
-//                        } finally {
-//                            updateCount++
-//                            printProgressBar(toUpdateCount, updateCount)
-//                        }
-//                    }
-//                }
-//            }
-//        }
-//    }
-//}
+@OptIn(ExperimentalAtomicApi::class)
+suspend fun updateDailyCandles() = coroutineScope {
+    val stockDb = stockDb
+    val allStocks = stockBasicSeq.toList()
+    val toUpdateCount = AtomicInt(allStocks.size)
+    val updateCount = AtomicInt(0)
+    with(Semaphore(cpuCores * 2)) {
+        allStocks.onEach { stock ->
+            withPermit {
+                val start = System.currentTimeMillis()
+                updateCount.fetchAndAdd(1)
+                printProgressBar(updateCount.load(), toUpdateCount.load())
+                // clear the stock candle table, calculate adjust then update all
+                stock.tsCode.candleSeq.clear()
+                val adjFactorDeferred = async { tushare.getAdjFactor(stock.tsCode) }
+                val dailyDeferred = async { tushare.getDailyCandles(stock.tsCode) }
+                val (adjFactorResp, dailyResp) = suspendCoroutine { continuation ->
+                    supervisorScope.launch(Dispatchers.IO) {
+                        continuation.resume(adjFactorDeferred.await() to dailyDeferred.await())
+                    }
+                }
+                val (_, adjFactor) = suspendCoroutine { continuation ->
+                    adjFactorResp.onSucceed { continuation.resume(it) }
+                        .onFail { msg -> logger.error("query adj factor failed: $msg") }
+                }
+                val (_, daily) = suspendCoroutine { continuation ->
+                    dailyResp.onSucceed { continuation.resume(it) }
+                        .onFail { msg -> logger.error("query daily candle failed: $msg") }
+                }
+                val candles = (0 until daily.size).map { i ->
+                    val tTsCode = "${daily[i][0]}"
+                    val tTradDate = "${daily[i][1]}"
+                    val tOpen = daily[i][2]!!.toFloat()
+                    val tHigh = daily[i][3]!!.toFloat()
+                    val tLow = daily[i][4]!!.toFloat()
+                    val tClose = daily[i][5]!!.toFloat()
+                    val tFactor = adjFactor[i][2]?.toFloat() ?: 0f
+                    val tLatestFactor = adjFactor.first()[2]?.toFloat() ?: 0f
+                    val tVol = daily[i][9]?.toFloat() ?: 0f
+                    val tAmount = daily[i][10]?.toFloat() ?: 0f
+                    return@map Candle {
+                        tsCode = tTsCode
+                        tradeDate = tTradDate
+                        close = tClose
+                        closeQfq = tClose.qfq(tFactor, tLatestFactor)
+                        closeHfq = tClose.hfq(tFactor)
+                        open = tOpen
+                        openQfq = tOpen.qfq(tFactor, tLatestFactor)
+                        openHfq = tOpen.hfq(tFactor)
+                        high = tHigh
+                        highQfq = tHigh.qfq(tFactor, tLatestFactor)
+                        highHfq = tHigh.hfq(tFactor)
+                        low = tLow
+                        lowQfq = tLow.qfq(tFactor, tLatestFactor)
+                        lowHfq = tLow.hfq(tFactor)
+                        vol = tVol
+                        amount = tAmount
+                    }
+                }
+                candles.chunked(500) { chunked ->
+                    stockDb.bulkInsert(stock.tsCode.candleTable) insert@{
+                        chunked.forEach { candle ->
+                            this@insert.item { c ->
+                                setCandle(c, candle)
+                            }
+                        }
+                    }
+                }
+                logger.notify("candles updated: code: ${stock.tsCode}, time: ${System.currentTimeMillis() - start}ms")
+            }
+        }
+    }
+}
 
-//private suspend fun getStockHist(
-//    symbol: Symbol,
-//    end: String
-//) = coroutineScope {
-//    val table = symbol.code.candleTable
-//    val start = stockDb.from(table)
-//        .select()
-//        .orderBy(table.date.desc())
-//        .limit(1)
-//        .map { rowSet -> rowSet[table.date] }
-//        .firstOrNull()
-//    val candles = tushare.getStockHist(
-//        symbol = symbol.code,
-//        start = start,
-//        end = end
-//    )
-//    val update = candles.firstOrNull()
-//    update?.let { u ->
-//        stockDb.update(table) update@{ t ->
-//            setCandle(t, u.convert())
-//            where { t.date eq u.date }
-//        }
-//    }
-//    candles.chunked(500) { chunked ->
-//        stockDb.bulkInsert(table) insert@{
-//            chunked.forEach { candle ->
-//                this@insert.item { ta ->
-//                    setCandle(ta, candle.convert { propertyName, origin ->
-//                        if (propertyName != "date") return@convert origin
-//                        else LocalDateTime.parse((origin as String), DateTimeFormatter.ISO_LOCAL_DATE_TIME)
-//                            .format(DateTimeFormatter.ofPattern("yyyyMMdd"))
-//                    })
-//                }
-//            }
-//        }
-//    }
-//}
+private fun Float.qfq(factor: Float, latestFactor: Float) = this * factor / latestFactor
+
+private fun Float.hfq(factor: Float) = this * factor
