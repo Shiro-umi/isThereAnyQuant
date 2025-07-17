@@ -17,7 +17,7 @@ suspend fun updateStockBasic() {
     tushare.getStockBasic()
         .onFail { msg -> logger.error("request stock basic info failed: $msg.") }
         .onSucceed { form ->
-            logger.info("stock basic info request succeed, total: ${form.items.size}.")
+            logger.info("stock basic info request succeed, total: ${form!!.items.size}.")
             form.items.forEach { item ->
                 val data = StockBasicInfo {
                     tsCode = "${item[0]}"

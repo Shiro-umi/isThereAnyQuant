@@ -3,7 +3,6 @@ package org.shiroumi.database.table
 import org.ktorm.entity.EntitySequence
 import org.ktorm.entity.sequenceOf
 import org.ktorm.schema.Table
-import org.ktorm.schema.double
 import org.ktorm.schema.float
 import org.ktorm.schema.varchar
 import org.shiroumi.database.stockDb

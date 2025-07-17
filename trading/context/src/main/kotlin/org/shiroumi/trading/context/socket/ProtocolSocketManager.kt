@@ -1,7 +1,7 @@
 package org.shiroumi.trading.context.socket
 
 import Logger
-import asDispatcher
+import asSingleDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
@@ -25,11 +25,11 @@ class ProtocolSocketManager(
     private val sendingChannel: Channel<Protocol> = Channel()
 
     private val Dispatchers.protocolRecv by lazy {
-        "socket_protocol_recv".asDispatcher
+        "socket_protocol_recv".asSingleDispatcher
     }
 
     private val Dispatchers.protocolSend by lazy {
-        "socket_protocol_send".asDispatcher
+        "socket_protocol_send".asSingleDispatcher
     }
 
     override val exceptionHandlers: List<suspend (CoroutineContext, Throwable) -> Unit> = listOf { _, _ ->

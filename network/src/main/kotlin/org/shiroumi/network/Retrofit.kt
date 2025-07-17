@@ -3,11 +3,8 @@ package org.shiroumi.network
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
-import okhttp3.Response
 import okhttp3.ResponseBody
 import retrofit2.Converter
 import retrofit2.Retrofit
@@ -42,24 +39,15 @@ fun createRetrofit(baseUrl: String): Retrofit {
         .baseUrl(baseUrl)
         .client(
             OkHttpClient.Builder()
-                .connectTimeout(30, TimeUnit.SECONDS)
-                .readTimeout(50, TimeUnit.SECONDS)
-                .writeTimeout(50, TimeUnit.SECONDS)
+                .connectTimeout(5, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .writeTimeout(30, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(false)
+//                .addInterceptor(RetryInterceptor())
 //                .addInterceptor(LoggingInterceptor()) // 可选，添加日志拦截器
                 .build()
         )
         .addConverterFactory(stringConverterFactory)
         .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
         .build()
-}
-
-// 可选：日志拦截器
-class LoggingInterceptor : Interceptor {
-    override fun intercept(chain: Interceptor.Chain): Response {
-        val request = chain.request()
-        println("Request: ${request.url}, method: ${request.method}, body: ${request.body?.contentType()}")
-        val response = chain.proceed(request)
-//        println("Response: ${request.url}, body: ${response.body.string()}")
-        return response
-    }
 }

@@ -1,6 +1,6 @@
 package org.shiroumi.trading.context.socket
 
-import asDispatcher
+import asSingleDispatcher
 import io.ktor.network.selector.*
 import io.ktor.network.sockets.*
 import io.ktor.utils.io.*
@@ -65,7 +65,7 @@ abstract class SocketManager<T> {
         buffer: Channel<T>
     ) = supervisorScope.launch {
         val channel = openWriteChannel(autoFlush = true)
-        launch(context = "socket_sending_looper".asDispatcher + combinedCoroutineExceptionHandler) {
+        launch(context = "socket_sending_looper".asSingleDispatcher + combinedCoroutineExceptionHandler) {
             for (t in buffer) {
                 channel.writeStringUtf8("${onSendData(t)}\n")
             }
@@ -74,7 +74,7 @@ abstract class SocketManager<T> {
 
     private fun AReadable.startReceivingLooper() = supervisorScope.launch {
         val channel = openReadChannel()
-        launch(context = "socket_receiving_looper".asDispatcher + combinedCoroutineExceptionHandler) {
+        launch(context = "socket_receiving_looper".asSingleDispatcher + combinedCoroutineExceptionHandler) {
             while (true) {
                 onReceiveData(channel.readUTF8Line() ?: continue)
             }

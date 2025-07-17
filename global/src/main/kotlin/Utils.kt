@@ -22,7 +22,12 @@ fun printProgressBar(current: Int, total: Int) = if (total == 0) {
 
 val supervisorScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-val String.asDispatcher: ExecutorCoroutineDispatcher
+val String.asSingleDispatcher: ExecutorCoroutineDispatcher
     get() = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "thread_dispatcher_$this").apply { isDaemon = true }
+    }.asCoroutineDispatcher()
+
+val String.asDispatcher: ExecutorCoroutineDispatcher
+    get() = Executors.newCachedThreadPool { r ->
         Thread(r, "thread_dispatcher_$this").apply { isDaemon = true }
     }.asCoroutineDispatcher()

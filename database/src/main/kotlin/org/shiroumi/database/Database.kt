@@ -2,6 +2,7 @@ package org.shiroumi.database
 
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
+import cpuCores
 import org.ktorm.database.Database
 import org.ktorm.support.mysql.MySqlDialect
 import org.shiroumi.configs.BuildConfigs
@@ -25,5 +26,6 @@ val Schema.connectionPool: HikariDataSource
             username = BuildConfigs.DATABASE_USERNAME
             password = BuildConfigs.DATABASE_PASSWORD
             driverClassName = "com.mysql.cj.jdbc.Driver"
+            maximumPoolSize = cpuCores * 2
         }
     )

@@ -30,9 +30,10 @@ data class BaseTushare(
     @SerialName("request_id")
     val requestId: String,
     val code: String,
-    private val data: TushareForm
+    val msg: String,
+    private val data: TushareForm? = null
 ) {
-    fun onSucceed(action: (TushareForm) -> Unit): BaseTushare {
+    fun onSucceed(action: (TushareForm?) -> Unit): BaseTushare {
         if (code != "0") return this
         action(data)
         return this
@@ -40,7 +41,7 @@ data class BaseTushare(
 
     fun onFail(action: (msg: String) -> Unit): BaseTushare {
         if (code == "0") return this
-        action("request failed. code: $code")
+        action("request failed. code: $code, msg: $msg")
         return this
     }
 }

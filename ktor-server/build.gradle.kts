@@ -4,6 +4,8 @@ plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ktor)
+    java
+    application
 }
 
 group = "org.shiroumi"
@@ -42,5 +44,15 @@ kotlin {
     jvmToolchain(17)
     sourceSets.main {
         kotlin.srcDir("build/generated/ksp/main/kotlin")
+    }
+}
+
+application {
+    mainClass.set("org.shiroumi.MainKt")
+}
+
+tasks.jar {
+    manifest {
+        attributes["Main-Class"] = application.mainClass.get()
     }
 }
