@@ -3,6 +3,9 @@ import java.util.concurrent.Executors
 
 val cpuCores = Runtime.getRuntime().availableProcessors()
 
+val String?.f: Float
+    get() = (this ?: "0").toFloat()
+
 fun printProgressBar(current: Int, total: Int) = if (total == 0) {
     println("\r[....................] 0/0 (0%)")
 } else {

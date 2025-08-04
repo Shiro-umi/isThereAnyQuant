@@ -36,3 +36,5 @@ abstract class LoggerDelegate {
 fun logger(className: String) = object : LoggerDelegate() {
     override val clsName: String = className
 }
+
+

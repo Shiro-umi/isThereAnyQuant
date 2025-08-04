@@ -18,7 +18,22 @@ fun main() {
 //        println(tushare.getDailyCandles("000001.SZ"))
 //        startApplication()
         println("xxxxxx")
+//        tushare.getAdjFactor(date = "19901219").also { data ->
+//            data.onSucceed { res ->
+//                res!!.items.forEach { item ->
+//                    logger.error("adj: $item")
+//                }
+//            }
+//        }
+//        tushare.getDailyCandles(date = "19901219").also { data ->
+//            data.onSucceed { res ->
+//                res!!.items.forEach { item ->
+//                    logger.error("candle: $item")
+//                }
+//            }
+//        }
         updateDailyCandles()
+//        select()
     }
 }
 

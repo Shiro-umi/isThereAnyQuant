@@ -11,6 +11,7 @@ interface Candle : Entity<Candle> {
 
     var tsCode: String
     var tradeDate: String
+    var adjFactor: Float
     var close: Float
     var open: Float
     var high: Float

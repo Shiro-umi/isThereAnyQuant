@@ -21,6 +21,9 @@ abstract class CandleTable(tableName: String) : Table<Candle>(tableName) {
     val tradeDate = varchar("trade_date").primaryKey().bindTo { it.tradeDate }
 
     @KtormAssignmentsInclude
+    val adjFactor = float("adj_factor").bindTo { it.adjFactor }
+
+    @KtormAssignmentsInclude
     val close = float("close").bindTo { it.close }
 
     @KtormAssignmentsInclude
@@ -83,6 +86,7 @@ private fun createStkFactorTableIfNotExists(tableName: String) {
  CREATE TABLE IF NOT EXISTS `$tableName` (
 	`ts_code` VARCHAR(255) NOT NULL,
 	`trade_date` VARCHAR(255) NOT NULL,
+    `adj_factor` FLOAT NOT NULL,
 	`close` FLOAT NOT NULL,
 	`open` FLOAT NOT NULL,
 	`high` FLOAT NOT NULL,

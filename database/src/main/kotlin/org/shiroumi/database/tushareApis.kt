@@ -23,11 +23,24 @@ interface TuShareApi {
 
 suspend fun TuShareApi.getStockBasic() = query(tushareParams.ofApi("stock_basic").toJsonBody())
 
-suspend fun TuShareApi.getAdjFactor(tsCode: String) =
-    query(tushareParams.ofApi("adj_factor").carriesParam(mapOf("ts_code" to tsCode)).toJsonBody())
+suspend fun TuShareApi.getAdjFactor(tsCode: String? = null, date: String? = null) =
+    query(tushareParams.ofApi("adj_factor").carriesParam(
+        mutableMapOf<String, String>().apply {
+            tsCode?.let { put("ts_code", it) }
+            date?.let { put("trade_date", it) }
+        }
+    ).toJsonBody())
 
-suspend fun TuShareApi.getDailyCandles(tsCode: String) =
-    query(tushareParams.ofApi("daily").carriesParam(mapOf("ts_code" to tsCode)).toJsonBody())
+suspend fun TuShareApi.getDailyCandles(tsCode: String? = null, date: String? = null) =
+    query(tushareParams.ofApi("daily").carriesParam(
+        mutableMapOf<String, String>().apply {
+            tsCode?.let { put("ts_code", it) }
+            date?.let { put("trade_date", it) }
+        }
+    ).toJsonBody())
+
+suspend fun TuShareApi.getTradingDate() = query(tushareParams.ofApi("trade_cal").toJsonBody()).check()
+
 
 val tushareParams: TushareParams
     get() = TushareParams()

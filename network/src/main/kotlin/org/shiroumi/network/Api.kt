@@ -2,6 +2,9 @@ package org.shiroumi.network
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlin.coroutines.suspendCoroutine
 import kotlin.reflect.KProperty
 
 abstract class ApiDelegate<T> {
@@ -33,16 +36,13 @@ data class BaseTushare(
     val msg: String,
     private val data: TushareForm? = null
 ) {
-    fun onSucceed(action: (TushareForm?) -> Unit): BaseTushare {
-        if (code != "0") return this
-        action(data)
-        return this
-    }
 
-    fun onFail(action: (msg: String) -> Unit): BaseTushare {
-        if (code == "0") return this
-        action("request failed. code: $code, msg: $msg")
-        return this
+    suspend fun check() = suspendCoroutine { c ->
+        if (code != "0") {
+            c.resumeWithException(Exception("request failed. code: $code, msg: $msg"))
+            return@suspendCoroutine
+        }
+        c.resume(data)
     }
 }
 
