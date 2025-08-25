@@ -11,13 +11,15 @@ repositories {
 }
 
 dependencies {
-    implementation(project(":model"))
     implementation(project(":ksp"))
     implementation(project(":global"))
     implementation(project(":network"))
+
+    implementation(libs.jetbrains.exposed.core)
+    implementation(libs.jetbrains.exposed.dao)
+    implementation(libs.jetbrains.exposed.jdbc)
+    implementation(libs.h2)
     ksp(project(":ksp"))
-    api(libs.ktorm.core)
-    api(libs.ktorm.mysql)
     api(libs.jdbc)
     api(libs.kotlin.datetime)
     api(libs.retrofit)

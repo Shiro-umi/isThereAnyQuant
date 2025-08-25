@@ -18,8 +18,6 @@ dependencies {
     implementation(project(":global"))
     implementation(project(":database"))
     implementation(libs.kotlin.coroutines.core)
-    implementation(libs.ktorm.core)
-    implementation(libs.ktorm.mysql)
     api(libs.jdbc)
 }
 

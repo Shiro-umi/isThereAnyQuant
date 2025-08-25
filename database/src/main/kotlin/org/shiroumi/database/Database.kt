@@ -1,31 +1,40 @@
 package org.shiroumi.database
 
-import com.zaxxer.hikari.HikariConfig
-import com.zaxxer.hikari.HikariDataSource
-import cpuCores
-import org.ktorm.database.Database
-import org.ktorm.support.mysql.MySqlDialect
+import org.jetbrains.exposed.v1.core.StdOutSqlLogger
+import org.jetbrains.exposed.v1.core.Table
+import org.jetbrains.exposed.v1.core.Transaction
+import org.jetbrains.exposed.v1.jdbc.Database
+import org.jetbrains.exposed.v1.jdbc.SchemaUtils
+import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.shiroumi.configs.BuildConfigs
+import org.shiroumi.database.table.Candle
 
-// database instance
-val commonDb = Database.connect(Schema.Common.connectionPool, dialect = MySqlDialect())
-val stockDb = Database.connect(Schema.Stock.connectionPool, dialect = MySqlDialect())
+const val MAX_VARCHAR_LENGTH = 128
 
+val stockDb =
+    Database.connect(
+        "jdbc:mysql://192.168.31.125:3306/stock?allowMultiQueries=true&rewriteBatchedInserts=true",
+        driver = "org.h2.Driver",
+        user = "remote",
+        password = BuildConfigs.DATABASE_PASSWORD
+    )
 
-// schema def
-sealed class Schema(val value: String) {
-    data object Common : Schema("common")
-    data object Stock : Schema("stock")
+fun <T> Database.transaction(
+    vararg tables: Table,
+    log: Boolean = true,
+    block: Transaction.() -> T
+) = transaction(db = this) {
+    if (log) addLogger(StdOutSqlLogger)
+    SchemaUtils.create(*tables)
+    return@transaction block()
 }
 
-// connection pool
-val Schema.connectionPool: HikariDataSource
-    get() = HikariDataSource(
-        HikariConfig().apply {
-            jdbcUrl = "jdbc:mysql://192.168.31.125:3306/$value?allowMultiQueries=true"
-            username = BuildConfigs.DATABASE_USERNAME
-            password = BuildConfigs.DATABASE_PASSWORD
-            driverClassName = "com.mysql.cj.jdbc.Driver"
-            maximumPoolSize = cpuCores * 2
-        }
-    )
+operator fun <T> List<T>.component6() = get(5)
+
+operator fun <T> List<T>.component7() = get(6)
+
+operator fun <T> List<T>.component8() = get(7)
+
+operator fun <T> List<T>.component9() = get(8)
+
+operator fun <T> List<T>.component10() = get(9)

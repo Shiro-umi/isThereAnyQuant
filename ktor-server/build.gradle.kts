@@ -23,9 +23,8 @@ application {
 
 dependencies {
     implementation(project(":network"))
-    implementation(project(":model"))
     implementation(project(":database"))
-    implementation(project(":global"))
+    api(project(":global"))
     implementation(project(":trading"))
     implementation(kotlin("stdlib"))
     implementation(kotlin("reflect"))
@@ -34,7 +33,7 @@ dependencies {
     implementation(libs.kotlin.datetime)
     implementation(libs.retrofit)
     implementation(libs.bundles.ktor.server)
-    implementation(libs.bundles.ktorm)
+//    implementation(libs.bundles.ktorm)
 }
 
 tasks.test {

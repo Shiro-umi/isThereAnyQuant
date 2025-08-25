@@ -7,6 +7,7 @@ import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 import kotlin.reflect.KProperty
 
+
 abstract class ApiDelegate<T> {
 
     abstract val clazz: Class<T>
@@ -50,4 +51,20 @@ data class BaseTushare(
 data class TushareForm(
     val fields: List<String>,
     val items: List<List<String?>>
-)
+) {
+    fun toColumns(sortKey: String? = null): List<Column> {
+        val sorted = sortKey?.let { key ->
+            val keyIndex = fields.indexOf(sortKey)
+            items.sortedBy { item -> item[keyIndex] }
+        } ?: items
+        return sorted.map { Column(fields = fields, items = it) }
+    }
+}
+
+data class Column(
+    val fields: List<String>,
+    val items: List<String?>
+) {
+
+    infix fun provides(key: String) = items[fields.indexOf(key)] ?: ""
+}

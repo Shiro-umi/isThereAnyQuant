@@ -19,13 +19,10 @@ dependencies {
     implementation(project(":global"))
     implementation(project(":database"))
     implementation(project(":ksp"))
-    implementation(project(":model"))
     ksp(project(":ksp"))
     implementation(libs.bundles.ktor.client)
     api(libs.kotlin.serialization.json)
     implementation(libs.kotlin.coroutines.core)
-    implementation(libs.ktorm.core)
-    implementation(libs.ktorm.mysql)
     @Suppress("VulnerableLibrariesLocal", "RedundantSuppression")
     api(libs.jdbc)
 }
