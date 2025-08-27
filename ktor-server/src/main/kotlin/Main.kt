@@ -1,5 +1,6 @@
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
+import org.shiroumi.database.datasource.calculateAdjCandle
 import org.shiroumi.database.datasource.updateDailyCandles
 import org.shiroumi.database.datasource.updateStockBasic
 
@@ -8,7 +9,8 @@ fun main() {
     // startup
     runBlocking {
 //        updateStockBasic()
-        updateDailyCandles()
+//        updateDailyCandles()
+        calculateAdjCandle()
 //        select()
     }
 }

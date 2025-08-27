@@ -8,13 +8,17 @@ import org.shiroumi.database.MAX_VARCHAR_LENGTH
 
 object DailyCandleTable : IntIdTable("daily_candle") {
 
-    val tsCode = varchar("ts_code", MAX_VARCHAR_LENGTH).index()
-    val tradeDate = varchar("trade_date", MAX_VARCHAR_LENGTH).index()
-    val close = float("close").default(0f).index()
+    val tsCode = varchar("ts_code", MAX_VARCHAR_LENGTH)
+    val tradeDate = varchar("trade_date", MAX_VARCHAR_LENGTH)
+    val close = float("close").default(0f)
     val open = float("open").default(0f)
     val high = float("high").default(0f)
     val low = float("low").default(0f)
-    val vol = float("vol").default(0f).index()
+    val vol = float("vol").default(0f)
+
+    init {
+        index(isUnique = false, tsCode, tradeDate)
+    }
 }
 
 class Candle(id: EntityID<Int>) : IntEntity(id) {

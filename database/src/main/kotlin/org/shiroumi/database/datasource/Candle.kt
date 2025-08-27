@@ -18,7 +18,6 @@ import org.shiroumi.database.table.DailyCandleTable
 import org.shiroumi.network.TushareForm
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
-import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 
 

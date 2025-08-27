@@ -8,13 +8,18 @@ import org.shiroumi.database.MAX_VARCHAR_LENGTH
 
 object AdjFactorTable : IntIdTable("adj_factor") {
 
-    val tsCode = varchar("ts_code", MAX_VARCHAR_LENGTH).index()
-    val tradeDate = varchar("trade_date", MAX_VARCHAR_LENGTH).index()
-    val adjFactor = float("adj_factor").default(0f).index()
+    val tsCode = varchar("ts_code", MAX_VARCHAR_LENGTH).references(DailyCandleTable.tsCode)
+    val tradeDate = varchar("trade_date", MAX_VARCHAR_LENGTH)
+    val adjFactor = float("adj_factor").default(0f)
+
+    init {
+        index(false, tsCode, tradeDate)
+    }
 }
 
 class AdjFactor(id: EntityID<Int>) : IntEntity(id) {
     companion object : IntEntityClass<AdjFactor>(AdjFactorTable)
+
     val tsCode by AdjFactorTable.tsCode
     val tradeDate by AdjFactorTable.tradeDate
     val adjFactor by AdjFactorTable.adjFactor
