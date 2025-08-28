@@ -5,11 +5,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import logger
 import org.jetbrains.exposed.v1.jdbc.batchUpsert
-import org.shiroumi.database.getStockBasic
+import org.shiroumi.network.apis.getStockBasic
+import org.shiroumi.network.apis.tushare
 import org.shiroumi.database.stockDb
 import org.shiroumi.database.table.StockTable
 import org.shiroumi.database.transaction
-import org.shiroumi.database.tushare
 
 private val logger by logger("updateStockBasic")
 

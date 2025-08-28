@@ -1,4 +1,4 @@
-package org.shiroumi.database
+package org.shiroumi.network.apis
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive

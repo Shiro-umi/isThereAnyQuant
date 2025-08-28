@@ -29,6 +29,12 @@ inline fun <reified T> tushare() = object : ApiDelegate<T>() {
     override val baseUrl: String = "http://api.tushare.pro/"
 }
 
+inline fun <reified T> deepseek() = object : ApiDelegate<T>() {
+    override val clazz = T::class.java
+
+    override val baseUrl: String = "https://api.deepseek.com/"
+}
+
 @Serializable
 data class BaseTushare(
     @SerialName("request_id")

@@ -100,5 +100,4 @@ data class RawCandle(
     fun hfq(p: KProperty0<Float>) = p.get() * adjFactor
 
     fun qfq(p: KProperty0<Float>) = p.get() / adjFactor
-
 }

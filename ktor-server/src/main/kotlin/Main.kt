@@ -1,8 +1,8 @@
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
-import org.shiroumi.database.datasource.calculateAdjCandle
-import org.shiroumi.database.datasource.updateDailyCandles
-import org.shiroumi.database.datasource.updateStockBasic
+import org.shiroumi.network.apis.chat
+import org.shiroumi.network.apis.llmApi
+import org.shiroumi.network.apis.Message
 
 // vm entry
 fun main() {
@@ -10,8 +10,16 @@ fun main() {
     runBlocking {
 //        updateStockBasic()
 //        updateDailyCandles()
-        calculateAdjCandle()
-//        select()
+//        calculateAdjCandle()
+        val msgs = listOf(
+            Message(role = "system", content = "You are a helpful assistant"),
+            Message(role = "user", content = "Hi"),
+        )
+        val res = llmApi.chat(
+            model = "deepseek-chat",
+            messages = msgs
+        )
+        println(res.choices.first().message)
     }
 }
 

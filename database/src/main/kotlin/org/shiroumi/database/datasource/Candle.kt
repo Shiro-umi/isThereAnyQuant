@@ -11,10 +11,15 @@ import kotlinx.coroutines.launch
 import logger
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.jdbc.batchUpsert
-import org.shiroumi.database.*
+import org.shiroumi.network.apis.getAdjFactor
+import org.shiroumi.network.apis.getDailyCandles
+import org.shiroumi.network.apis.getTradingDate
+import org.shiroumi.network.apis.tushare
+import org.shiroumi.database.stockDb
 import org.shiroumi.database.table.AdjFactorTable
 import org.shiroumi.database.table.Candle
 import org.shiroumi.database.table.DailyCandleTable
+import org.shiroumi.database.transaction
 import org.shiroumi.network.TushareForm
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter

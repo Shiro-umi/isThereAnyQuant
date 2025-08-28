@@ -13,6 +13,7 @@ repositories {
 dependencies {
     implementation(kotlin("stdlib"))
     implementation(kotlin("reflect"))
+    implementation(project(":global"))
     api(libs.kotlin.coroutines.core)
     api(libs.kotlin.serialization.json)
     api(libs.retrofit)
