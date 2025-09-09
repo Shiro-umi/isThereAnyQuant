@@ -20,6 +20,7 @@ dependencies {
     implementation(libs.jetbrains.exposed.jdbc)
     implementation(libs.h2)
     ksp(project(":ksp"))
+    ksp(project(":global"))
     api(libs.jdbc)
     api(libs.kotlin.datetime)
     api(libs.retrofit)

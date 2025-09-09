@@ -64,6 +64,7 @@ suspend fun calculateAdjCandle() = coroutineScope {
                             }
                     }.toList()
                     logger.notify("joined for $tsCode, ${allStocks.size}")
+                    val latest = candle.last()
                     stockDb.transaction(AdjCandleTable, log = false) {
                         AdjCandleTable.batchUpsert(candle) { raw ->
                             set(AdjCandleTable.tsCode, raw.tsCode)
@@ -73,10 +74,10 @@ suspend fun calculateAdjCandle() = coroutineScope {
                             set(AdjCandleTable.highHfq, raw.hfq(raw::high))
                             set(AdjCandleTable.lowHfq, raw.hfq(raw::low))
                             set(AdjCandleTable.volFq, raw.hfq(raw::vol))
-                            set(AdjCandleTable.closeQfq, raw.qfq(raw::close))
-                            set(AdjCandleTable.openQfq, raw.qfq(raw::open))
-                            set(AdjCandleTable.highQfq, raw.qfq(raw::high))
-                            set(AdjCandleTable.lowQfq, raw.qfq(raw::low))
+                            set(AdjCandleTable.closeQfq, raw.qfq(latest::close, latest))
+                            set(AdjCandleTable.openQfq, raw.qfq(latest::open, latest))
+                            set(AdjCandleTable.highQfq, raw.qfq(latest::high, latest))
+                            set(AdjCandleTable.lowQfq, raw.qfq(latest::low, latest))
                         }
                     }
                     logger.notify("calculate adj_candle, code:$tsCode done.  $i/${allStocks.size}")
@@ -99,5 +100,5 @@ data class RawCandle(
 ) {
     fun hfq(p: KProperty0<Float>) = p.get() * adjFactor
 
-    fun qfq(p: KProperty0<Float>) = p.get() / adjFactor
+    fun qfq(p: KProperty0<Float>, latest: RawCandle) = (adjFactor / latest.adjFactor) * p.get()
 }

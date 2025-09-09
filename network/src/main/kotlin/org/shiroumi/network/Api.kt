@@ -1,10 +1,5 @@
 package org.shiroumi.network
 
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
-import kotlin.coroutines.suspendCoroutine
 import kotlin.reflect.KProperty
 
 
@@ -35,42 +30,8 @@ inline fun <reified T> deepseek() = object : ApiDelegate<T>() {
     override val baseUrl: String = "https://api.deepseek.com/"
 }
 
-@Serializable
-data class BaseTushare(
-    @SerialName("request_id")
-    val requestId: String,
-    val code: String,
-    val msg: String,
-    private val data: TushareForm? = null
-) {
+inline fun <reified T> siliconFlow() = object : ApiDelegate<T>() {
+    override val clazz = T::class.java
 
-    suspend fun check() = suspendCoroutine { c ->
-        if (code != "0") {
-            c.resumeWithException(Exception("request failed. code: $code, msg: $msg"))
-            return@suspendCoroutine
-        }
-        c.resume(data)
-    }
-}
-
-@Serializable
-data class TushareForm(
-    val fields: List<String>,
-    val items: List<List<String?>>
-) {
-    fun toColumns(sortKey: String? = null): List<Column> {
-        val sorted = sortKey?.let { key ->
-            val keyIndex = fields.indexOf(sortKey)
-            items.sortedBy { item -> item[keyIndex] }
-        } ?: items
-        return sorted.map { Column(fields = fields, items = it) }
-    }
-}
-
-data class Column(
-    val fields: List<String>,
-    val items: List<String?>
-) {
-
-    infix fun provides(key: String) = items[fields.indexOf(key)] ?: ""
+    override val baseUrl: String = "https://api.siliconflow.cn/"
 }

@@ -1,5 +1,8 @@
 @file:Suppress("VulnerableLibrariesLocal")
 
+import org.gradle.kotlin.dsl.implementation
+
+
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
@@ -33,7 +36,12 @@ dependencies {
     implementation(libs.kotlin.datetime)
     implementation(libs.retrofit)
     implementation(libs.bundles.ktor.server)
-//    implementation(libs.bundles.ktorm)
+//    implementation(libs.jetbrains.koog)
+    // import Kotlin API client BOM
+    implementation(platform("com.aallam.openai:openai-client-bom:4.0.1"))
+
+    // define dependencies without versions
+    implementation("com.aallam.openai:openai-client")
 }
 
 tasks.test {

@@ -4,6 +4,7 @@ import org.jetbrains.exposed.v1.core.StdOutSqlLogger
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.core.Transaction
 import org.jetbrains.exposed.v1.jdbc.Database
+import org.jetbrains.exposed.v1.jdbc.JdbcTransaction
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.shiroumi.configs.BuildConfigs
@@ -22,7 +23,7 @@ val stockDb =
 fun <T> Database.transaction(
     vararg tables: Table,
     log: Boolean = true,
-    block: Transaction.() -> T
+    block: JdbcTransaction.() -> T
 ) = transaction(db = this) {
     if (log) addLogger(StdOutSqlLogger)
     SchemaUtils.create(*tables)

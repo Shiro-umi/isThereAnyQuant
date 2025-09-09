@@ -20,7 +20,7 @@ import org.shiroumi.database.table.AdjFactorTable
 import org.shiroumi.database.table.Candle
 import org.shiroumi.database.table.DailyCandleTable
 import org.shiroumi.database.transaction
-import org.shiroumi.network.TushareForm
+import org.shiroumi.network.apis.TushareForm
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
