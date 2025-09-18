@@ -25,6 +25,13 @@ interface TuShareApi {
     suspend fun query(@Body body: RequestBody?): BaseTushare
 }
 
+suspend fun TuShareApi.getThsHotStocks(tradeDate: String) = query(tushareParams.ofApi("ths_hot")
+    .carriesParam(mutableMapOf<String, String>().apply {
+        put("trade_date", tradeDate)
+        put("market", "热股")
+        put("is_new", "N")
+    }).toJsonBody())
+
 suspend fun TuShareApi.getStockBasic() = query(tushareParams.ofApi("stock_basic").toJsonBody())
 
 suspend fun TuShareApi.getAdjFactor(tsCode: String? = null, date: String? = null) =

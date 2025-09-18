@@ -6,7 +6,6 @@ import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import Task
-//import Trading
 
 fun Application.ktorRouting() {
     install(ContentNegotiation) {

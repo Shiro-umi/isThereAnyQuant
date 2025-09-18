@@ -2,7 +2,9 @@ package org.shiroumi.database.datasource
 
 import ScheduledTasks
 import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.chunked
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import logger
@@ -17,12 +19,19 @@ import org.shiroumi.database.table.StockTable
 import org.shiroumi.database.transaction
 import kotlin.reflect.KProperty0
 
+@OptIn(ExperimentalCoroutinesApi::class)
 suspend fun calculateAdjCandle() = coroutineScope {
     val logger by logger("CalculateAdj")
     launch(CoroutineExceptionHandler { _, t ->
         logger.error("${t.message}")
         t.printStackTrace()
     }) {
+        stockDb.transaction {
+            val lowLevelCx = connection.connection as java.sql.Connection
+            val query = lowLevelCx.createStatement()
+            query.execute("""DROP TABLE IF EXISTS adj_daily_candle;""")
+        }
+
         val allStocks = stockDb.transaction {
             StockTable.select(StockTable.tsCode, StockTable.name).map { row ->
                 row[StockTable.tsCode] to row[StockTable.name]
@@ -30,7 +39,7 @@ suspend fun calculateAdjCandle() = coroutineScope {
         }.toList()
         logger.notify("all stocks: ${allStocks.size}")
 
-        val scheduledTasks = ScheduledTasks<Any>()
+        val scheduledTasks = ScheduledTasks<Any>(concurrency = 32)
         allStocks.forEachIndexed { i, (tsCode, name) ->
             scheduledTasks.emit(
                 tag = tsCode,
@@ -74,10 +83,10 @@ suspend fun calculateAdjCandle() = coroutineScope {
                             set(AdjCandleTable.highHfq, raw.hfq(raw::high))
                             set(AdjCandleTable.lowHfq, raw.hfq(raw::low))
                             set(AdjCandleTable.volFq, raw.hfq(raw::vol))
-                            set(AdjCandleTable.closeQfq, raw.qfq(latest::close, latest))
-                            set(AdjCandleTable.openQfq, raw.qfq(latest::open, latest))
-                            set(AdjCandleTable.highQfq, raw.qfq(latest::high, latest))
-                            set(AdjCandleTable.lowQfq, raw.qfq(latest::low, latest))
+                            set(AdjCandleTable.closeQfq, raw.qfq(raw::close, latest))
+                            set(AdjCandleTable.openQfq, raw.qfq(raw::open, latest))
+                            set(AdjCandleTable.highQfq, raw.qfq(raw::high, latest))
+                            set(AdjCandleTable.lowQfq, raw.qfq(raw::low, latest))
                         }
                     }
                     logger.notify("calculate adj_candle, code:$tsCode done.  $i/${allStocks.size}")

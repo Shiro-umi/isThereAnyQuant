@@ -46,7 +46,8 @@ data class Message(
     val role: String,
     val content: String,
     @SerialName("tool_calls") val toolCalls: List<ToolCalls>? = null,
-    @SerialName("tool_call_id") val toolCallId: String? = null
+    @SerialName("tool_call_id") var toolCallId: String? = null,
+    @SerialName("reasoning_content") val reasoningContent: String? = null
 )
 
 @Serializable
@@ -88,7 +89,9 @@ suspend fun LLMApi.chat(
     model: String,
     messages: List<Message>,
     tools: JsonArray? = null,
-    stream: Boolean = false
+    stream: Boolean = false,
+    temperature: Float = 0.9f,
+    topK: Int = 50
 ): ChatCompletion = post(
     body = pretty.encodeToString(buildJsonObject {
         putJsonArray("messages") {
@@ -100,6 +103,11 @@ suspend fun LLMApi.chat(
         }
         put("model", model)
         put("stream", stream)
+        put("temperature", temperature)
+        put("top_k", topK)
+//        put("enable_thinking", true)
+        put("thinking_budget", 65536)
+        put("max_tokens", 163840)
         tools?.let { t -> put("tools", tools) }
     }).toRequestBody(contentType = "application/json".toMediaType())
 )

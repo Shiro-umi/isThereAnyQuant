@@ -42,6 +42,9 @@ dependencies {
 
     // define dependencies without versions
     implementation("com.aallam.openai:openai-client")
+
+    implementation("org.commonmark:commonmark:0.26.0")
+    implementation("org.xhtmlrenderer:flying-saucer-core:9.1.22")
 }
 
 tasks.test {
@@ -55,11 +58,23 @@ kotlin {
 }
 
 application {
-    mainClass.set("org.shiroumi.MainKt")
+    mainClass.set("org.shiroumi.server.MainKt")
 }
 
-tasks.jar {
+tasks.withType<Jar> {
+    // Otherwise you'll get a "No main manifest attribute" error
     manifest {
-        attributes["Main-Class"] = application.mainClass.get()
+        attributes["Main-Class"] = "org.shiroumi.server.MainKt"
     }
+
+    // To avoid the duplicate handling strategy error
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    // To add all the dependencies
+    from(sourceSets.main.get().output)
+
+    dependsOn(configurations.runtimeClasspath)
+    from({
+        configurations.runtimeClasspath.get().filter { it.name.endsWith("jar") }.map { zipTree(it) }
+    })
 }

@@ -22,7 +22,7 @@ kotlin {
 tasks.withType<Jar> {
     // Otherwise you'll get a "No main manifest attribute" error
     manifest {
-        attributes["Main-Class"] = "org.shiroumi.MainKt"
+        attributes["Main-Class"] = "org.shiroumi.server.MainKt"
     }
 
     // To avoid the duplicate handling strategy error

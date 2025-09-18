@@ -41,7 +41,7 @@ fun createRetrofit(baseUrl: String): Retrofit {
         .client(
             OkHttpClient.Builder()
                 .connectTimeout(5, TimeUnit.SECONDS)
-                .readTimeout(120, TimeUnit.SECONDS)
+                .readTimeout(3000, TimeUnit.SECONDS)
                 .writeTimeout(30, TimeUnit.SECONDS)
                 .retryOnConnectionFailure(false)
 //                .addInterceptor(RetryInterceptor())
