@@ -6,7 +6,6 @@ import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.ResponseBody
-import org.shiroumi.network.interceptor.LoggingInterceptor
 import retrofit2.Converter
 import retrofit2.Retrofit
 import java.lang.reflect.Type
@@ -45,7 +44,7 @@ fun createRetrofit(baseUrl: String): Retrofit {
                 .writeTimeout(30, TimeUnit.SECONDS)
                 .retryOnConnectionFailure(false)
 //                .addInterceptor(RetryInterceptor())
-                .addInterceptor(LoggingInterceptor()) // 可选，添加日志拦截器
+//                .addInterceptor(LoggingInterceptor()) // 可选，添加日志拦截器
                 .build()
         )
         .addConverterFactory(stringConverterFactory)

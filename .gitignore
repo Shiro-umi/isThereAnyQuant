@@ -49,5 +49,4 @@ bin/
 /.idea/libraries/Permanent_Script_Dependencies.xml
 /.idea/inspectionProfiles/Project_Default.xml
 
-sys_prompt
-usr_prompt
+assets/**

@@ -49,7 +49,7 @@ import kotlinx.serialization.json.*
 ${
                 collected.joinToString("\n        ") { c ->
                     val functionName = c.first.simpleName.asString()
-                    "import org.shiroumi.database.functioncalling.$functionName"
+                    "import ktor.module.llm.$functionName"
                 }
             }
 
@@ -71,11 +71,10 @@ ${
     else -> null
 }
 """
-
             file.write(content.toByteArray())
             file.close()
         } catch (e: Exception) {
-            e.printStackTrace()
+//            e.printStackTrace()
         }
         return ret
     }

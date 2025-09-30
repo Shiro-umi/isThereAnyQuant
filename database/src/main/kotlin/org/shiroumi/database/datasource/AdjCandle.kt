@@ -4,7 +4,6 @@ import ScheduledTasks
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.chunked
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import logger
@@ -73,7 +72,7 @@ suspend fun calculateAdjCandle() = coroutineScope {
                             }
                     }.toList()
                     logger.notify("joined for $tsCode, ${allStocks.size}")
-                    val latest = candle.last()
+                    val latest = candle.lastOrNull()
                     stockDb.transaction(AdjCandleTable, log = false) {
                         AdjCandleTable.batchUpsert(candle) { raw ->
                             set(AdjCandleTable.tsCode, raw.tsCode)
@@ -83,10 +82,12 @@ suspend fun calculateAdjCandle() = coroutineScope {
                             set(AdjCandleTable.highHfq, raw.hfq(raw::high))
                             set(AdjCandleTable.lowHfq, raw.hfq(raw::low))
                             set(AdjCandleTable.volFq, raw.hfq(raw::vol))
-                            set(AdjCandleTable.closeQfq, raw.qfq(raw::close, latest))
-                            set(AdjCandleTable.openQfq, raw.qfq(raw::open, latest))
-                            set(AdjCandleTable.highQfq, raw.qfq(raw::high, latest))
-                            set(AdjCandleTable.lowQfq, raw.qfq(raw::low, latest))
+                            latest?.let {
+                                set(AdjCandleTable.closeQfq, raw.qfq(raw::close, latest))
+                                set(AdjCandleTable.openQfq, raw.qfq(raw::open, latest))
+                                set(AdjCandleTable.highQfq, raw.qfq(raw::high, latest))
+                                set(AdjCandleTable.lowQfq, raw.qfq(raw::low, latest))
+                            }
                         }
                     }
                     logger.notify("calculate adj_candle, code:$tsCode done.  $i/${allStocks.size}")

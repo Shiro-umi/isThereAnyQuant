@@ -7,6 +7,7 @@ plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ktor)
+    alias(libs.plugins.kotlin.ksp)
     java
     application
 }
@@ -37,14 +38,11 @@ dependencies {
     implementation(libs.retrofit)
     implementation(libs.bundles.ktor.server)
 //    implementation(libs.jetbrains.koog)
-    // import Kotlin API client BOM
-    implementation(platform("com.aallam.openai:openai-client-bom:4.0.1"))
+    ksp(project(":ksp"))
+    implementation(project(":ksp"))
+    implementation("org.seleniumhq.selenium:selenium-java:4.35.0")
+    implementation("org.seleniumhq.selenium:selenium-devtools-v139:4.35.0")
 
-    // define dependencies without versions
-    implementation("com.aallam.openai:openai-client")
-
-    implementation("org.commonmark:commonmark:0.26.0")
-    implementation("org.xhtmlrenderer:flying-saucer-core:9.1.22")
 }
 
 tasks.test {

@@ -1,12 +1,10 @@
 package org.shiroumi.network.apis
 
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -29,7 +27,7 @@ data class ChatCompletionUsage(
 
 @Serializable
 data class ToolCalls(
-    val index: Int,
+//    val index: Int,
     val id: String,
     val type: String,
     val function: FunctionTool,
@@ -91,23 +89,38 @@ suspend fun LLMApi.chat(
     tools: JsonArray? = null,
     stream: Boolean = false,
     temperature: Float = 0.9f,
-    topK: Int = 50
-): ChatCompletion = post(
-    body = pretty.encodeToString(buildJsonObject {
-        putJsonArray("messages") {
-            messages.forEach { msg ->
-                add(
-                    pretty.encodeToJsonElement(Message.serializer(), msg)
-                )
+    topP: Float = 0.9f,
+    topK: Int = 50,
+    jsonMode: Boolean = false,
+    enableThinking: Boolean = true,
+    thinkingBudget: Int = 4096,
+    maxTokens: Int = 4096
+): ChatCompletion = withContext(CoroutineExceptionHandler { _, t ->
+    println(t.message)
+}) {
+    post(
+        body = pretty.encodeToString(buildJsonObject {
+            putJsonArray("messages") {
+                messages.forEach { msg ->
+                    add(
+                        pretty.encodeToJsonElement(Message.serializer(), msg)
+                    )
+                }
             }
-        }
-        put("model", model)
-        put("stream", stream)
-        put("temperature", temperature)
-        put("top_k", topK)
-//        put("enable_thinking", true)
-        put("thinking_budget", 65536)
-        put("max_tokens", 163840)
-        tools?.let { t -> put("tools", tools) }
-    }).toRequestBody(contentType = "application/json".toMediaType())
-)
+            put("model", model)
+            put("stream", stream)
+            put("temperature", temperature)
+            put("top_p", topP)
+            put("top_k", topK)
+            if (enableThinking) {
+                put("enable_thinking", true)
+                put("thinking_budget", thinkingBudget)
+            }
+            put("max_tokens", maxTokens)
+            if (jsonMode) put("response_format", buildJsonObject {
+                put("type", "json_object")
+            })
+            tools?.let { t -> put("tools", t) }
+        }).toRequestBody(contentType = "application/json".toMediaType())
+    )
+}

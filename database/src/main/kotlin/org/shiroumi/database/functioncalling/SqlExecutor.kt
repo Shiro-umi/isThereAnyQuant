@@ -9,44 +9,51 @@ import org.shiroumi.database.table.AdjCandleTable
 import org.shiroumi.database.table.DailyCandleTable
 import org.shiroumi.database.table.StockTable
 import org.shiroumi.database.transaction
-import org.shiroumi.ksp.Description
-import org.shiroumi.ksp.FunctionCall
-
-
-@FunctionCall(description = "这个方法没有什么帮助，占位用的")
-suspend fun executeSql(
-    @Description("这个方法没有什么帮助，占位用的") sql: String
-) = ""
-//@FunctionCall(description = "输入你希望执行的sql并返回结果")
-//suspend fun executeSql(
-//    @Description("需要执行的sql语句") sql: String
-//) = stockDb.transaction {
-//    println(sql)
-//    val lowLevelCx = connection.connection as java.sql.Connection
-//    val query = lowLevelCx.createStatement()
-//    val rs = query.executeQuery(sql)
-//    val res = mutableListOf<List<String>>()
-//    while (rs.next()) {
-//        val column = mutableListOf<String>()
-//        for (i in 1..rs.metaData.columnCount) {
-//            column.add("${rs.getObject(i)}")
-//        }
-//        res.add(column)
-//    }
-//    println(res)
-//    "$res"
-//}
+import java.lang.Float.max
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import kotlin.math.abs
 
 data class JoinedCandles(
     val tsCode: String,
     val name: String,
-    val res: List<List<String>>
+    val res: List<Candle>
 )
 
-fun getJoinedCandles(tsCode: String, limit: Int): JoinedCandles {
+data class Candle(
+    val date: String,
+    val open: Float,
+    val close: Float,
+    val low: Float,
+    val high: Float,
+    val vol: Float,
+    val ibs: Float,
+    var tr: Float = 0f,
+    var atr: Float = 0f,
+    var ema20: Float = 0f,
+    var ema20Slope: Float = 0f
+) {
+    override fun toString(): String = listOf(
+        "tradeDate=${date}",
+        "close=$close",
+        "low=$low",
+        "high=$high",
+        "open=$open",
+        "vol=$vol",
+        "ibs=$ibs",
+        "atr=$atr",
+        "normAtr=${atr / close}",
+        "ema20=$ema20",
+        "ema20Slope=$ema20Slope"
+    ).toString()
+}
+
+private val today = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"))
+
+fun getJoinedCandles(tsCode: String, limit: Int, endDate: String = today): JoinedCandles {
     var name = ""
     val res = stockDb.transaction {
-        DailyCandleTable.join(
+        val rows = DailyCandleTable.join(
             AdjCandleTable,
             JoinType.LEFT,
             additionalConstraint = { (DailyCandleTable.tsCode eq AdjCandleTable.tsCode) }
@@ -65,22 +72,93 @@ fun getJoinedCandles(tsCode: String, limit: Int): JoinedCandles {
             AdjCandleTable.volFq,
         )
             .where {
-                (DailyCandleTable.tsCode eq tsCode) and (DailyCandleTable.tradeDate eq AdjCandleTable.tradeDate) and (DailyCandleTable.tsCode eq StockTable.tsCode)
+                (DailyCandleTable.tsCode eq tsCode) and (DailyCandleTable.tradeDate eq AdjCandleTable.tradeDate) and (DailyCandleTable.tsCode eq StockTable.tsCode) and (DailyCandleTable.tradeDate less endDate)
             }
             .orderBy(DailyCandleTable.tradeDate, SortOrder.DESC)
             .limit(limit)
             .map { row ->
                 name.ifBlank { name = row[StockTable.name] }
-                listOf(
-                    "tradeDate=${row[DailyCandleTable.tradeDate]}",
-                    "closeQfq=${row[AdjCandleTable.closeQfq]}",
-                    "lowQfq=${row[AdjCandleTable.lowQfq]}",
-                    "highQfq=${row[AdjCandleTable.highQfq]}",
-                    "openQfq=${row[AdjCandleTable.openQfq]}",
-                    "volFq=${row[AdjCandleTable.volFq]}",
-                )
-            }
-            .toList()
+                val date = row[DailyCandleTable.tradeDate]
+                val close = row[AdjCandleTable.closeQfq]
+                val low = row[AdjCandleTable.lowQfq]
+                val high = row[AdjCandleTable.highQfq]
+                val open = row[AdjCandleTable.openQfq]
+                val vol = row[AdjCandleTable.volFq]
+                val ibs = ((close - low) / (high - low)) * 100
+                Candle(date, open, close, low, high, vol, ibs)
+            }.toList().asReversed().distinctBy { it.date }
+        rows.calculateAtr()
+        rows.calculateEma20()
+        rows.subList(rows.lastIndex - 30, rows.lastIndex)
     }
     return JoinedCandles(tsCode = tsCode, name = name, res = res)
 }
+
+private fun List<Candle>.calculateEma20() {
+    val period = 20
+    if (this.size < period) return
+    val multiplier = 2.0 / (period + 1)
+    var ema: Float = this[period - 1].close
+    var prevEma: Float? = null
+    val slopes = mutableListOf<Float>()
+
+    for (i in period until this.size) {
+        ema = ((this[i].close * multiplier) + (ema * (1 - multiplier))).toFloat()
+        this[i].ema20 = ema
+
+        // 计算EMA20的斜率
+        if (prevEma != null) {
+            val slope = ema - prevEma
+            this[i].ema20Slope = slope
+            slopes.add(slope)
+        }
+
+        // 更新前一个EMA20值
+        prevEma = ema
+    }
+
+    // 归一化斜率
+    if (slopes.isNotEmpty()) {
+        val minSlope = slopes.minOrNull() ?: 0f
+        val maxSlope = slopes.maxOrNull() ?: 0f
+        val range = maxSlope - minSlope
+
+        for (i in period until this.size) {
+            if (range > 0) {
+                this[i].ema20Slope = (this[i].ema20Slope - minSlope) / range
+            } else {
+                this[i].ema20Slope = 0f
+            }
+        }
+    }
+}
+
+private fun List<Candle>.calculateAtr() {
+    val n = 14
+    var p = 0
+    var sum = 0f
+    while (p < n) {
+        this[p].tr = calculateTr(p)
+        sum += this[p].tr
+        this[p].atr = 0f
+        p++
+    }
+    this[p].atr = sum / n.toFloat()
+    p++
+    while (p < this.size) {
+        this[p].tr = calculateTr(p)
+        this[p].atr = (this[p - 1].atr * (n - 1) + this[p].tr) / n
+        p++
+    }
+}
+
+private fun List<Candle>.calculateTr(i: Int): Float {
+    if (i == 0) return 0f
+    val pClose = this[i - 1].close
+    val c = this[i]
+    val tr1 = abs(c.high - c.low)
+    val tr2 = abs(c.high - pClose)
+    val tr3 = abs(c.low - pClose)
+    return max(tr1, max(tr2, tr3))
+}
+
