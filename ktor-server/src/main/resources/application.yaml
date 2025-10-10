@@ -1,9 +1,0 @@
-ktor:
-    application:
-        modules:
-            - org.shiroumi.ktor.module.RoutingKt.ktorRouting
-    development: true
-    deployment:
-        port: 9870
-        watch:
-            - classes

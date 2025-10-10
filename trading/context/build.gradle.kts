@@ -1,7 +1,7 @@
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.kotlin.ksp)
+//    alias(libs.plugins.kotlin.ksp)
 }
 
 group = "org.shiroumi"
@@ -18,8 +18,8 @@ sourceSets.main {
 dependencies {
     implementation(project(":global"))
     implementation(project(":database"))
-    implementation(project(":ksp"))
-    ksp(project(":ksp"))
+//    implementation(project(":ksp"))
+//    ksp(project(":ksp"))
     implementation(libs.bundles.ktor.client)
     api(libs.kotlin.serialization.json)
     implementation(libs.kotlin.coroutines.core)

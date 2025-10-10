@@ -1,0 +1,9 @@
+{
+  "name": "Quant.it",
+  "short_name": "Quant.it",
+  "description": "wpa from kmp",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#FFFFFF",
+  "theme_color": "#000000"
+}

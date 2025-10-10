@@ -1,17 +1,24 @@
 package org.shiroumi.database.functioncalling
 
+import f
 import org.jetbrains.exposed.v1.core.JoinType
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
+import org.jetbrains.exposed.v1.jdbc.batchUpsert
 import org.jetbrains.exposed.v1.jdbc.select
+import org.jetbrains.exposed.v1.jdbc.upsert
 import org.shiroumi.database.stockDb
 import org.shiroumi.database.table.AdjCandleTable
+import org.shiroumi.database.table.AdjFactorTable
 import org.shiroumi.database.table.DailyCandleTable
 import org.shiroumi.database.table.StockTable
+import org.shiroumi.database.table.Strategy
+import org.shiroumi.database.table.StrategyTable
 import org.shiroumi.database.transaction
 import java.lang.Float.max
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.util.UUID
 import kotlin.math.abs
 
 data class JoinedCandles(
@@ -87,9 +94,9 @@ fun getJoinedCandles(tsCode: String, limit: Int, endDate: String = today): Joine
                 val ibs = ((close - low) / (high - low)) * 100
                 Candle(date, open, close, low, high, vol, ibs)
             }.toList().asReversed().distinctBy { it.date }
-        rows.calculateAtr()
         rows.calculateEma20()
-        rows.subList(rows.lastIndex - 30, rows.lastIndex)
+        rows.calculateAtr()
+        return@transaction rows.subList(rows.lastIndex - 30, rows.lastIndex + 1)
     }
     return JoinedCandles(tsCode = tsCode, name = name, res = res)
 }
@@ -162,3 +169,24 @@ private fun List<Candle>.calculateTr(i: Int): Float {
     return max(tr1, max(tr2, tr3))
 }
 
+
+fun upsertStrategy(tsCode: String, name: String, tradeDate: String, res: String) {
+    stockDb.transaction(StrategyTable, log = true) {
+        StrategyTable.upsert { s ->
+            s[StrategyTable.tsCode] = tsCode
+            s[StrategyTable.name] = name
+            s[StrategyTable.tradeDate] = tradeDate
+            s[StrategyTable.strategy] = res
+        }
+    }
+}
+
+fun fetchDoneTasks(): List<List<String>> = stockDb.transaction {
+    Strategy.all().map { s ->
+        listOf("${s.id}", s.tsCode, s.tradeDate, s.name, "done")
+    }
+}
+
+fun fetchDoneTask(uuid: String): String = stockDb.transaction {
+    Strategy.findById(UUID.fromString(uuid))?.strategy ?: ""
+}

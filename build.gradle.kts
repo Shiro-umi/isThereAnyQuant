@@ -1,38 +1,12 @@
 plugins {
-    alias(libs.plugins.kotlin.jvm)
-}
-
-group = "org.shiroumi"
-version = "1.0-SNAPSHOT"
-
-repositories {
-    mavenCentral()
-}
-
-buildscript {
-    dependencies {
-        classpath(kotlin("gradle-plugin", version = "2.2.0-Beta2"))
-    }
-}
-
-kotlin {
-    jvmToolchain(17)
-}
-
-tasks.withType<Jar> {
-    // Otherwise you'll get a "No main manifest attribute" error
-    manifest {
-        attributes["Main-Class"] = "org.shiroumi.server.MainKt"
-    }
-
-    // To avoid the duplicate handling strategy error
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-
-    // To add all the dependencies
-    from(sourceSets.main.get().output)
-
-    dependsOn(configurations.runtimeClasspath)
-    from({
-        configurations.runtimeClasspath.get().filter { it.name.endsWith("jar") }.map { zipTree(it) }
-    })
+    // this is necessary to avoid the plugins to be loaded multiple times
+    // in each subproject's classloader
+    alias(libs.plugins.androidApplication) apply false
+    alias(libs.plugins.androidLibrary) apply false
+    alias(libs.plugins.composeHotReload) apply false
+    alias(libs.plugins.composeMultiplatform) apply false
+    alias(libs.plugins.composeCompiler) apply false
+    alias(libs.plugins.kotlin.jvm) apply false
+    alias(libs.plugins.kotlinMultiplatform) apply false
+    alias(libs.plugins.ktorfit)
 }

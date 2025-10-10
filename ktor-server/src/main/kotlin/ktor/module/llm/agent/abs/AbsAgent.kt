@@ -2,12 +2,15 @@ package ktor.module.llm.agent.abs
 
 import Logger
 import ktor.module.llm.Model
+import okhttp3.ResponseBody
 import org.shiroumi.network.ApiDelegate
 import org.shiroumi.network.apis.ChatCompletion
 import org.shiroumi.network.apis.LLMApi
 import org.shiroumi.network.apis.Message
 import org.shiroumi.network.apis.chat
+import org.shiroumi.network.apis.chatStream
 import org.shiroumi.server.rootDir
+import retrofit2.Call
 import java.io.File
 
 abstract class Agent<T : LLMApi>(api: ApiDelegate<T>) {
@@ -23,8 +26,11 @@ abstract class Agent<T : LLMApi>(api: ApiDelegate<T>) {
     val history: History by lazy { History(prompts.sys) }
 
     suspend fun chat(msg: Message? = null): ChatCompletion {
+        logger.warning("completion started.")
+        val start = System.currentTimeMillis()
         msg?.let { m -> history.remember(m) }
-        return caller.chat(
+
+        val res = caller.chat(
             model = model.m,
             messages = history.content,
             tools = model.tools,
@@ -34,8 +40,31 @@ abstract class Agent<T : LLMApi>(api: ApiDelegate<T>) {
             jsonMode = model.jsonMode,
             enableThinking = model.enableThinking,
             thinkingBudget = model.thinkingBudget,
-            maxTokens = model.maxTokens
+            maxTokens = model.maxTokens,
         )
+        logger.warning("completion end. cost: ${(System.currentTimeMillis() - start) / 1000f}s")
+        return res
+    }
+
+    suspend fun chatStream(msg: Message? = null): ResponseBody {
+        logger.warning("stream completion started.")
+        val start = System.currentTimeMillis()
+        msg?.let { m -> history.remember(m) }
+
+        val res = caller.chatStream(
+            model = model.m,
+            messages = history.content,
+            tools = model.tools,
+            temperature = model.temperature,
+            topP = model.topP,
+            topK = model.topK,
+            jsonMode = model.jsonMode,
+            enableThinking = model.enableThinking,
+            thinkingBudget = model.thinkingBudget,
+            maxTokens = model.maxTokens,
+        )
+        logger.warning("stream completion end. cost: ${(System.currentTimeMillis() - start) / 1000f}s")
+        return res
     }
 
     data class Prompts(
