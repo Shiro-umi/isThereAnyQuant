@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalSerializationApi::class)
+@file:OptIn(ExperimentalSerializationApi::class, ExperimentalUuidApi::class)
 
 package org.shiroumi.quant_kmp.ui.task_page
 
@@ -7,7 +7,6 @@ import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,12 +28,13 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNamingStrategy
-import org.shiroumi.quant_kmp.BuildConfigs
+import model.Quant
+import org.shiroumi.configs.BuildConfigs
 import org.shiroumi.quant_kmp.createHttpClient
 import org.shiroumi.quant_kmp.model.StrategyModel
-import org.shiroumi.quant_kmp.model.TaskModel
 import org.shiroumi.quant_kmp.showToast
 import org.shiroumi.quant_kmp.ui.theme.ArrowBack
+import kotlin.uuid.ExperimentalUuidApi
 
 @ExperimentalSerializationApi
 private val json = Json {
@@ -47,7 +47,7 @@ private val json = Json {
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun SharedTransitionScope.StrategyPage(
-    task: TaskModel,
+    quant: Quant,
     scope: AnimatedContentScope,
     onBackPressed: () -> Unit
 ) = Box(modifier = Modifier.fillMaxSize()) {
@@ -84,10 +84,10 @@ fun SharedTransitionScope.StrategyPage(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    text = "${task.name}(${task.code})",
+                    text = "${quant.name}(${quant.code})",
                     fontSize = 28.sp,
                     modifier = Modifier.sharedBounds(
-                        sharedContentState = rememberSharedContentState(task.code + task.name),
+                        sharedContentState = rememberSharedContentState(quant.uuid),
                         animatedVisibilityScope = scope
                     )
                 )
@@ -101,17 +101,19 @@ fun SharedTransitionScope.StrategyPage(
 
         strategy?.let { s ->
             item { OverviewItem(modifier = Modifier.width(640.dp), s.baseInfo, s.summarise) }
-            item { CandleImg(modifier = Modifier.width(640.dp), task = task) }
-            item {
-                Row(
-                    modifier = Modifier.width(640.dp).wrapContentHeight(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    AreaItem(modifier = Modifier.weight(1f), area = s.keyPaSignal.area)
-                    CyclesItems(modifier = Modifier.weight(1f), cycle = s.keyPaSignal.overview)
+            item { CandleImg(modifier = Modifier.width(640.dp), quant = quant) }
+            s.keyPaSignal?.let { signal ->
+                item {
+                    Row(
+                        modifier = Modifier.width(640.dp).wrapContentHeight(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        AreaItem(modifier = Modifier.weight(1f), area = signal.area)
+                        CyclesItems(modifier = Modifier.weight(1f), cycle = signal.overview)
+                    }
                 }
+                item { SignalCandleItem(modifier = Modifier.width(640.dp), signal = signal.signal) }
             }
-            item { SignalCandleItem(modifier = Modifier.width(640.dp), signal = s.keyPaSignal.signal) }
             if (s.tradeStrategy.strategy.isNotEmpty()) {
                 item { NamedDivider(modifier = Modifier.width(640.dp), name = "交易策略") }
                 item {
@@ -151,13 +153,13 @@ fun SharedTransitionScope.StrategyPage(
         }
     }
 
-    DisposableEffect(task) {
+    DisposableEffect(quant) {
         val client = createHttpClient()
         coroutineScope.launch(ioDispatcher() + CoroutineExceptionHandler { _, t ->
             t.printStackTrace()
             coroutineScope.launch { showToast("fetch strategy failed.") }
         }) {
-            val raw = client.get("/strategy?uuid=${task.id}").bodyAsText()
+            val raw = client.get("/strategy?uuid=${quant.uuid}").bodyAsText()
             strategy = json.decodeFromString<StrategyModel>(raw)
         }
         onDispose {
@@ -167,12 +169,12 @@ fun SharedTransitionScope.StrategyPage(
 
 
 @Composable
-fun CandleImg(modifier: Modifier, task: TaskModel) = Box(modifier = modifier.aspectRatio(2f)) {
+fun CandleImg(modifier: Modifier, quant: Quant) = Box(modifier = modifier.aspectRatio(2f)) {
     val color = MaterialTheme.colorScheme.surface.toArgb().toHexString()
     val primary = MaterialTheme.colorScheme.primary.toArgb().toHexString()
     val secondary = MaterialTheme.colorScheme.secondary.toArgb().toHexString()
     val url by remember {
-        mutableStateOf(URL("${BuildConfigs.BASE_URL}:${BuildConfigs.PORT}/candleImg?ts_code=${task.code}&bg_color=$color&primary=$primary&secondary=$secondary&date=${task.date}"))
+        mutableStateOf(URL("${BuildConfigs.BASE_URL}:${BuildConfigs.PORT}/candleImg?ts_code=${quant.code}&bg_color=$color&primary=$primary&secondary=$secondary&date=${quant.targetDate}"))
     }
 
     val painter = asyncPainterResource(data = url) painter@{

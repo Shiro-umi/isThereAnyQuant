@@ -1,11 +1,7 @@
 @file:OptIn(ExperimentalWasmDsl::class)
 
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
-import org.jetbrains.kotlin.gradle.dsl.JsSourceMapEmbedMode
-import java.util.Properties
-import kotlin.apply
-import kotlin.collections.component1
-import kotlin.collections.component2
+import java.util.*
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
@@ -28,6 +24,7 @@ kotlin {
         val commonMain by getting {
             kotlin.srcDir(layout.buildDirectory.dir("generated/sources/kotlin/main"))
             dependencies {
+                implementation(project(":shared"))
                 implementation(libs.ktor.client.core)
                 implementation(libs.ktor.client.content.negotiation)
                 implementation(libs.ktor.serialization.kotlinx.json)
@@ -38,7 +35,7 @@ kotlin {
                 implementation(compose.components.resources)
                 implementation(compose.components.uiToolingPreview)
                 implementation(compose.material3AdaptiveNavigationSuite)
-//            implementation(compose.materialIconsExtended)
+//                implementation(compose.materialIconsExtended)
                 implementation(libs.androidx.lifecycle.viewmodelCompose)
                 implementation(libs.androidx.lifecycle.runtimeCompose)
                 implementation("media.kamel:kamel-core:1.0.8")
@@ -48,6 +45,7 @@ kotlin {
                 implementation("media.kamel:kamel-decoder-image-bitmap:1.0.8")
                 implementation("com.squareup.okio:okio:3.17.0-SNAPSHOT")
                 implementation("com.squareup.okio:okio-fakefilesystem:3.17.0-SNAPSHOT")
+
             }
         }
         jsMain.dependencies {

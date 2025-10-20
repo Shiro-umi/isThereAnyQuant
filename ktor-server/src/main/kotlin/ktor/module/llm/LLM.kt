@@ -31,6 +31,28 @@ sealed class SiliconFlowModel(
         maxTokens = 163839,
         jsonMode = false
     )
+
+    data object DeepSeekV3Exp: SiliconFlowModel(
+        m = "deepseek-ai/DeepSeek-V3.2-Exp",
+        temperature = .35f,
+        topP = 0.9f,
+        topK = 30,
+        enableThinking = true,
+        thinkingBudget = 163839,
+        maxTokens = 163839,
+        jsonMode = false
+    )
+
+    data object Qwen330BThinking2507 : SiliconFlowModel(
+        m = "Qwen/Qwen3-30B-A3B-Thinking-2507",
+        temperature = 0.6f,
+        topP = 0.6f,
+        topK = 20,
+        enableThinking = false,
+        thinkingBudget = 131072,
+        maxTokens = 131072,
+        jsonMode = true
+    )
 }
 
 open class Model(

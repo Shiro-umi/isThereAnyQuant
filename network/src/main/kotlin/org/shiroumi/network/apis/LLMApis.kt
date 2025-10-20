@@ -1,11 +1,8 @@
 package org.shiroumi.network.apis
 
-import kotlinx.coroutines.CoroutineExceptionHandler
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
-import kotlinx.serialization.json.put
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -13,7 +10,6 @@ import okhttp3.ResponseBody
 import org.shiroumi.configs.BuildConfigs
 import org.shiroumi.network.deepseek
 import org.shiroumi.network.siliconFlow
-import retrofit2.Call
 import retrofit2.http.Body
 import retrofit2.http.Headers
 import retrofit2.http.POST

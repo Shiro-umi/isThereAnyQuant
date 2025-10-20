@@ -1,3 +1,5 @@
+package utils
+
 import kotlin.reflect.KProperty
 
 const val RED = "\u001B[31m"

@@ -1,6 +1,5 @@
 package ktor.module.llm.agent.abs
 
-import Logger
 import ktor.module.llm.Model
 import okhttp3.ResponseBody
 import org.shiroumi.network.ApiDelegate
@@ -10,7 +9,7 @@ import org.shiroumi.network.apis.Message
 import org.shiroumi.network.apis.chat
 import org.shiroumi.network.apis.chatStream
 import org.shiroumi.server.rootDir
-import retrofit2.Call
+import utils.Logger
 import java.io.File
 
 abstract class Agent<T : LLMApi>(api: ApiDelegate<T>) {

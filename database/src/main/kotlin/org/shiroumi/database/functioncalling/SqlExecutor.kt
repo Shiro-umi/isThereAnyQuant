@@ -1,24 +1,17 @@
 package org.shiroumi.database.functioncalling
 
-import f
 import org.jetbrains.exposed.v1.core.JoinType
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
-import org.jetbrains.exposed.v1.jdbc.batchUpsert
 import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.upsert
 import org.shiroumi.database.stockDb
-import org.shiroumi.database.table.AdjCandleTable
-import org.shiroumi.database.table.AdjFactorTable
-import org.shiroumi.database.table.DailyCandleTable
-import org.shiroumi.database.table.StockTable
-import org.shiroumi.database.table.Strategy
-import org.shiroumi.database.table.StrategyTable
+import org.shiroumi.database.table.*
 import org.shiroumi.database.transaction
 import java.lang.Float.max
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
-import java.util.UUID
+import java.util.*
 import kotlin.math.abs
 
 data class JoinedCandles(
@@ -79,7 +72,7 @@ fun getJoinedCandles(tsCode: String, limit: Int, endDate: String = today): Joine
             AdjCandleTable.volFq,
         )
             .where {
-                (DailyCandleTable.tsCode eq tsCode) and (DailyCandleTable.tradeDate eq AdjCandleTable.tradeDate) and (DailyCandleTable.tsCode eq StockTable.tsCode) and (DailyCandleTable.tradeDate less endDate)
+                (DailyCandleTable.tsCode eq tsCode) and (DailyCandleTable.tradeDate eq AdjCandleTable.tradeDate) and (DailyCandleTable.tsCode eq StockTable.tsCode) and (DailyCandleTable.tradeDate lessEq endDate)
             }
             .orderBy(DailyCandleTable.tradeDate, SortOrder.DESC)
             .limit(limit)
@@ -170,12 +163,13 @@ private fun List<Candle>.calculateTr(i: Int): Float {
 }
 
 
-fun upsertStrategy(tsCode: String, name: String, tradeDate: String, res: String) {
+fun upsertStrategy(tsCode: String, name: String, tradeDate: String, startTime: Long, res: String) {
     stockDb.transaction(StrategyTable, log = true) {
         StrategyTable.upsert { s ->
             s[StrategyTable.tsCode] = tsCode
             s[StrategyTable.name] = name
             s[StrategyTable.tradeDate] = tradeDate
+            s[StrategyTable.startTime] = startTime
             s[StrategyTable.strategy] = res
         }
     }
@@ -183,7 +177,7 @@ fun upsertStrategy(tsCode: String, name: String, tradeDate: String, res: String)
 
 fun fetchDoneTasks(): List<List<String>> = stockDb.transaction {
     Strategy.all().map { s ->
-        listOf("${s.id}", s.tsCode, s.tradeDate, s.name, "done")
+        listOf("${s.id}", s.tsCode, s.tradeDate, s.startTime.toString(), s.name, "Done")
     }
 }
 

@@ -12,7 +12,7 @@ repositories {
 
 dependencies {
     implementation(project("backtesting"))
-    implementation(project(":global"))
+    implementation(project(":shared"))
     implementation(project("schedule"))
     implementation(libs.kotlin.coroutines.core)
     implementation(libs.kotlin.serialization.json)

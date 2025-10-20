@@ -3,10 +3,9 @@ package ktor.module.llm.agent
 import ktor.module.llm.Model
 import ktor.module.llm.SiliconFlowModel
 import ktor.module.llm.agent.abs.Agent
-import ktor.module.llm.getJoinedCandles
-import logger
 import org.shiroumi.network.apis.LLMApi
 import org.shiroumi.network.siliconFlow
+import utils.logger
 
 class StreamTestAgent() : Agent<LLMApi>(siliconFlow()) {
 

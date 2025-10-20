@@ -2,16 +2,15 @@ package ktor.module.llm.agent
 
 import ktor.module.llm.Model
 import ktor.module.llm.SiliconFlowModel
-import ktor.module.llm.agent.abs.Agent
-import ktor.module.llm.getJoinedCandles
-import logger
-import org.shiroumi.network.apis.LLMApi
-import org.shiroumi.network.siliconFlow
+import ktor.module.llm.agent.abs.AbsCandleAgent
 import org.shiroumi.server.today
+import utils.logger
 
-class OverviewAgent() : Agent<LLMApi>(siliconFlow()) {
+class OverviewAgent() : AbsCandleAgent() {
 
     override val logger by logger("OverviewAgent")
+
+    override val suffixMsgs: List<String> = listOf("今天的日期是$today")
 
     override val prompts: Prompts by lazy {
         Prompts(
@@ -20,8 +19,5 @@ class OverviewAgent() : Agent<LLMApi>(siliconFlow()) {
         )
     }
 
-    override val model: Model = SiliconFlowModel.DeepSeekV3Terminus
-
-    suspend fun chat(tsCode: String) =
-        chat(msg = Role.User provides "${prompts.usr}\n${getJoinedCandles(tsCode = tsCode)}\n今天的日期是$today")
+    override val model: Model = SiliconFlowModel.DeepSeekV3Exp
 }

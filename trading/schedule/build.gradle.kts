@@ -15,7 +15,7 @@ sourceSets.main {
 }
 
 dependencies {
-    implementation(project(":global"))
+    implementation(project(":shared"))
     implementation(project(":database"))
     implementation(libs.kotlin.coroutines.core)
     api(libs.jdbc)

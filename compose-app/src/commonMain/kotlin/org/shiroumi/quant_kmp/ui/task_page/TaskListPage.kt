@@ -1,11 +1,18 @@
+@file:OptIn(ExperimentalUuidApi::class)
+
 package org.shiroumi.quant_kmp.ui.task_page
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentScope
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.*
@@ -20,20 +27,19 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import io.ktor.client.request.*
-import io.ktor.client.statement.*
 import io.ktor.utils.io.*
 import kotlinx.coroutines.CoroutineExceptionHandler
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
-import org.shiroumi.quant_kmp.connectSocket
-import org.shiroumi.quant_kmp.createHttpClient
-import org.shiroumi.quant_kmp.model.CycleOverview
-import org.shiroumi.quant_kmp.model.CycleOverviewItem
-import org.shiroumi.quant_kmp.model.TaskModel
+import model.Quant
+import model.Status
+import model.TaskList
+import model.format
+import org.shiroumi.quant_kmp.SocketClient
 import org.shiroumi.quant_kmp.showToast
+import org.shiroumi.quant_kmp.ui.theme.Search
+import org.shiroumi.quant_kmp.ui.theme.emptyMutableInteractionSource
+import kotlin.uuid.ExperimentalUuidApi
 
 private val json = Json { ignoreUnknownKeys = true }
 
@@ -41,12 +47,18 @@ private val json = Json { ignoreUnknownKeys = true }
 @Composable
 fun SharedTransitionScope.TaskListPage(
     scope: AnimatedContentScope,
-    onItemSelect: (task: TaskModel) -> Unit
+    onItemSelect: (quant: Quant) -> Unit
 ) = Box(modifier = Modifier.fillMaxSize()) {
     val coroutineScope = rememberCoroutineScope { ioDispatcher() }
-    var pendingList by remember { mutableStateOf(SnapshotStateList<TaskModel>()) }
-    var runningList by remember { mutableStateOf(SnapshotStateList<TaskModel>()) }
-    var doneList by remember { mutableStateOf(SnapshotStateList<TaskModel>()) }
+    var filter by remember { mutableStateOf("") }
+    var showFilter by remember { mutableStateOf(false) }
+    var pendingList by remember { mutableStateOf(SnapshotStateList<Quant>()) }
+    var runningList by remember { mutableStateOf(SnapshotStateList<Quant>()) }
+    var doneList by remember { mutableStateOf(SnapshotStateList<Quant>()) }
+
+    val filterPending by remember { derivedStateOf { pendingList.filter { filter in it.name || filter in it.code } } }
+    val filterRunning by remember { derivedStateOf { runningList.filter { filter in it.name || filter in it.code } } }
+    val filterDone by remember { derivedStateOf { doneList.filter { filter in it.name || filter in it.code } } }
 
     Column(
         modifier = Modifier.width(720.dp)
@@ -55,7 +67,7 @@ fun SharedTransitionScope.TaskListPage(
             .align(Alignment.Center)
     ) {
 
-        Box(modifier = Modifier.wrapContentSize().padding(0.dp, 64.dp, 0.dp, 0.dp)) {
+        Box(modifier = Modifier.fillMaxWidth().wrapContentHeight().padding(0.dp, 48.dp, 0.dp, 0.dp)) {
             Text(text = "Task List", fontSize = 48.sp)
         }
 
@@ -63,7 +75,7 @@ fun SharedTransitionScope.TaskListPage(
             contentPadding = PaddingValues(0.dp, 64.dp, 0.dp, 64.dp)
         ) {
 
-            if (runningList.isNotEmpty()) stickyHeader {
+            if (filterRunning.isNotEmpty()) stickyHeader {
                 Box(modifier = Modifier.fillMaxWidth().height(64.dp).background(MaterialTheme.colorScheme.surface)) {
                     Text(
                         "Running Tasks",
@@ -73,11 +85,11 @@ fun SharedTransitionScope.TaskListPage(
                 }
             }
 
-            items(runningList) { item ->
+            items(filterRunning, { item -> item.uuid }) { item ->
                 TaskItem(item, scope, onItemSelect)
             }
 
-            if (pendingList.isNotEmpty()) stickyHeader {
+            if (filterPending.isNotEmpty()) stickyHeader {
                 Box(modifier = Modifier.fillMaxWidth().height(64.dp).background(MaterialTheme.colorScheme.surface)) {
                     Text(
                         "Pending Tasks",
@@ -87,11 +99,11 @@ fun SharedTransitionScope.TaskListPage(
                 }
             }
 
-            items(pendingList) { item ->
+            items(filterPending, { item -> item.uuid }) { item ->
                 TaskItem(item, scope, onItemSelect)
             }
 
-            if (doneList.isNotEmpty()) stickyHeader {
+            if (filterDone.isNotEmpty()) stickyHeader {
                 Box(modifier = Modifier.fillMaxWidth().height(64.dp).background(MaterialTheme.colorScheme.surface)) {
                     Text(
                         "Done Tasks",
@@ -101,40 +113,103 @@ fun SharedTransitionScope.TaskListPage(
                 }
             }
 
-            items(doneList) { item ->
+            items(filterDone, { item -> item.uuid }) { item ->
                 TaskItem(item, scope, onItemSelect)
             }
         }
     }
 
-    DisposableEffect(Unit) {
-        val client = createHttpClient()
-        coroutineScope.launch(CoroutineExceptionHandler { _, t ->
-            coroutineScope.launch { showToast("Fetch task list failed.") }
-            t.printStackTrace()
-            client.close()
-        }) {
-            client.connectSocket { res ->
-                val running = SnapshotStateList<TaskModel>()
-                val pending = SnapshotStateList<TaskModel>()
-                val done = SnapshotStateList<TaskModel>()
-                json.decodeFromString<List<TaskModel>>(res).forEach { item ->
-                    when (item.status) {
-                        "Running" -> running.add(item)
-                        "Pending" -> pending.add(item)
-                        else -> done.add(item)
+    AnimatedVisibility(visible = showFilter, enter = fadeIn(), exit = fadeOut()) {
+        Box(
+            modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)
+                .clickable(interactionSource = emptyMutableInteractionSource) {
+                    filter = ""
+                    showFilter = false
+                })
+    }
+
+    AnimatedContent(
+        targetState = showFilter,
+        modifier = Modifier.width(640.dp).align(Alignment.BottomCenter),
+    ) s@{ show ->
+        var tmpFilter by remember { mutableStateOf("") }
+        if (show) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                OutlinedTextField(
+                    value = tmpFilter,
+                    onValueChange = { t -> tmpFilter = t },
+                    label = { Text("过滤任务") },
+                    suffix = {
+                        IconButton(onClick = {
+                            filter = tmpFilter
+                            tmpFilter = ""
+                            showFilter = false
+                        }, modifier = Modifier.align(Alignment.CenterEnd).offset((-2).dp).padding(0.dp)) {
+                            Icon(
+                                Search,
+                                "搜索",
+                                modifier = Modifier.padding(0.dp)
+                            )
+                        }
+                    },
+                    singleLine = true,
+                    modifier = Modifier.width(480.dp).wrapContentHeight().align(Alignment.Center).sharedElement(
+                        sharedContentState = rememberSharedContentState("fab"),
+                        animatedVisibilityScope = this@s
+                    ),
+                    shape = RoundedCornerShape(40.dp)
+                )
+            }
+        } else {
+            Box(modifier = Modifier.fillMaxSize().align(Alignment.BottomCenter)) {
+                if (filter.isBlank()) {
+                    FloatingActionButton(
+                        onClick = { showFilter = true },
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(32.dp).sharedElement(
+                            sharedContentState = rememberSharedContentState("fab"),
+                            animatedVisibilityScope = this@s
+                        ),
+                        shape = remember { RoundedCornerShape(32.dp) }
+                    ) {
+                        Icon(Search, contentDescription = "搜索")
+                    }
+                } else {
+                    ExtendedFloatingActionButton(
+                        onClick = { showFilter = true },
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(32.dp).sharedElement(
+                            sharedContentState = rememberSharedContentState("fab"),
+                            animatedVisibilityScope = this@s
+                        ),
+                        shape = remember { RoundedCornerShape(32.dp) }
+                    ) {
+                        Icon(Search, contentDescription = "搜索")
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(filter)
                     }
                 }
-                running.sortByDescending { it.date }
-                runningList = running
-                pending.sortByDescending { it.date }
-                pendingList = pending
-                done.sortByDescending { it.date }
-                doneList = done
+            }
+        }
+    }
+
+
+    DisposableEffect(Unit) {
+        val client = SocketClient()
+        coroutineScope.launch(CoroutineExceptionHandler { _, t ->
+            coroutineScope.launch {
+                client.close()
+                showToast("Fetch task list failed.")
+            }
+            t.printStackTrace()
+        }) {
+
+            client.open { res ->
+                val taskList = json.decodeFromString<TaskList>(res)
+                updateListWithDiff(runningList, taskList.runningList)
+                updateListWithDiff(pendingList, taskList.pendingList)
             }
         }
         onDispose {
-            client.close()
+            coroutineScope.launch { client.close() }
         }
     }
 }
@@ -142,11 +217,11 @@ fun SharedTransitionScope.TaskListPage(
 @OptIn(ExperimentalComposeUiApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
 private fun SharedTransitionScope.TaskItem(
-    task: TaskModel,
+    quant: Quant,
     scope: AnimatedContentScope,
-    onItemSelect: (task: TaskModel) -> Unit
+    onItemSelect: (quant: Quant) -> Unit
 ) {
-    val task by rememberUpdatedState(task)
+    val quant by rememberUpdatedState(quant)
     val interactionSource = remember { MutableInteractionSource() }
     val elevatedCardColor = MaterialTheme.colorScheme.surfaceColorAtElevation(8.dp)
     val surfaceColor = MaterialTheme.colorScheme.surface
@@ -159,11 +234,11 @@ private fun SharedTransitionScope.TaskItem(
         label = "cardColor"
     )
     ElevatedCard(
-        modifier = Modifier.height(64.dp).fillMaxWidth().sharedBounds(
-            sharedContentState = rememberSharedContentState(task.code + task.name + "card"),
-            animatedVisibilityScope = scope
-        ),
-        onClick = { onItemSelect(task) },
+        modifier = Modifier.height(64.dp).fillMaxWidth(),
+        onClick = click@{
+            if (quant.status !is Status.Done) return@click
+            onItemSelect(quant)
+        },
         interactionSource = interactionSource,
         elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp, hoveredElevation = cardElevation),
         colors = CardDefaults.elevatedCardColors(
@@ -181,48 +256,70 @@ private fun SharedTransitionScope.TaskItem(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 OutlinedCard(
-                    modifier = Modifier.wrapContentSize().sharedBounds(
-                        sharedContentState = rememberSharedContentState(task.code + task.name),
-                        animatedVisibilityScope = scope
-                    ),
+                    modifier = Modifier.wrapContentSize(),
                 ) {
                     Text(
-                        text = task.code,
+                        text = quant.code,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.padding(14.dp, 6.dp, 14.dp, 6.dp)
                     )
                 }
-                Box(modifier = Modifier.fillMaxHeight().padding(12.dp, 0.dp, 0.dp, 0.dp)) {
-                    Text(task.name, modifier = Modifier.align(Alignment.CenterStart))
+                Box(
+                    modifier = Modifier.fillMaxHeight().sharedBounds(
+                        sharedContentState = rememberSharedContentState(quant.uuid),
+                        animatedVisibilityScope = scope
+                    ).padding(12.dp, 0.dp, 0.dp, 0.dp)
+                ) {
+                    Text(quant.name, modifier = Modifier.align(Alignment.CenterStart))
                 }
 
                 Box(modifier = Modifier.fillMaxHeight().padding(12.dp, 0.dp, 0.dp, 0.dp)) {
-                    Text(task.date, modifier = Modifier.align(Alignment.CenterStart))
+                    Text(quant.triggerTime.format(), modifier = Modifier.align(Alignment.CenterStart), fontSize = 12.sp)
                 }
 
                 Box(modifier = Modifier.weight(1f))
 
-                if (task.status == "Running") {
+                if (quant.status is Status.Running) {
                     Box(modifier = Modifier.size(32.dp)) {
                         Ring(
                             modifier = Modifier.align(Alignment.Center),
-                            progress = task.progress.percentage,
+                            progress = quant.progress.progress,
                             strokeWidth = 2.dp,
                             showNum = false
                         )
                     }
                     Box(modifier = Modifier.fillMaxHeight().padding(0.dp, 0.dp, 12.dp, 0.dp)) {
                         Text(
-                            "${task.status} Step ${task.progress.step}/${task.progress.totalStep}",
+                            "${quant.status::class.simpleName} Step ${quant.progress.step}/${quant.progress.totalStep}",
                             modifier = Modifier.align(Alignment.CenterEnd)
                         )
                     }
                 } else {
                     Box(modifier = Modifier.fillMaxHeight().padding(0.dp, 0.dp, 12.dp, 0.dp)) {
-                        Text(task.status, modifier = Modifier.align(Alignment.CenterEnd))
+                        Text("${quant.status::class.simpleName}", modifier = Modifier.align(Alignment.CenterEnd))
                     }
                 }
             }
         }
+    }
+}
+
+private fun updateListWithDiff(
+    currentList: SnapshotStateList<Quant>,
+    newList: List<Quant>
+) {
+    val newMap = newList.associateBy { it.uuid }
+    val oldMap = currentList.associateBy { it.uuid }
+    val toRemove = oldMap.keys - newMap.keys
+    if (toRemove.isNotEmpty()) {
+        currentList.removeAll { it.uuid in toRemove }
+    }
+    newList.forEachIndexed { index, newTask ->
+        val oldTask = oldMap[newTask.uuid]
+        oldTask?.let { old ->
+            if (old.uuid == newTask.uuid) return@let
+            val oldIndex = currentList.indexOfFirst { it.uuid == oldTask.uuid }
+            if (oldIndex != -1) currentList[oldIndex] = newTask
+        } ?: currentList.add(index, newTask)
     }
 }

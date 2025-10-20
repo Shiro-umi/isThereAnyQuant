@@ -5,79 +5,113 @@ import io.ktor.client.*
 import io.ktor.client.plugins.websocket.*
 import io.ktor.http.*
 import io.ktor.websocket.*
+import io.ktor.websocket.close
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import org.shiroumi.configs.BuildConfigs
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 
 // 期望一个函数，它能返回一个配置好的 HttpClient
 expect fun createHttpClient(): HttpClient
 
-suspend fun HttpClient.connectSocket(onReceiveText: (text: String) -> Unit) {
-//    val client = createHttpClient()
-    println("Connecting to WebSocket server...")
 
-    // 2. 使用 webSocket 块建立连接
-    webSocket(
-        method = HttpMethod.Get,
-        host = BuildConfigs.BASE_URL,
-        port = BuildConfigs.PORT.toInt(),
-        path = "/tasks"
-    ) {
-        // 'this' 是一个 DefaultClientWebSocketSession 对象
+class SocketClient {
+
+    private val client: HttpClient by lazy {
+        createHttpClient()
+    }
+
+    private var session: WebSocketSession? = null
+
+    suspend fun open(onConnected: () -> Unit = {}, onReceiveText: (text: String) -> Unit) {
+        val session = client.webSocketSession(
+            method = HttpMethod.Get,
+            host = BuildConfigs.BASE_URL.replace("http://", ""),
+            port = BuildConfigs.PORT.toInt(),
+            path = "/tasks",
+        )
+        this.session = session
+        onConnected()
         println("Connection established! Ready to communicate.")
-
-        // 3. 发送消息给服务器
-        // 例如，在连接成功后发送一条身份验证或初始化消息
         val initialMessage = "Hello from Ktor Client!"
-        send(Frame.Text(initialMessage))
+        session.send(Frame.Text(initialMessage))
         println("Sent: '$initialMessage'")
 
-        // 4. 持续接收来自服务器的消息
-        // incoming 是一个 ReceiveChannel<Frame>
-        // for-loop 会挂起，直到有新消息或连接关闭
-        for (frame in incoming) {
+        for (frame in session.incoming) {
             when (frame) {
                 is Frame.Text -> {
                     val receivedText = frame.readText()
                     println("Received: '$receivedText'")
                     onReceiveText(receivedText)
-                    // 在这里处理收到的文本消息
-                    // 例如，如果服务器说 "close", 我们就主动断开
                     if (receivedText.equals("close", ignoreCase = true)) {
-                        close(CloseReason(CloseReason.Codes.NORMAL, "Client requested close"))
+                        session.close(CloseReason(CloseReason.Codes.NORMAL, "Client requested close"))
                         println("Closing connection...")
                     }
                 }
+
                 is Frame.Binary -> println("Received binary data: ${frame.readBytes().size} bytes")
                 is Frame.Close -> {
                     println("Server closed the connection: ${frame.readReason()}")
-                    break // 收到关闭帧后退出循环
+                    break
                 }
-                is Frame.Ping -> { /* Ktor 内部会自动处理 Pong */ }
-                is Frame.Pong -> { /* Ktor 内部会自动处理 Ping */ }
+
+                is Frame.Ping -> Unit
+                is Frame.Pong -> Unit
             }
         }
     }
 
-    println("WebSocket session finished.")
-    close() // 5. 关闭客户端，释放资源
+    suspend fun close() {
+        session?.close(CloseReason(CloseReason.Codes.NORMAL, "Client requested close"))
+        session = null
+    }
+
 }
 
-//object Network {
+//suspend fun HttpClient.connectSocket(
+//    onReceiveText: (text: String) -> Unit,
+//) {
+//    println("Connecting to WebSocket server...")
+//    webSocket(
+//        method = HttpMethod.Get,
+//        host = BuildConfigs.BASE_URL.replace("http://", ""),
+//        port = BuildConfigs.PORT.toInt(),
+//        path = "/tasks"
+//    ) {
+//        println("Connection established! Ready to communicate.")
+//        val initialMessage = "Hello from Ktor Client!"
+//        send(Frame.Text(initialMessage))
+//        println("Sent: '$initialMessage'")
 //
-//    private val ktorfit: Ktorfit by lazy {
-//        val ktorClient = createHttpClient()
+//        for (frame in incoming) {
+//            when (frame) {
+//                is Frame.Text -> {
+//                    val receivedText = frame.readText()
+//                    println("Received: '$receivedText'")
+//                    onReceiveText(receivedText)
+//                    if (receivedText.equals("close", ignoreCase = true)) {
+//                        close(CloseReason(CloseReason.Codes.NORMAL, "Client requested close"))
+//                        println("Closing connection...")
+//                    }
+//                }
 //
-//        Ktorfit.Builder()
-//            .baseUrl("https://127.0.0.1:9870/")
-//            .httpClient(ktorClient)
-//            .build()
+//                is Frame.Binary -> println("Received binary data: ${frame.readBytes().size} bytes")
+//                is Frame.Close -> {
+//                    println("Server closed the connection: ${frame.readReason()}")
+//                    break
+//                }
+//
+//                is Frame.Ping -> Unit
+//                is Frame.Pong -> Unit
+//            }
+//        }
 //    }
 //
-//    val apiService: ApiService by lazy {
-//        ktorfit.create<ApiService>()
-//    }
-//}
-//interface ApiService {
-////    suspend fun getPosts(): List<Post>
-//
-//    @GET("/tasks/submit")
-//    suspend fun submitTask(@Query("ts_code") tsCode: String): String
+//    println("WebSocket session finished.")
+//    close()
 //}

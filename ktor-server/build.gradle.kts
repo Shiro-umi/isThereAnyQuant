@@ -35,7 +35,8 @@ repositories {
 dependencies {
     implementation(project(":network"))
     implementation(project(":database"))
-    api(project(":global"))
+    implementation(project(":shared"))
+    api(project(":shared"))
 //    implementation(project(":trading"))
     implementation(kotlin("stdlib"))
     implementation(kotlin("reflect"))

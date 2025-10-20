@@ -12,7 +12,7 @@ repositories {
 
 dependencies {
     implementation(project(":ksp"))
-    implementation(project(":global"))
+    implementation(project(":shared"))
     implementation(project(":network"))
 
     implementation(libs.jetbrains.exposed.core)
@@ -20,7 +20,7 @@ dependencies {
     implementation(libs.jetbrains.exposed.jdbc)
     implementation(libs.h2)
     ksp(project(":ksp"))
-    ksp(project(":global"))
+    ksp(project(":shared"))
     api(libs.jdbc)
     api(libs.kotlin.datetime)
     api(libs.retrofit)

@@ -32,7 +32,7 @@ fun AreaItem(modifier: Modifier, area: Area) = CardItem(
         OutlinedCard(colors = CardDefaults.elevatedCardColors(colorProvider())) {
             Row(modifier = Modifier.fillMaxWidth().padding(8.dp).height(48.dp)) {
                 Box(modifier = Modifier.fillMaxWidth().fillMaxHeight().weight(1f)) {
-                    Text(text = "高概率区间", fontSize = 18.sp, modifier = Modifier.align(Alignment.CenterStart))
+                    Text(text = "高概率区间", fontSize = 18.sp, modifier = Modifier.align(Alignment.Center))
                 }
                 Column(
                     modifier = Modifier.fillMaxWidth().wrapContentHeight().weight(1f),

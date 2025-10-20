@@ -16,7 +16,7 @@ sourceSets.main {
 }
 
 dependencies {
-    implementation(project(":global"))
+    implementation(project(":shared"))
     implementation(project(":database"))
 //    implementation(project(":ksp"))
 //    ksp(project(":ksp"))

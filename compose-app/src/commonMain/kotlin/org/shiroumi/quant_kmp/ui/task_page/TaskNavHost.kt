@@ -7,28 +7,28 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import org.shiroumi.quant_kmp.model.TaskModel
+import model.Quant
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun TaskNavHost() = SharedTransitionLayout {
 
-    var task: TaskModel? by remember { mutableStateOf(null) }
+    var quant: Quant? by remember { mutableStateOf(null) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         AnimatedContent(
-            targetState = task,
+            targetState = quant,
             modifier = Modifier.fillMaxSize()
         ) animate@{ selected ->
             selected?.run {
-                StrategyPage(task = selected, scope = this@animate) { task = null }
-            } ?: TaskListPage(this@animate) { newTask -> task = newTask }
+                StrategyPage(quant = selected, scope = this@animate) { quant = null }
+            } ?: TaskListPage(this@animate) { newTask -> quant = newTask }
         }
     }
 
     DisposableEffect(Unit) {
         onDispose {
-            task = null
+            quant = null
         }
     }
 }
