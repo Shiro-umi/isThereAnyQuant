@@ -163,12 +163,12 @@ private fun List<Candle>.calculateTr(i: Int): Float {
 }
 
 
-fun upsertStrategy(tsCode: String, name: String, tradeDate: String, startTime: Long, res: String) {
+fun upsertStrategy(tsCode: String, name: String, targetDate: String, startTime: Long, res: String) {
     stockDb.transaction(StrategyTable, log = true) {
         StrategyTable.upsert { s ->
             s[StrategyTable.tsCode] = tsCode
             s[StrategyTable.name] = name
-            s[StrategyTable.tradeDate] = tradeDate
+            s[StrategyTable.tradeDate] = targetDate
             s[StrategyTable.startTime] = startTime
             s[StrategyTable.strategy] = res
         }
@@ -176,8 +176,8 @@ fun upsertStrategy(tsCode: String, name: String, tradeDate: String, startTime: L
 }
 
 fun fetchDoneTasks(): List<List<String>> = stockDb.transaction {
-    Strategy.all().map { s ->
-        listOf("${s.id}", s.tsCode, s.tradeDate, s.startTime.toString(), s.name, "Done")
+    Strategy.all().sortedByDescending { it.startTime }.map { s ->
+        listOf("${s.id}", s.tsCode, s.name, s.tradeDate, s.startTime.toString())
     }
 }
 

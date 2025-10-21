@@ -5,8 +5,8 @@
         </encoder>
     </appender>
 
-    <logger name="io.ktor" level="TRACE" />
-    <logger name="io.netty" level="TRACE" />
+<!--    <logger name="io.ktor" level="TRACE" />-->
+<!--    <logger name="io.netty" level="TRACE" />-->
     <logger name="org.shiroumi" level="TRACE" />
 
     <root level="INFO">

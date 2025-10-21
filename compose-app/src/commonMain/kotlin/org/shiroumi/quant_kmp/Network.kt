@@ -46,7 +46,7 @@ class SocketClient {
             when (frame) {
                 is Frame.Text -> {
                     val receivedText = frame.readText()
-                    println("Received: '$receivedText'")
+//                    println("Received: '$receivedText'")
                     onReceiveText(receivedText)
                     if (receivedText.equals("close", ignoreCase = true)) {
                         session.close(CloseReason(CloseReason.Codes.NORMAL, "Client requested close"))
@@ -72,46 +72,3 @@ class SocketClient {
     }
 
 }
-
-//suspend fun HttpClient.connectSocket(
-//    onReceiveText: (text: String) -> Unit,
-//) {
-//    println("Connecting to WebSocket server...")
-//    webSocket(
-//        method = HttpMethod.Get,
-//        host = BuildConfigs.BASE_URL.replace("http://", ""),
-//        port = BuildConfigs.PORT.toInt(),
-//        path = "/tasks"
-//    ) {
-//        println("Connection established! Ready to communicate.")
-//        val initialMessage = "Hello from Ktor Client!"
-//        send(Frame.Text(initialMessage))
-//        println("Sent: '$initialMessage'")
-//
-//        for (frame in incoming) {
-//            when (frame) {
-//                is Frame.Text -> {
-//                    val receivedText = frame.readText()
-//                    println("Received: '$receivedText'")
-//                    onReceiveText(receivedText)
-//                    if (receivedText.equals("close", ignoreCase = true)) {
-//                        close(CloseReason(CloseReason.Codes.NORMAL, "Client requested close"))
-//                        println("Closing connection...")
-//                    }
-//                }
-//
-//                is Frame.Binary -> println("Received binary data: ${frame.readBytes().size} bytes")
-//                is Frame.Close -> {
-//                    println("Server closed the connection: ${frame.readReason()}")
-//                    break
-//                }
-//
-//                is Frame.Ping -> Unit
-//                is Frame.Pong -> Unit
-//            }
-//        }
-//    }
-//
-//    println("WebSocket session finished.")
-//    close()
-//}

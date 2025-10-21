@@ -7,12 +7,12 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import model.LLMTask
-import model.Progress
-import model.Quant
-import model.TaskList
+import model.*
+import org.shiroumi.database.functioncalling.fetchDoneTasks
+import org.shiroumi.database.functioncalling.getJoinedCandles
 import utils.logger
 import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 private const val capacity = 3
 
@@ -33,6 +33,8 @@ object QuantScheduler {
 
     private val errorQueue: ErrorQueue by lazy { ErrorQueue(supervisorScope) }
 
+    private val doneQueue: DoneQueue by lazy { DoneQueue(supervisorScope) }
+
     val quantListFlow: MutableSharedFlow<TaskList> = MutableSharedFlow()
 
     var quantList: TaskList = TaskList()
@@ -44,30 +46,32 @@ object QuantScheduler {
         supervisorScope.launch {
             pendingQueue.startQueue()
             pendingQueue.subscribeSnapshot { pendingList ->
-                logger.notify("Pending queue snapshot collect: $pendingList")
-                val sorted = pendingList.sortedByDescending { it.triggerTime }
                 mutex.withLock {
-                    quantList = quantList.copy(pendingList = sorted)
+                    quantList = quantList.copy(pendingList = pendingList)
                 }
             }
         }
         supervisorScope.launch {
             runningQueue.startQueue()
             runningQueue.subscribeSnapshot { runningList ->
-                logger.notify("Running queue snapshot collect: $runningList")
-                val sorted = runningList.sortedByDescending { it.triggerTime }
                 mutex.withLock {
-                    quantList = quantList.copy(runningList = sorted)
+                    quantList = quantList.copy(runningList = runningList)
                 }
             }
         }
         supervisorScope.launch {
             errorQueue.startQueue()
             errorQueue.subscribeSnapshot { errorList ->
-                logger.notify("Error queue snapshot collect: $errorList")
-                val sorted = errorList.sortedByDescending { it.triggerTime }
                 mutex.withLock {
-                    quantList = quantList.copy(errorList = sorted)
+                    quantList = quantList.copy(errorList = errorList)
+                }
+            }
+        }
+        supervisorScope.launch {
+            doneQueue.start()
+            doneQueue.subscribeSnapshot { doneList ->
+                mutex.withLock {
+                    quantList = quantList.copy(doneList = doneList)
                 }
             }
         }
@@ -77,8 +81,13 @@ object QuantScheduler {
             }
         }
         supervisorScope.launch {
-            runningQueue.outgoingFlow.collect { quantError ->
-                errorQueue.submit(quantError)
+            runningQueue.outgoingFlow.collect { quantRun ->
+                when (quantRun.status) {
+                    Status.Done -> with(receiver = doneQueue) { quantRun.update() }
+                    Status.Error -> errorQueue.submit(quantRun)
+                    Status.Pending,
+                    Status.Running -> Unit
+                }
             }
         }
         supervisorScope.launch {
@@ -97,8 +106,8 @@ object QuantScheduler {
     suspend fun submit(tsCode: String, tasks: List<LLMTask>): Quant {
         val quant = Quant(
             code = tsCode,
-//            name = getJoinedCandles(tsCode, 60).name,
-            name = tsCode,
+            name = getJoinedCandles(tsCode, 60).name,
+//            name = tsCode,
             progress = Progress(totalStep = tasks.size),
             tasks = tasks
         )

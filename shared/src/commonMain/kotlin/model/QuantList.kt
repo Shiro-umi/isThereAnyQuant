@@ -20,7 +20,7 @@ import kotlinx.serialization.encoding.Encoder
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
-typealias LLMTask = suspend () -> Unit
+typealias LLMTask = suspend (quant: Quant) -> Unit
 
 fun Long.format(timeZone: TimeZone = TimeZone.currentSystemDefault()): String {
     val instant = Instant.fromEpochMilliseconds(this)
@@ -53,16 +53,7 @@ data class Quant(
     val triggerTime: Long = Clock.System.now().toEpochMilliseconds(),
     @Serializable(LambdaSerializer::class)
     val tasks: List<LLMTask>? = null
-) {
-
-    override fun hashCode() = uuid.hashCode()
-
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (other !is Quant) return false
-        return uuid == other.uuid
-    }
-}
+)
 
 object LambdaSerializer : KSerializer<List<LLMTask>> {
 
@@ -72,14 +63,14 @@ object LambdaSerializer : KSerializer<List<LLMTask>> {
         encoder.encodeString("default")
     }
 
-    override fun deserialize(decoder: Decoder) = listOf<suspend () -> Unit>({})
+    override fun deserialize(decoder: Decoder) = listOf<suspend (quant: Quant) -> Unit>({})
 }
 
 @Serializable
 data class Progress(
     val step: Int = 0,
     val totalStep: Int = 0,
-    val description: String = "asdfasdfadsfasdfasdfasdf",
+    val description: String = "",
     val progress: Float = 0f,
 )
 

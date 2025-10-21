@@ -54,10 +54,12 @@ fun SharedTransitionScope.TaskListPage(
     var showFilter by remember { mutableStateOf(false) }
     var pendingList by remember { mutableStateOf(SnapshotStateList<Quant>()) }
     var runningList by remember { mutableStateOf(SnapshotStateList<Quant>()) }
+    var errorList by remember { mutableStateOf(SnapshotStateList<Quant>()) }
     var doneList by remember { mutableStateOf(SnapshotStateList<Quant>()) }
 
     val filterPending by remember { derivedStateOf { pendingList.filter { filter in it.name || filter in it.code } } }
     val filterRunning by remember { derivedStateOf { runningList.filter { filter in it.name || filter in it.code } } }
+    val filterError by remember { derivedStateOf { errorList.filter { filter in it.name || filter in it.code } } }
     val filterDone by remember { derivedStateOf { doneList.filter { filter in it.name || filter in it.code } } }
 
     Column(
@@ -89,6 +91,19 @@ fun SharedTransitionScope.TaskListPage(
                 TaskItem(item, scope, onItemSelect)
             }
 
+            if (filterError.isNotEmpty()) stickyHeader {
+                Box(modifier = Modifier.fillMaxWidth().height(64.dp).background(MaterialTheme.colorScheme.surface)) {
+                    Text(
+                        "Error Tasks",
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.align(Alignment.CenterStart)
+                    )
+                }
+            }
+            items(filterError, { item -> item.uuid }) { item ->
+                TaskItem(item, scope, onItemSelect)
+            }
+
             if (filterPending.isNotEmpty()) stickyHeader {
                 Box(modifier = Modifier.fillMaxWidth().height(64.dp).background(MaterialTheme.colorScheme.surface)) {
                     Text(
@@ -116,6 +131,16 @@ fun SharedTransitionScope.TaskListPage(
             items(filterDone, { item -> item.uuid }) { item ->
                 TaskItem(item, scope, onItemSelect)
             }
+        }
+    }
+
+    AnimatedVisibility(
+        visible = pendingList.isEmpty() && runningList.isEmpty() && errorList.isEmpty() && doneList.isEmpty(),
+        enter = fadeIn(),
+        exit = fadeOut()
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
         }
     }
 
@@ -206,6 +231,8 @@ fun SharedTransitionScope.TaskListPage(
                 val taskList = json.decodeFromString<TaskList>(res)
                 updateListWithDiff(runningList, taskList.runningList)
                 updateListWithDiff(pendingList, taskList.pendingList)
+                updateListWithDiff(errorList, taskList.errorList)
+                updateListWithDiff(doneList, taskList.doneList)
             }
         }
         onDispose {
@@ -317,8 +344,8 @@ private fun updateListWithDiff(
     newList.forEachIndexed { index, newTask ->
         val oldTask = oldMap[newTask.uuid]
         oldTask?.let { old ->
-            if (old.uuid == newTask.uuid) return@let
-            val oldIndex = currentList.indexOfFirst { it.uuid == oldTask.uuid }
+            if (old == newTask) return@let
+            val oldIndex = currentList.indexOfFirst { it == oldTask }
             if (oldIndex != -1) currentList[oldIndex] = newTask
         } ?: currentList.add(index, newTask)
     }

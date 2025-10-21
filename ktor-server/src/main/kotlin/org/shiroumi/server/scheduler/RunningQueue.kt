@@ -32,7 +32,8 @@ class RunningQueue(
 
     override suspend fun onExecute(quant: Quant) {
         logger.accept("onExecute $quant")
-        var qt = quant
+        var qt = quant.copy(status = Status.Running)
+        qt.update()
         try {
             quant.tasks?.forEachIndexed { i, task ->
                 if (qt.status == Status.Error) return@forEachIndexed
@@ -42,7 +43,12 @@ class RunningQueue(
                         qt = qt.copy(status = Status.Error)
                         qt.update()
                     }
-                }) { task() }
+                }) {
+                    runCatching { task(quant) }.onFailure {
+                        it.printStackTrace()
+                        qt = qt.copy(status = Status.Error)
+                    }
+                }
                 val taskStartTime = now
                 while (llmJob.isActive) {
                     qt = qt.copy(
@@ -50,7 +56,7 @@ class RunningQueue(
                             step = i + 1,
                             totalStep = qt.tasks?.size ?: 1,
                             description = "running task ${i + 1}/${qt.progress.totalStep}",
-                            progress = (now - taskStartTime) / 120000f
+                            progress = (now - taskStartTime) / 10000f
                         )
                     )
                     qt.update()
@@ -61,7 +67,7 @@ class RunningQueue(
             qt.update()
         } finally {
             qt.drop()
-            if (qt.status == Status.Error) _outgoingFlow.emit(qt)
+            _outgoingFlow.emit(qt)
             tokenBucket.send(Unit)
         }
     }
