@@ -15,7 +15,7 @@ expect fun MultiPlatform(
     content: @Composable BoxScope.() -> Unit
 )
 
-expect suspend fun showToast(msg: String)
+expect fun showToast(msg: String)
 
 expect fun getFileSystem(): FileSystem
 

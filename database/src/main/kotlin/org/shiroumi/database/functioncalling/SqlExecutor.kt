@@ -184,3 +184,8 @@ fun fetchDoneTasks(): List<List<String>> = stockDb.transaction {
 fun fetchDoneTask(uuid: String): String = stockDb.transaction {
     Strategy.findById(UUID.fromString(uuid))?.strategy ?: ""
 }
+
+fun getStockName(tsCode: String): String = stockDb.transaction {
+    val res = Stock.find { StockTable.tsCode eq tsCode }.toList().firstOrNull()
+    res?.name ?: throw Exception("stock $tsCode not found")
+}

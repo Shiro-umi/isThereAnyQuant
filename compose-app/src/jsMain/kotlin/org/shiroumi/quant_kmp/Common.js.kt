@@ -9,8 +9,12 @@ import androidx.compose.runtime.ProvidedValue
 import androidx.compose.ui.Modifier
 import io.kamel.core.utils.File
 import io.ktor.util.Platform
+import io.ktor.utils.io.ioDispatcher
 import kotlinx.browser.window
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.await
+import kotlinx.coroutines.launch
 import okio.FileSystem
 import okio.fakefilesystem.FakeFileSystem
 import org.shiroumi.quant_kmp.toast.LocalToastHostState
@@ -42,7 +46,11 @@ actual fun MultiPlatform(
     }
 }
 
-actual suspend fun showToast(msg: String) = toastState.showToast(msg)
+actual fun showToast(msg: String) {
+    CoroutineScope(Dispatchers.Default).launch {
+        toastState.showToast(msg)
+    }
+}
 
 
 actual fun getFileSystem() = fakeFileSystem

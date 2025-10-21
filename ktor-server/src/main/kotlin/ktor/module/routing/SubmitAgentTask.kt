@@ -3,6 +3,7 @@ package ktor.module.routing
 import io.ktor.http.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import kotlinx.serialization.json.Json
 import ktor.module.llm.agent.*
 import ktor.module.llm.agent.abs.AbsCandleAgent
 import model.Quant
@@ -10,7 +11,9 @@ import org.shiroumi.database.functioncalling.upsertStrategy
 import org.shiroumi.server.scheduler.QuantScheduler
 import org.shiroumi.server.today
 import kotlin.reflect.KClass
+import kotlin.uuid.ExperimentalUuidApi
 
+@OptIn(ExperimentalUuidApi::class)
 fun Route.submitAgentTask(route: String) = get(route) {
     val tsCode = call.queryParameters["ts_code"]
     val tradeDate = call.queryParameters["trade_date"] ?: today
@@ -37,13 +40,21 @@ fun Route.submitAgentTask(route: String) = get(route) {
             )
         ),
     )
-    val task = QuantScheduler.submit(tsCode, workflow.works.map { work ->
-        { quant -> work(quant, tsCode) }
-    })
-    call.respond(
-        HttpStatusCode.OK,
-        "task submit. $task"
-    )
+    runCatching {
+        QuantScheduler.submit(tsCode, workflow.works.map { work ->
+            { quant -> work(quant, tsCode) }
+        })
+    }.onSuccess {
+        call.respond(
+            HttpStatusCode.OK,
+            Json.encodeToString(it.copy(tasks = null))
+        )
+    }.onFailure { t ->
+        call.respond(
+            HttpStatusCode.BadRequest,
+            "${t.message}"
+        )
+    }
 }
 
 class Workflow private constructor(

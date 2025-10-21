@@ -36,12 +36,11 @@ import model.Status
 import model.TaskList
 import model.format
 import org.shiroumi.quant_kmp.SocketClient
+import org.shiroumi.quant_kmp.json
 import org.shiroumi.quant_kmp.showToast
 import org.shiroumi.quant_kmp.ui.theme.Search
 import org.shiroumi.quant_kmp.ui.theme.emptyMutableInteractionSource
 import kotlin.uuid.ExperimentalUuidApi
-
-private val json = Json { ignoreUnknownKeys = true }
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable

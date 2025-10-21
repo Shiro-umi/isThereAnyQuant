@@ -10,6 +10,7 @@ import kotlinx.coroutines.sync.withLock
 import model.*
 import org.shiroumi.database.functioncalling.fetchDoneTasks
 import org.shiroumi.database.functioncalling.getJoinedCandles
+import org.shiroumi.database.functioncalling.getStockName
 import utils.logger
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
@@ -106,8 +107,7 @@ object QuantScheduler {
     suspend fun submit(tsCode: String, tasks: List<LLMTask>): Quant {
         val quant = Quant(
             code = tsCode,
-            name = getJoinedCandles(tsCode, 60).name,
-//            name = tsCode,
+            name = getStockName(tsCode = tsCode),
             progress = Progress(totalStep = tasks.size),
             tasks = tasks
         )
