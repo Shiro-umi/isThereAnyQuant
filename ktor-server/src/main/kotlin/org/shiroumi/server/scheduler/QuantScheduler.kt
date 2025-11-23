@@ -84,7 +84,7 @@ object QuantScheduler {
         supervisorScope.launch {
             runningQueue.outgoingFlow.collect { quantRun ->
                 when (quantRun.status) {
-                    Status.Done -> with(receiver = doneQueue) { quantRun.update() }
+                    Status.Done -> doneQueue.submit(quantRun)
                     Status.Error -> errorQueue.submit(quantRun)
                     Status.Pending,
                     Status.Running -> Unit
@@ -104,14 +104,14 @@ object QuantScheduler {
         }
     }
 
-    suspend fun submit(tsCode: String, tasks: List<LLMTask>): Quant {
+    fun submit(tsCode: String, tasks: List<LLMTask>): Quant {
         val quant = Quant(
             code = tsCode,
             name = getStockName(tsCode = tsCode),
             progress = Progress(totalStep = tasks.size),
             tasks = tasks
         )
-        pendingQueue.submit(quant)
+        supervisorScope.launch { pendingQueue.submit(quant) }
         return quant
     }
 }

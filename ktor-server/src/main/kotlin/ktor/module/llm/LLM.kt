@@ -1,9 +1,7 @@
 package ktor.module.llm
 
 import kotlinx.serialization.json.JsonArray
-import org.shiroumi.database.functioncalling.getJoinedCandles
-import org.shiroumi.ksp.Description
-import org.shiroumi.ksp.FunctionCall
+import org.shiroumi.ai.function.llmTools
 
 
 sealed class DeepSeekModel(m: String) : Model(m) {
@@ -19,39 +17,77 @@ sealed class SiliconFlowModel(
     enableThinking: Boolean,
     thinkingBudget: Int,
     maxTokens: Int,
+    tools: JsonArray? = null,
     jsonMode: Boolean
-) : Model(m, temperature, topP, topK, enableThinking, thinkingBudget, maxTokens, jsonMode) {
-    data object DeepSeekV3Terminus : SiliconFlowModel(
+) : Model(m, temperature, topP, topK, enableThinking, thinkingBudget, maxTokens, jsonMode, tools) {
+
+    data object DeepSeekV3T : SiliconFlowModel(
         m = "deepseek-ai/DeepSeek-V3.1-Terminus",
         temperature = .35f,
-        topP = 0.9f,
+        topP = 0.35f,
         topK = 100,
-        enableThinking = true,
+        enableThinking = false,
         thinkingBudget = 163839,
         maxTokens = 163839,
         jsonMode = false
     )
 
-    data object DeepSeekV3Exp: SiliconFlowModel(
+    data object DeepSeekV3TTool : SiliconFlowModel(
+        m = "deepseek-ai/DeepSeek-V3.1-Terminus",
+        temperature = .35f,
+        topP = 0.35f,
+        topK = 100,
+        tools = llmTools,
+        enableThinking = false,
+        thinkingBudget = 163839,
+        maxTokens = 163839,
+        jsonMode = false
+    )
+
+    data object DeepSeekV3Exp : SiliconFlowModel(
         m = "deepseek-ai/DeepSeek-V3.2-Exp",
         temperature = .35f,
-        topP = 0.9f,
+        topP = 0.4f,
         topK = 30,
         enableThinking = true,
-        thinkingBudget = 163839,
-        maxTokens = 163839,
+        thinkingBudget = 1024,
+        maxTokens = 1024,
         jsonMode = false
     )
 
-    data object Qwen330BThinking2507 : SiliconFlowModel(
-        m = "Qwen/Qwen3-30B-A3B-Thinking-2507",
-        temperature = 0.6f,
-        topP = 0.6f,
-        topK = 20,
+    data object DeepSeekV3ExpTool : SiliconFlowModel(
+        m = "deepseek-ai/DeepSeek-V3.2-Exp",
+        temperature = .35f,
+        topP = 0.4f,
+        topK = 30,
+        tools = llmTools,
         enableThinking = false,
-        thinkingBudget = 131072,
-        maxTokens = 131072,
-        jsonMode = true
+        thinkingBudget = 1024,
+        maxTokens = 10240,
+        jsonMode = false
+    )
+
+    data object Ring1T : SiliconFlowModel(
+        m = "inclusionAI/Ring-1T",
+        temperature = 0.35f,
+        topP = 0.4f,
+        topK = 20,
+        enableThinking = true,
+        thinkingBudget = 1024,
+        maxTokens = 2048,
+        jsonMode = false
+    )
+
+    data object Ring1TTool : SiliconFlowModel(
+        m = "inclusionAI/Ring-1T",
+        temperature = 0.35f,
+        topP = 0.4f,
+        topK = 20,
+        tools = llmTools,
+        enableThinking = true,
+        thinkingBudget = 1024,
+        maxTokens = 2048,
+        jsonMode = false
     )
 }
 
@@ -66,9 +102,3 @@ open class Model(
     val jsonMode: Boolean = false,
     val tools: JsonArray? = null
 )
-
-@FunctionCall(description = "获取最近30天的股票日线")
-suspend fun getJoinedCandles(
-    @Description("股票代码") tsCode: String
-) = getJoinedCandles(tsCode, 60).toString()
-

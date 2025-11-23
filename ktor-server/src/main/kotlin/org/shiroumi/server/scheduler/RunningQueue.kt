@@ -31,44 +31,46 @@ class RunningQueue(
     }
 
     override suspend fun onExecute(quant: Quant) {
-        logger.accept("onExecute $quant")
-        var qt = quant.copy(status = Status.Running)
-        qt.update()
-        try {
-            quant.tasks?.forEachIndexed { i, task ->
-                if (qt.status == Status.Error) return@forEachIndexed
-                val llmJob = scope.launch(context = CoroutineExceptionHandler { _, t ->
-                    t.printStackTrace()
-                    scope.launch {
-                        qt = qt.copy(status = Status.Error)
-                        qt.update()
-                    }
-                }) {
-                    runCatching { task(quant) }.onFailure {
-                        it.printStackTrace()
-                        qt = qt.copy(status = Status.Error)
-                    }
-                }
-                val taskStartTime = now
-                while (llmJob.isActive) {
-                    qt = qt.copy(
-                        progress = qt.progress.copy(
-                            step = i + 1,
-                            totalStep = qt.tasks?.size ?: 1,
-                            description = "running task ${i + 1}/${qt.progress.totalStep}",
-                            progress = (now - taskStartTime) / 10000f
-                        )
-                    )
-                    qt.update()
-                    delay(500L)
-                }
-            }
-            val qt = qt.copy(status = if (qt.status == Status.Running) Status.Done else qt.status)
+        scope.launch {
+            logger.accept("onExecute $quant")
+            var qt = quant.copy(status = Status.Running)
             qt.update()
-        } finally {
-            qt.drop()
-            _outgoingFlow.emit(qt)
-            tokenBucket.send(Unit)
+            try {
+                quant.tasks?.forEachIndexed { i, task ->
+                    if (qt.status == Status.Error) return@forEachIndexed
+                    val llmJob = scope.launch(context = CoroutineExceptionHandler { _, t ->
+                        t.printStackTrace()
+                        scope.launch {
+                            qt = qt.copy(status = Status.Error)
+                            qt.update()
+                        }
+                    }) {
+                        runCatching { task(quant) }.onFailure {
+                            it.printStackTrace()
+                            qt = qt.copy(status = Status.Error)
+                        }
+                    }
+                    val taskStartTime = now
+                    while (llmJob.isActive) {
+                        qt = qt.copy(
+                            progress = qt.progress.copy(
+                                step = i + 1,
+                                totalStep = qt.tasks?.size ?: 1,
+                                description = "running task ${i + 1}/${qt.progress.totalStep}",
+                                progress = (now - taskStartTime) / 120000f
+                            )
+                        )
+                        qt.update()
+                        delay(500L)
+                    }
+                }
+                qt = qt.copy(status = if (qt.status == Status.Running) Status.Done else qt.status)
+                qt.update()
+            } finally {
+                qt.drop()
+                _outgoingFlow.emit(qt)
+                tokenBucket.send(Unit)
+            }
         }
     }
 

@@ -45,7 +45,8 @@ data class Message(
     val content: String,
     @SerialName("tool_calls") val toolCalls: List<ToolCalls>? = null,
     @SerialName("tool_call_id") var toolCallId: String? = null,
-    @SerialName("reasoning_content") val reasoningContent: String? = null
+    @SerialName("reasoning_content") val reasoningContent: String? = null,
+    var oneUse: Boolean? = false
 )
 
 @Serializable

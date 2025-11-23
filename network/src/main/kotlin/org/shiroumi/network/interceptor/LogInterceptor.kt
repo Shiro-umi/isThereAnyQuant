@@ -33,7 +33,15 @@ class LoggingInterceptor : Interceptor {
             return response.newBuilder()
                 .body(newResponseBody)
                 .build()
+        } else {
+            val bodyString = response.body.string()
+            println("HTTP Status Code: " + response.code)
+            println("Response Body: $bodyString")
+            val contentType: MediaType? = response.body.contentType()
+            val newResponseBody: ResponseBody = bodyString.toResponseBody(contentType)
+            return response.newBuilder()
+                .body(newResponseBody)
+                .build()
         }
-        return response
     }
 }

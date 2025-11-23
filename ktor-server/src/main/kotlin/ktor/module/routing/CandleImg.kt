@@ -34,7 +34,7 @@ fun Route.candleImg(route: String) = get(route) {
         "high" to candles.map { it.high },
         "low" to candles.map { it.low },
         "close" to candles.map { it.close },
-        "ema20" to candles.map { it.ema20 }
+//        "ema20" to candles.map { it.ema20 }
     )
     val png = df.plot {
         layout.style {

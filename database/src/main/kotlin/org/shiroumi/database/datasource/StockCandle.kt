@@ -12,6 +12,8 @@ import org.shiroumi.database.stockDb
 import org.shiroumi.database.table.AdjFactorTable
 import org.shiroumi.database.table.Candle
 import org.shiroumi.database.table.DailyCandleTable
+import org.shiroumi.database.table.IndexCandle
+import org.shiroumi.database.table.IndexDailyCandleTable
 import org.shiroumi.database.transaction
 import org.shiroumi.network.apis.*
 import utils.ScheduledTasks
@@ -59,6 +61,11 @@ suspend fun updateDailyCandles() = coroutineScope {
                 stockDb.transaction(DailyCandleTable, AdjFactorTable, log = false) {
                     chunked.forEach { (tag, form) ->
                         val (candles, factors) = form
+                        AdjFactorTable.batchUpsert(factors) { f ->
+                            set(AdjFactorTable.tsCode, f provides "ts_code")
+                            set(AdjFactorTable.tradeDate, f provides "trade_date")
+                            set(AdjFactorTable.adjFactor, (f provides "adj_factor").f)
+                        }
                         DailyCandleTable.batchUpsert(candles) { c ->
                             set(DailyCandleTable.tsCode, c provides "ts_code")
                             set(DailyCandleTable.tradeDate, c provides "trade_date")
@@ -67,11 +74,6 @@ suspend fun updateDailyCandles() = coroutineScope {
                             set(DailyCandleTable.high, (c provides "high").f)
                             set(DailyCandleTable.low, (c provides "low").f)
                             set(DailyCandleTable.vol, (c provides "vol").f)
-                        }
-                        AdjFactorTable.batchUpsert(factors) { f ->
-                            set(AdjFactorTable.tsCode, f provides "ts_code")
-                            set(AdjFactorTable.tradeDate, f provides "trade_date")
-                            set(AdjFactorTable.adjFactor, (f provides "adj_factor").f)
                         }
                         logger.accept(tag)
                     }

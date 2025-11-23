@@ -52,6 +52,16 @@ suspend fun TuShareApi.getDailyCandles(tsCode: String? = null, date: String? = n
 
 suspend fun TuShareApi.getTradingDate() = query(tushareParams.ofApi("trade_cal").toJsonBody()).check()
 
+suspend fun TuShareApi.getIndexDaily(tsCode: String? = null, date: String? = null, startDate: String? = null, endDate: String? = null) =
+    query(tushareParams.ofApi("index_daily").carriesParam(
+        mutableMapOf<String, String>().apply {
+            tsCode?.let { put("ts_code", it) }
+            date?.let { put("trade_date", it) }
+            startDate?.let { put("start_date", it) }
+            endDate?.let { put("end_date", it) }
+        }
+    ).toJsonBody())
+
 
 val tushareParams: TushareParams
     get() = TushareParams()

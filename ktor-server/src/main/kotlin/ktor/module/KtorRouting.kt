@@ -11,5 +11,7 @@ fun Application.ktorRouting() {
         getStrategy(route = "/strategy")
         candleImg(route = "/candleImg")
         taskSubscribe(route = "/tasks")
+        symbol(route = "/symbol")
+        symbolSubmit(route = "/symbol/submit")
     }
 }

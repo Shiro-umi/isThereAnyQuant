@@ -36,7 +36,7 @@ open class ListStateProvider(val scope: CoroutineScope) {
 
     protected open fun start() = scope.launch {
         while (isActive) {
-            val stateList = map.values.sortedBy { it.triggerTime }
+            val stateList = map.values.sortedByDescending { it.triggerTime }
             _stateFLow.emit(stateList)
             delay(1000L)
         }

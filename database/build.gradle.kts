@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.ksp)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 group = "org.shiroumi"
@@ -18,6 +19,7 @@ dependencies {
     implementation(libs.jetbrains.exposed.core)
     implementation(libs.jetbrains.exposed.dao)
     implementation(libs.jetbrains.exposed.jdbc)
+    implementation(libs.kotlin.serialization.json)
     implementation(libs.h2)
     ksp(project(":ksp"))
     ksp(project(":shared"))

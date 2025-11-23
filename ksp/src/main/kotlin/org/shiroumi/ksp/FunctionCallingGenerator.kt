@@ -48,8 +48,8 @@ class FunctionCallingGenerator(private val env: SymbolProcessorEnvironment) : Sy
 import kotlinx.serialization.json.*
 ${
                 collected.joinToString("\n        ") { c ->
-                    val functionName = c.first.simpleName.asString()
-                    "import ktor.module.llm.$functionName"
+                    val functionName = c.first.qualifiedName?.asString()
+                    "import $functionName"
                 }
             }
 
@@ -86,7 +86,7 @@ ${
             val convert = when (p.second) {
                 "Int" -> "?.jsonPrimitive?.intOrNull ?: 0"
                 "Long" -> "?.jsonPrimitive?.longOrNull ?: 0L"
-                "Float" -> "?.jsonPrimitive?.doubleOrNull ?: 0.0"
+                "Float" -> "?.jsonPrimitive?.floatOrNull ?: 0f"
                 "Double" -> "?.jsonPrimitive?.doubleOrNull ?: 0.0"
                 "Boolean" -> "?.jsonPrimitive?.booleanOrNull ?: false"
                 else -> "!!.jsonPrimitive.content"

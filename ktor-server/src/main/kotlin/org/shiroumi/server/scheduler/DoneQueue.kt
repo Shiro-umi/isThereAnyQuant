@@ -21,6 +21,10 @@ class DoneQueue(scope: CoroutineScope) : ListStateProvider(scope) {
         scope.launch { stateFlow.collect(collector) }
     }
 
+    suspend fun submit(quant: Quant) {
+        quant.update()
+    }
+
     public override fun start() = runBlocking {
         val savedTasks = fetchDoneTasks().map { task ->
             Quant(
