@@ -8,7 +8,7 @@ import kotlinx.coroutines.SupervisorJob
 expect val cpuCores: Int
 
 val String?.f: Float
-    get() = (this ?: "0").toFloat()
+    get() = if (this.isNullOrBlank()) 0f else  this.toFloat()
 
 val supervisorScope: CoroutineScope
     get() = CoroutineScope(SupervisorJob() + Dispatchers.Default)

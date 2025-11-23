@@ -62,6 +62,27 @@ suspend fun TuShareApi.getIndexDaily(tsCode: String? = null, date: String? = nul
         }
     ).toJsonBody())
 
+suspend fun TuShareApi.getIndexClassify(level: String, src: String, parentCode: String? = null) =
+    query(tushareParams.ofApi("index_classify").carriesParam(
+        mutableMapOf<String, String>().apply {
+            put("level", level)
+            put("src", src)
+            parentCode?.let { put("parent_code", it) }
+        }
+    ).toJsonBody())
+
+suspend fun TuShareApi.getSwDaily(tsCode: String? = null, tradeDate: String? = null, startDate: String? = null, endDate: String? = null) =
+    query(tushareParams.ofApi("sw_daily").carriesParam(
+        mutableMapOf<String, String>().apply {
+            tsCode?.let { put("ts_code", it) }
+            tradeDate?.let { put("trade_date", it) }
+            startDate?.let { put("start_date", it) }
+            endDate?.let { put("end_date", it) }
+        }
+    ).toJsonBody())
+
+
+
 
 val tushareParams: TushareParams
     get() = TushareParams()

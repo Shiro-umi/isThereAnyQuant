@@ -3,6 +3,7 @@
     "jobName": "logTask",
     "cronExpression": "* * * * * ?",
     "jobClass": "org.shiroumi.trading.schedule.task.LogTask",
+    "enable": false,
     "parameters": {
       "logMsg": "log."
     }
@@ -11,6 +12,20 @@
     "jobName": "dailyTask",
     "cronExpression": "0 * * * * ?",
     "jobClass": "org.shiroumi.trading.schedule.task.DailyTask",
+    "parameters": {}
+  },
+  {
+    "jobName": "updateIndustryClassify",
+    "cronExpression": "0 0 2 * * ?",
+    "jobClass": "org.shiroumi.trading.schedule.task.UpdateIndustryClassifyJob",
+    "enable": true,
+    "parameters": {}
+  },
+  {
+    "jobName": "updateSwIndexDaily",
+    "cronExpression": "0 30 2 * * ?",
+    "jobClass": "org.shiroumi.trading.schedule.task.UpdateSwIndexDailyJob",
+    "enable": true,
     "parameters": {}
   }
 ]
