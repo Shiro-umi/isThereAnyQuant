@@ -3,14 +3,12 @@
 package org.shiroumi.server.scheduler
 
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import model.Quant
 import model.Status
-import org.shiroumi.database.functioncalling.fetchDoneTasks
-import org.shiroumi.server.scheduler.base.FlowQueue
+import org.shiroumi.database.old.functioncalling.fetchDoneTasks
 import org.shiroumi.server.scheduler.base.ListStateProvider
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid

@@ -1,7 +1,7 @@
 package ktor.module.llm.agent.abs
 
 import kotlinx.serialization.json.Json
-import org.shiroumi.database.functioncalling.getJoinedCandles
+import org.shiroumi.database.old.functioncalling.getJoinedCandles
 import org.shiroumi.network.apis.ChatCompletion
 import org.shiroumi.network.apis.LLMApi
 import org.shiroumi.network.siliconFlow

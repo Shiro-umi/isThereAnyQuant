@@ -15,10 +15,6 @@ dependencies {
     implementation(project(":ksp"))
     implementation(project(":shared"))
     implementation(project(":network"))
-
-    implementation(libs.jetbrains.exposed.core)
-    implementation(libs.jetbrains.exposed.dao)
-    implementation(libs.jetbrains.exposed.jdbc)
     implementation(libs.kotlin.serialization.json)
     implementation(libs.h2)
     ksp(project(":ksp"))
@@ -29,7 +25,11 @@ dependencies {
     implementation(libs.kotlin.coroutines.core)
     implementation(kotlin("reflect"))
     implementation("mysql:mysql-connector-java:8.0.33")
-    implementation("com.zaxxer:HikariCP:5.1.0")
+
+    implementation(platform(libs.jetbrains.exposed.bom))
+    implementation(libs.jetbrains.exposed.core)
+    implementation(libs.jetbrains.exposed.jdbc)
+    implementation(libs.jetbrains.exposed.kotlin.datetime)
 }
 
 kotlin {

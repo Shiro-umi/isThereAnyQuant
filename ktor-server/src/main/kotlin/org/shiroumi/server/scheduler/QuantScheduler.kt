@@ -8,12 +8,9 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import model.*
-import org.shiroumi.database.functioncalling.fetchDoneTasks
-import org.shiroumi.database.functioncalling.getJoinedCandles
-import org.shiroumi.database.functioncalling.getStockName
+import org.shiroumi.database.old.functioncalling.getStockName
 import utils.logger
 import kotlin.uuid.ExperimentalUuidApi
-import kotlin.uuid.Uuid
 
 private const val capacity = 3
 

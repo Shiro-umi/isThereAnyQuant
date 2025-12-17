@@ -7,7 +7,7 @@ import kotlinx.serialization.json.Json
 import ktor.module.llm.agent.*
 import ktor.module.llm.agent.abs.AbsCandleAgent
 import model.Quant
-import org.shiroumi.database.functioncalling.upsertStrategy
+import org.shiroumi.database.old.functioncalling.upsertStrategy
 import org.shiroumi.server.scheduler.QuantScheduler
 import org.shiroumi.server.today
 import kotlin.reflect.KClass

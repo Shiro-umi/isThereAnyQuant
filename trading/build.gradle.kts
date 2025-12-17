@@ -14,6 +14,8 @@ dependencies {
     implementation(project("backtesting"))
     implementation(project(":shared"))
     implementation(project("schedule"))
+    implementation(project(":database"))
+    implementation(project(":network"))
     implementation(libs.kotlin.coroutines.core)
     implementation(libs.kotlin.serialization.json)
     implementation(libs.bundles.ktor.client)

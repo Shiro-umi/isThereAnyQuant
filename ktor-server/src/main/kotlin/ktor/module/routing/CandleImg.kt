@@ -14,7 +14,7 @@ import org.jetbrains.kotlinx.kandy.letsplot.layers.line
 import org.jetbrains.kotlinx.kandy.util.color.Color
 import org.jetbrains.kotlinx.kandy.util.context.invoke
 import org.jetbrains.kotlinx.statistics.kandy.layers.candlestick
-import org.shiroumi.database.functioncalling.getJoinedCandles
+import org.shiroumi.database.old.functioncalling.getJoinedCandles
 import org.shiroumi.server.today
 import kotlin.text.substring
 

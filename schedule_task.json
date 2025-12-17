@@ -27,5 +27,12 @@
     "jobClass": "org.shiroumi.trading.schedule.task.UpdateSwIndexDailyJob",
     "enable": true,
     "parameters": {}
+  },
+  {
+    "jobName": "updateIndexMember",
+    "jobClass": "org.shiroumi.trading.schedule.task.UpdateIndexMemberJob",
+    "cronExpression": "0 0 2 * * ?",
+    "enable": false,
+    "parameters": {}
   }
 ]

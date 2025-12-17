@@ -5,6 +5,7 @@ import kotlinx.serialization.json.jsonObject
 import ktor.module.llm.Model
 import okhttp3.ResponseBody
 import org.shiroumi.ai.function.functionCall
+import org.shiroumi.ksp.FunctionCall
 import org.shiroumi.network.ApiDelegate
 import org.shiroumi.network.apis.*
 import org.shiroumi.server.rootDir
@@ -138,3 +139,7 @@ abstract class Agent<T : LLMApi>(api: ApiDelegate<T>, historyProvider: () -> His
     }
 
 }
+
+
+@FunctionCall(description = "占位没用")
+fun a() = ""

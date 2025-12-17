@@ -8,23 +8,24 @@ import kotlin.coroutines.CoroutineContext
 @OptIn(ExperimentalCoroutinesApi::class)
 class ScheduledTasks<T>(
     val concurrency: Int = cpuCores * 2,
-    val frequency: Int = 200
+    val frequency: Int = 500
 ) {
 
     private val tokenBucket by lazy { TokenBucket(frequency = frequency) }
 
-    private val tasks = mutableListOf<Pair<String, List<suspend () -> T>>>()
+    private val tasks = mutableListOf<Pair<String, suspend () -> T>>()
 
-    fun emit(tag: String, vararg task: suspend () -> T) {
-        tasks.add(tag to task.toList())
+    fun emit(tag: String, task: suspend () -> T) {
+        tasks.add(tag to task)
     }
 
     fun schedule(dispatcher: CoroutineContext = Dispatchers.Default) =
-        tasks.asFlow().flatMapMerge(concurrency) { (tag, tasks) ->
+        tasks.asFlow().flatMapMerge(concurrency) { (tag, task) ->
             channelFlow channel@{
                 tokenBucket.receive()
+                delay(2000)
                 println("request for $tag")
-                send(tag to tasks.map { task -> async { task() } }.awaitAll())
+                send(tag to task())
             }.retry(retries = 3).flowOn(dispatcher)
         }
 
