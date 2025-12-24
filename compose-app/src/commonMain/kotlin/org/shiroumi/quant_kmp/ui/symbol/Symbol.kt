@@ -453,7 +453,7 @@ fun SymbolCanvas(
         }
 
         // 计算最大成交量用于归一化
-        val maxVolume = visibleData.maxOfOrNull { it.vol } ?: 1f
+//        val maxVolume = visibleData.maxOfOrNull { it.vol } ?: 1f
         val volumeBarHeight = chartHeight * 0.2f // 成交量占用图表高度的20%
         val volumeBaseY = size.height - padding
 
@@ -519,8 +519,9 @@ fun SymbolCanvas(
             )
 
             // 绘制成交量柱状图
-            val normalizedVolume = candle.vol / maxVolume
-            val volumeHeight = volumeBarHeight * normalizedVolume
+//            val normalizedVolume = candle.vol / maxVolume
+//            val volumeHeight = volumeBarHeight * normalizedVolume
+            val volumeHeight = 1f
             val volumeColor = color.copy(alpha = 0.5f)
 
             drawRect(

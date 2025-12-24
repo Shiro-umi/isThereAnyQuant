@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import model.*
-import org.shiroumi.database.old.functioncalling.getStockName
+//import org.shiroumi.database.old.functioncalling.getStockName
 import utils.logger
 import kotlin.uuid.ExperimentalUuidApi
 
@@ -102,13 +102,17 @@ object QuantScheduler {
     }
 
     fun submit(tsCode: String, tasks: List<LLMTask>): Quant {
+//        val quant = Quant(
+//            code = tsCode,
+//            name = getStockName(tsCode = tsCode),
+//            progress = Progress(totalStep = tasks.size),
+//            tasks = tasks
+//        )
+//        supervisorScope.launch { pendingQueue.submit(quant) }
         val quant = Quant(
-            code = tsCode,
-            name = getStockName(tsCode = tsCode),
-            progress = Progress(totalStep = tasks.size),
-            tasks = tasks
+            code = "",
+            name = ""
         )
-        supervisorScope.launch { pendingQueue.submit(quant) }
         return quant
     }
 }

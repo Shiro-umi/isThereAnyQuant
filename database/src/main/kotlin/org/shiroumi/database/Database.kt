@@ -1,5 +1,6 @@
 package org.shiroumi.database
 
+import org.jetbrains.exposed.v1.core.DatabaseConfig
 import org.jetbrains.exposed.v1.core.StdOutSqlLogger
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.jdbc.Database
@@ -17,7 +18,10 @@ val commonDb: Database by lazy {
         "jdbc:mysql://127.0.0.1:3306/common_db?rewriteBatchedStatements=true&allowMultiQueries=true",
         driver = "com.mysql.cj.jdbc.Driver",
         user = "remote",
-        password = BuildConfigs.DATABASE_PASSWORD
+        password = BuildConfigs.DATABASE_PASSWORD,
+        databaseConfig = DatabaseConfig {
+            useNestedTransactions = false
+        }
     )
 }
 
@@ -27,7 +31,10 @@ val stockDb: Database by lazy {
         "jdbc:mysql://127.0.0.1:3306/stock_db?rewriteBatchedStatements=true&allowMultiQueries=true",
         driver = "com.mysql.cj.jdbc.Driver",
         user = "remote",
-        password = BuildConfigs.DATABASE_PASSWORD
+        password = BuildConfigs.DATABASE_PASSWORD,
+        databaseConfig = DatabaseConfig {
+            useNestedTransactions = false
+        }
     )
 }
 
@@ -37,7 +44,10 @@ val swIndexDb: Database by lazy {
         "jdbc:mysql://127.0.0.1:3306/sw_index_db?rewriteBatchedStatements=true&allowMultiQueries=true",
         driver = "com.mysql.cj.jdbc.Driver",
         user = "remote",
-        password = BuildConfigs.DATABASE_PASSWORD
+        password = BuildConfigs.DATABASE_PASSWORD,
+        databaseConfig = DatabaseConfig {
+            useNestedTransactions = false
+        }
     )
 }
 

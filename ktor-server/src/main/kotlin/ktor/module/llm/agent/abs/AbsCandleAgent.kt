@@ -1,7 +1,6 @@
 package ktor.module.llm.agent.abs
 
 import kotlinx.serialization.json.Json
-import org.shiroumi.database.old.functioncalling.getJoinedCandles
 import org.shiroumi.network.apis.ChatCompletion
 import org.shiroumi.network.apis.LLMApi
 import org.shiroumi.network.siliconFlow
@@ -15,12 +14,12 @@ abstract class AbsCandleAgent(
     private val json = Json { prettyPrint = true }
 
     open suspend fun chat(tsCode: String, msgs: List<String> = listOf()): ChatCompletion {
-        val msg = mutableListOf(prompts.usr, getJoinedCandles(tsCode = tsCode)).also { list ->
-            list.addAll(msgs)
-            list.addAll(suffixMsgs)
-        }
-        logger.warning("history: ${msg.joinToString("\n")}")
-        val res = chat(Role.User provides msg.joinToString("\n"))
+//        val msg = mutableListOf(prompts.usr, getJoinedCandles(tsCode = tsCode)).also { list ->
+//            list.addAll(msgs)
+//            list.addAll(suffixMsgs)
+//        }
+//        logger.warning("history: ${msg.joinToString("\n")}")
+        val res = chat(Role.User provides listOf("").joinToString("\n"))
         logger.accept(json.encodeToString(res))
         return res
     }

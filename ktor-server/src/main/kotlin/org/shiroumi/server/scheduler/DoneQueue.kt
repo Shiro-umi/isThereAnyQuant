@@ -8,7 +8,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import model.Quant
 import model.Status
-import org.shiroumi.database.old.functioncalling.fetchDoneTasks
 import org.shiroumi.server.scheduler.base.ListStateProvider
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
@@ -24,17 +23,17 @@ class DoneQueue(scope: CoroutineScope) : ListStateProvider(scope) {
     }
 
     public override fun start() = runBlocking {
-        val savedTasks = fetchDoneTasks().map { task ->
-            Quant(
-                uuid = Uuid.parse(task[0]),
-                code = task[1],
-                name = task[2],
-                targetDate = task[3],
-                triggerTime = task[4].toLong(),
-                status = Status.Done,
-            )
-        }
-        updateQuantList(savedTasks)
+//        val savedTasks = fetchDoneTasks().map { task ->
+//            Quant(
+//                uuid = Uuid.parse(task[0]),
+//                code = task[1],
+//                name = task[2],
+//                targetDate = task[3],
+//                triggerTime = task[4].toLong(),
+//                status = Status.Done,
+//            )
+//        }
+//        updateQuantList(savedTasks)
         super.start()
     }
 }

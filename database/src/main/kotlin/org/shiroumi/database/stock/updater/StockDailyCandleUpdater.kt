@@ -74,8 +74,6 @@ private suspend fun updateStock(tsCode: String, name: String) {
                     .zip(limit.asSequence()) { (a, b, c), d -> listOf(a, b, c, d) }
                     .toList()
             ) { (daily, adj, info, limit) ->
-                this[table.tsCode] = tsCode
-                this[table.name] = name
                 this[table.date] = "${daily[1]}".localDate
                 this[table.turnoverReal] = "${info[4] ?: -1}".toFloat()
                 this[table.pe] = "${info[6] ?: -1}".toFloat()
@@ -85,8 +83,6 @@ private suspend fun updateStock(tsCode: String, name: String) {
                 this[table.psTtm] = "${info[10] ?: -1}".toFloat()
                 this[table.mvTotal] = "${info[16] ?: -1}".toFloat()
                 this[table.mvCirc] = "${info[17] ?: -1}".toFloat()
-                this[table.upLimit] = "${limit[2]}".toFloat()
-                this[table.downLimit] = "${limit[3]}".toFloat()
 
                 // fq
                 val open = "${daily[2]}".toFloat()

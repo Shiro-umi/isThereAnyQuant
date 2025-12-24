@@ -1,6 +1,5 @@
 package org.shiroumi.database.common.updater
 
-import kotlinx.datetime.LocalDate
 import org.jetbrains.exposed.v1.jdbc.batchReplace
 import org.shiroumi.database.common.table.CalendarTable
 import org.shiroumi.database.commonDb
@@ -24,9 +23,9 @@ suspend fun updateCalendar() = runCatching {
         calDate!!.localDate to isOpen
     }
     commonDb.transaction(CalendarTable) {
-        CalendarTable.batchReplace(calendar) {(calDate, isOpen) ->
+        CalendarTable.batchReplace(calendar) { (calDate, isOpen) ->
             this[CalendarTable.calDate] = calDate
-            this[CalendarTable.isOpen] = 0
+            this[CalendarTable.isOpen] = isOpen?.toInt() ?: 0
         }
     }
 }.onFailure {

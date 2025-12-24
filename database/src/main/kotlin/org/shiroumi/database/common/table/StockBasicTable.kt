@@ -1,7 +1,7 @@
 package org.shiroumi.database.common.table
 
 import org.jetbrains.exposed.v1.core.dao.id.UUIDTable
-import org.shiroumi.database.old.MAX_VARCHAR_LENGTH
+import org.shiroumi.database.MAX_VARCHAR_LENGTH
 
 object StockBasicTable : UUIDTable("stock_info") {
     val tsCode = varchar("ts_code", MAX_VARCHAR_LENGTH).uniqueIndex()
