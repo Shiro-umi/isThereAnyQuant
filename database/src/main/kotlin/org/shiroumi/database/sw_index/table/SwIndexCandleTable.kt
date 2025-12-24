@@ -6,7 +6,7 @@ import org.shiroumi.database.MAX_VARCHAR_LENGTH
 abstract class SwIndexDailyTable(tsCode: String) : UUIDTable(name = tsCode) {
     val tsCode = varchar("ts_code", MAX_VARCHAR_LENGTH)
     val tradeDate = varchar("trade_date", MAX_VARCHAR_LENGTH).uniqueIndex(
-        "${tsCode.split(".").first().replace("`", "")}_trade_date_unique"
+        "${tsCode.replace(".", "_").replace("`", "").lowercase()}_trade_date_unique"
     )
     val name = varchar("name", MAX_VARCHAR_LENGTH)
     val open = float("open")

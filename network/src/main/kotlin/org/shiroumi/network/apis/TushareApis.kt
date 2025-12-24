@@ -104,16 +104,30 @@ suspend fun TuShareApi.getIndexDaily(
     date: String? = null,
     startDate: String? = null,
     endDate: String? = null
-) =
-    query(
-        tushareParams.ofApi("index_daily").carriesParam(
-            mutableMapOf<String, String>().apply {
-                tsCode?.let { put("ts_code", it) }
-                date?.let { put("trade_date", it) }
-                startDate?.let { put("start_date", it) }
-                endDate?.let { put("end_date", it) }
-            }
-        ).toJsonBody())
+) = query(
+    tushareParams.ofApi("index_daily").carriesParam(
+        mutableMapOf<String, String>().apply {
+            tsCode?.let { put("ts_code", it) }
+            date?.let { put("trade_date", it) }
+            startDate?.let { put("start_date", it) }
+            endDate?.let { put("end_date", it) }
+        }
+    ).toJsonBody())
+
+suspend fun TuShareApi.getIndexBasic(
+    tsCode: String? = null,
+    market: String? = null,
+    publisher: String? = null,
+    category: String? = null
+) = query(
+    tushareParams.ofApi("index_basic").carriesParam(
+        mutableMapOf<String, String>().apply {
+            tsCode?.let { put("ts_code", it) }
+            market?.let { put("market", it) }
+            publisher?.let { put("publisher", it) }
+            category?.let { put("category", it) }
+        }
+    ).toJsonBody())
 
 suspend fun TuShareApi.getSwIndexClassify(src: String = "SW2021", parentCode: String? = null) =
     query(

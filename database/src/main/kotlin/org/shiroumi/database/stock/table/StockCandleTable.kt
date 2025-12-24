@@ -6,7 +6,7 @@ import org.jetbrains.exposed.v1.datetime.date
 
 abstract class StockCandleTable(tsCode: String) : UUIDTable(name = tsCode) {
     val date = date("trade_date").uniqueIndex(
-        "${tsCode.split(".").first().replace("`", "")}_trade_date_unique"
+        "${tsCode.replace(".", "_").replace("`", "").lowercase()}_trade_date_unique"
     )
     val open = float("open")
     val high = float("high")

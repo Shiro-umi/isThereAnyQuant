@@ -51,6 +51,19 @@ val swIndexDb: Database by lazy {
     )
 }
 
+val indexDb: Database by lazy {
+    createDb(dbName = "index_db")
+    Database.connect(
+        "jdbc:mysql://127.0.0.1:3306/index_db?rewriteBatchedStatements=true&allowMultiQueries=true",
+        driver = "com.mysql.cj.jdbc.Driver",
+        user = "remote",
+        password = BuildConfigs.DATABASE_PASSWORD,
+        databaseConfig = DatabaseConfig {
+            useNestedTransactions = false
+        }
+    )
+}
+
 private fun createDb(dbName: String) = DriverManager.getConnection(
     "jdbc:mysql://127.0.0.1:3306/?user=remote&password=${BuildConfigs.DATABASE_PASSWORD}"
 ).use { connection ->
