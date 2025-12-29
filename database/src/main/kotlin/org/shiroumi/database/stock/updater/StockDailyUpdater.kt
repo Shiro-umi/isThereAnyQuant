@@ -58,7 +58,7 @@ suspend fun updateStockDaily() = runCatching {
     val calendar = commonDb.transaction {
         CalendarTable.selectAll()
             .sortedBy { it[CalendarTable.calDate] }
-            .filter { it[CalendarTable.isOpen] == 1 && it[CalendarTable.calDate] <= today && it[CalendarTable.stockDailyUpdated] == 0 }
+//            .filter { it[CalendarTable.isOpen] == 1 && it[CalendarTable.calDate] <= today && it[CalendarTable.stockDailyUpdated] == 0 }
             .map { compactDateFormat.format(it[CalendarTable.calDate]) }
             .toList()
     }

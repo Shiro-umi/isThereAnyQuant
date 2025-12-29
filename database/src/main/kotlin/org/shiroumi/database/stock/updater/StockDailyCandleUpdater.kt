@@ -65,8 +65,7 @@ private suspend fun updateStock(tsCode: String, name: String) {
         info = info.takeLast(winCtx)
 
         stockDb.transaction(table, log = false) {
-            val latestAdj = "${adjFactor.first()[2]}".toFloat()
-
+            val latestAdj = "${adjFactor.last()[2]}".toFloat()
             table.batchReplace(
                 data = dailyCandle.asSequence()
                     .zip(adjFactor.asSequence()) { a, b -> a to b }
@@ -100,7 +99,7 @@ private suspend fun updateStock(tsCode: String, name: String) {
                 this[table.highQfq] = (adj / latestAdj) * high
                 this[table.lowQfq] = (adj / latestAdj) * low
                 this[table.closeQfq] = (adj / latestAdj) * close
-                this[table.volumeQfq] = adj * volume
+                this[table.volumeQfq] = (latestAdj / adj) * volume
             }
             println("$name[$tsCode] updated.")
         }

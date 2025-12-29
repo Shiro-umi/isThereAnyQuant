@@ -3,11 +3,13 @@
 package org.shiroumi.database.stock.updater
 
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.collect
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import model.Candle
+import org.jetbrains.exposed.v1.jdbc.batchReplace
 import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.selectAll
-import org.jetbrains.exposed.v1.jdbc.batchReplace
+import org.shiroumi.database.common.table.CalendarTable
 import org.shiroumi.database.common.table.StockBasicTable
 import org.shiroumi.database.commonDb
 import org.shiroumi.database.stock.table.StockCandleTable
@@ -15,11 +17,26 @@ import org.shiroumi.database.stockDb
 import org.shiroumi.database.transaction
 import utils.ScheduledTasks
 import utils.logger
+import kotlin.time.ExperimentalTime
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 private val logger by logger("updateStockDailyFq")
+@OptIn(ExperimentalUuidApi::class, ExperimentalTime::class)
 suspend fun updateStockDailyFq() = runCatching {
+    val today = kotlin.time.Clock.System.now()
+        .toLocalDateTime(TimeZone.currentSystemDefault())
+        .date
+    val pendingDates = commonDb.transaction {
+        CalendarTable.selectAll()
+            .filter { it[CalendarTable.stockDailyUpdated] == 1 && it[CalendarTable.calDate] <= today }
+            .map { it[CalendarTable.calDate] }
+    }
+    if (pendingDates.isEmpty()) {
+        logger.info("no pending dates for stock fq update.")
+        return@runCatching
+    }
+
     val tsCodes = commonDb.transaction {
         StockBasicTable.select(StockBasicTable.tsCode).map { it[StockBasicTable.tsCode] }.toList()
     }
@@ -56,7 +73,7 @@ suspend fun updateStockDailyFq() = runCatching {
                         highQfq = (c.adj / last.adj) * c.high,
                         lowQfq = (c.adj / last.adj) * c.low,
                         closeQfq = (c.adj / last.adj) * c.close,
-                        volumeQfq = c.adj * last.volume
+                        volumeQfq = (last.adj / c.adj) * c.volume
                     )
                 }) { c ->
                     this[table.date] = c.date
@@ -86,6 +103,10 @@ suspend fun updateStockDailyFq() = runCatching {
     schedular.schedule(Dispatchers.IO).collect { (tsCode, _) ->
         logger.accept("$tsCode done.")
     }
-//    codeTables.map { it.second }
-//    stockDb.transaction()
 }
+
+//fun main() {
+//    runBlocking {
+//        updateStockDailyFq()
+//    }
+//}

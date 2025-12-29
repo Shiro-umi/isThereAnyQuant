@@ -40,7 +40,7 @@ suspend fun updateStockBasic() = runCatching {
     val basic = form.items.map { col ->
         listOf("${col[0]}", "${col[2]}", "${col[7]}", "${col[8]}", "${col[11]}")
     }
-    commonDb.transaction(StockBasicTable) {
+    commonDb.transaction(StockBasicTable, log = false) {
         StockBasicTable.batchReplace(basic) { (tsCode, name, cnSpell, market, listStatus) ->
             this[StockBasicTable.tsCode] = tsCode
             this[StockBasicTable.name] = name
