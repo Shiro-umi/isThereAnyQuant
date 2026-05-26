@@ -1,0 +1,805 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Quant 自适应布局迁移计划 · 方案 C（canonical scaffold）</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --surface: #161a22;
+    --surface-2: #1d2230;
+    --border: #2a3144;
+    --text: #e6e8ee;
+    --muted: #9aa3b2;
+    --accent: #7aa2ff;
+    --accent-2: #6ee7b7;
+    --warn: #fbbf24;
+    --danger: #f87171;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  html, body { background: var(--bg); color: var(--text); }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+                 "Microsoft YaHei", Helvetica, Arial, sans-serif;
+    line-height: 1.65;
+    font-size: 15px;
+  }
+  main { max-width: 1080px; margin: 0 auto; padding: 48px 28px 96px; }
+  h1 { font-size: 28px; margin: 0 0 8px; letter-spacing: 0.5px; }
+  h2 {
+    font-size: 20px;
+    margin: 48px 0 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 { font-size: 16px; margin: 28px 0 8px; color: var(--accent); }
+  h4 { font-size: 14px; margin: 20px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  p, li { color: var(--text); }
+  .meta { color: var(--muted); font-size: 13px; margin-bottom: 28px; }
+  .meta span + span::before { content: " · "; color: var(--border); }
+
+  table { border-collapse: collapse; width: 100%; margin: 12px 0 20px; font-size: 14px; }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: var(--surface-2); color: var(--text); font-weight: 600; }
+  td code { font-size: 13px; }
+
+  code, pre { font-family: var(--mono); }
+  code {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 13px;
+  }
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  pre code { background: none; border: 0; padding: 0; }
+
+  blockquote {
+    margin: 16px 0;
+    padding: 10px 16px;
+    background: var(--surface);
+    border-left: 3px solid var(--accent);
+    color: var(--text);
+    border-radius: 0 8px 8px 0;
+  }
+  blockquote.warn { border-left-color: var(--warn); }
+  blockquote.danger { border-left-color: var(--danger); }
+
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 24px 0 32px;
+  }
+  .toc ol { margin: 0; padding-left: 22px; }
+  .toc a { color: var(--text); text-decoration: none; }
+  .toc a:hover { color: var(--accent); text-decoration: underline; }
+
+  ul.checklist { list-style: none; padding-left: 4px; }
+  ul.checklist li { padding-left: 26px; position: relative; margin-bottom: 4px; }
+  ul.checklist li::before {
+    content: "☐";
+    position: absolute; left: 4px; top: 0; color: var(--accent);
+  }
+
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; border: 1px solid var(--border); color: var(--muted); }
+  .pill.must { color: var(--danger); border-color: var(--danger); }
+  .pill.should { color: var(--warn); border-color: var(--warn); }
+  .pill.nice { color: var(--accent-2); border-color: var(--accent-2); }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 760px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  .small { font-size: 13px; color: var(--muted); }
+  hr.sep { border: 0; border-top: 1px dashed var(--border); margin: 32px 0; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Quant 自适应布局迁移计划 · 方案 C</h1>
+<div class="meta">
+  <span>目标：全面接入 Material 3 Canonical Layouts（ListDetail / SupportingPane / Feed）</span>
+  <span>范围：<code>compose-app</code>（KMP commonMain · WasmJS / Android）</span>
+  <span>版本基线：CMP 1.10.3 · Kotlin 2.3.20 · Material 3 Adaptive 1.3.0-beta01</span>
+  <span>创建日期：2026-05-12</span>
+</div>
+
+<div class="toc">
+  <strong>目录</strong>
+  <ol>
+    <li><a href="#sec-1">迁移目标与原则</a></li>
+    <li><a href="#sec-2">最终架构总览</a></li>
+    <li><a href="#sec-3">依赖与版本</a></li>
+    <li><a href="#sec-4">阶段划分与里程碑</a></li>
+    <li><a href="#sec-5">阶段 0：基线校准与依赖接入</a></li>
+    <li><a href="#sec-6">阶段 1：WindowSizeClass 重写</a></li>
+    <li><a href="#sec-7">阶段 2：导航 Shell 重构（NavigationSuiteScaffold + nav3）</a></li>
+    <li><a href="#sec-8">阶段 3：Candle 页面迁移到 ListDetailPaneScaffold</a></li>
+    <li><a href="#sec-9">阶段 4：AgentAnalysis 页面迁移到 ListDetail</a></li>
+    <li><a href="#sec-10">阶段 5：Agent 独立工作区方案撤销（双向）</a></li>
+    <li><a href="#sec-11">阶段 6：Sentiment 迁移到 Feed（LazyVerticalGrid Adaptive）</a></li>
+    <li><a href="#sec-12">阶段 7：StrategyTracking / Login / Profile 校准</a></li>
+    <li><a href="#sec-13">阶段 8：旧 API 清理与文档同步</a></li>
+    <li><a href="#sec-14">风险、回滚与验收</a></li>
+    <li><a href="#sec-15">参考资料</a></li>
+  </ol>
+</div>
+
+<!-- ============== 1 ============== -->
+<h2 id="sec-1">1. 迁移目标与原则</h2>
+
+<h3>1.1 业务目标</h3>
+<ul>
+  <li>完全对齐 Material 3 自适应规范（5 档断点 + 3 类 canonical layouts）；</li>
+  <li>消除当前因 <code>600 / 1200</code> 双阈值导致的"组件错位"现象；</li>
+  <li>把"列表→详情"、"主区+辅助区"、"内容流"这三种交互让框架托管，业务代码不再手写双栏/三栏 Row；</li>
+  <li>WasmJS / Android 行为完全一致，保持 KMP commonMain 单点实现。</li>
+</ul>
+
+<h3>1.2 工程原则</h3>
+<ul>
+  <li><strong>分阶段、可回滚</strong>：每阶段都能独立合并、独立验证，必要时单独 revert；</li>
+  <li><strong>共存优先</strong>：旧 <code>WindowSizeClass</code>/<code>ListDetailLayout</code> 与新 scaffold 并存到阶段 8 才统一删除，避免一次性大改；</li>
+  <li><strong>不引入新业务逻辑</strong>：迁移只动布局层，不动 ViewModel/Repository；</li>
+  <li><strong>Experimental API 集中管理</strong>：所有 <code>@ExperimentalMaterial3AdaptiveApi</code> opt-in 通过 module 级 <code>freeCompilerArgs += "-opt-in=..."</code> 统一声明，业务文件不写 opt-in 注解。</li>
+</ul>
+
+<!-- ============== 2 ============== -->
+<h2 id="sec-2">2. 最终架构总览</h2>
+
+<h3>2.1 各页面目标 canonical 类型</h3>
+<table>
+  <thead>
+    <tr><th>页面</th><th>当前</th><th>目标 canonical</th><th>Scaffold 组件</th><th>Pane 结构</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Candle（行情）</td><td>自写双栏 Row + BottomSheet</td>
+      <td>List-Detail</td>
+      <td><code>NavigableListDetailPaneScaffold</code></td>
+      <td>list = 股票列表；detail = K 线+指标；extra = 不使用</td>
+    </tr>
+    <tr>
+      <td>AgentAnalysis（分析历史）</td><td>AnimatedContent 切换 / 双栏 Card</td>
+      <td>List-Detail</td>
+      <td><code>NavigableListDetailPaneScaffold</code></td>
+      <td>list = 历史；detail = Markdown 报告；extra = 不使用</td>
+    </tr>
+    <tr>
+      <td>Agent 独立工作区（已撤销）</td><td>自写三栏 Row + DraggableDivider</td>
+      <td>Supporting-Pane（双 Supporting）</td>
+      <td>2 × <code>NavigableSupportingPaneScaffold</code> 嵌套<br>或单 <code>NavigableListDetailPaneScaffold</code> 启用 extraPane</td>
+      <td>main = 聊天；supporting = 会话列表；extra = 详情面板</td>
+    </tr>
+    <tr>
+      <td>Sentiment（情绪）</td><td>手算 1/2/3 列 Grid</td>
+      <td>Feed</td>
+      <td><code>LazyVerticalGrid</code> + <code>GridCells.Adaptive</code></td>
+      <td>min item width 驱动列数</td>
+    </tr>
+    <tr>
+      <td>StrategyTracking（策略跟踪）</td><td>三档参数缩放 Timeline</td>
+      <td>非 canonical · 参数级响应</td>
+      <td>保留原 <code>BoxWithConstraints</code></td>
+      <td>仅按新断点重映射 spec</td>
+    </tr>
+    <tr>
+      <td>Login（登录）</td><td>分栏 BrandPanel + Form</td>
+      <td>Supporting-Pane（可选）</td>
+      <td>保持自写 Row，按新断点调整</td>
+      <td>main = 表单；supporting = 品牌面板</td>
+    </tr>
+    <tr>
+      <td>Profile</td><td>居中卡片</td>
+      <td>不变（无需 canonical）</td>
+      <td><code>AdaptivePageContainer</code></td>
+      <td>—</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>2.2 导航 Shell 架构</h3>
+<p>
+  顶层 Shell 用官方 <code>NavigationSuiteScaffold</code>（M3 stable，CMP 已通过 <code>compose.material3AdaptiveNavigationSuite</code> 接入），
+  替代当前手写的 <code>CompactNavigationLayout</code> / <code>MediumNavigationLayout</code> / <code>RailNavigationLayout</code>。
+  scaffold 内部仍承载 <code>NavDisplay</code>（nav3），canonical pane 出现在每个目的地的实现里。
+</p>
+
+<pre><code>NavigationSuiteScaffold(
+  // 框架托管 NavBar / NavRail / NavDrawer 切换
+  layoutType = NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo()),
+) {
+  // 内部仍是 nav3 的 NavDisplay；AgentSidebar / Toast 等全局层挂这里
+  NavDisplay(entries = ..., sceneStrategies = listOf(rememberListDetailSceneStrategy()))
+}</code></pre>
+
+<h3>2.3 关键不动点（守护性约束）</h3>
+<ul>
+  <li>所有页面入口仍是 <code>NavDest.*</code>，nav3 backstack 不动；</li>
+  <li><code>AgentSidebar</code> / <code>AgentFloatingCard</code> 行为不变，只是挂载点从手写三栏挪到 <code>NavigationSuiteScaffold</code> 的 content slot；</li>
+  <li>ViewModel 契约（Contract.State / Action / Effect）一字不动；</li>
+  <li><code>ProvideMobileTitleBar</code> 在 Compact 下继续可用（Scaffold topBar 不被 canonical scaffold 接管）。</li>
+</ul>
+
+<!-- ============== 3 ============== -->
+<h2 id="sec-3">3. 依赖与版本</h2>
+
+<h3>3.1 新增制品</h3>
+<table>
+  <thead><tr><th>制品</th><th>版本</th><th>用途</th><th>稳定性</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>org.jetbrains.compose.material3.adaptive:adaptive</code></td>
+      <td><code>1.3.0-beta01</code></td>
+      <td><code>currentWindowAdaptiveInfo()</code>、<code>WindowSizeClass</code>、<code>Posture</code></td>
+      <td>beta，多平台</td>
+    </tr>
+    <tr>
+      <td><code>org.jetbrains.compose.material3.adaptive:adaptive-layout</code></td>
+      <td><code>1.3.0-beta01</code></td>
+      <td><code>ListDetailPaneScaffold</code> / <code>SupportingPaneScaffold</code> 及 <code>AnimatedPane</code></td>
+      <td>beta，多平台</td>
+    </tr>
+    <tr>
+      <td><code>org.jetbrains.compose.material3.adaptive:adaptive-navigation</code></td>
+      <td><code>1.3.0-beta01</code></td>
+      <td><code>NavigableListDetailPaneScaffold</code>、<code>rememberListDetailPaneScaffoldNavigator</code> 及 predictive back</td>
+      <td>beta，多平台</td>
+    </tr>
+    <tr>
+      <td><code>org.jetbrains.compose.material3.adaptive:adaptive-navigation3</code></td>
+      <td><code>1.3.0-beta01</code></td>
+      <td><code>ListDetailSceneStrategy</code> / <code>SupportingPaneSceneStrategy</code>，将 nav3 目的地映射成 pane</td>
+      <td>beta，多平台</td>
+    </tr>
+  </tbody>
+</table>
+
+<blockquote class="warn">
+  <strong>稳定性注意：</strong>1.3.0-beta01 已经过 2025-Q4 稳定的 1.2.0 验证，但仍保留少量 <code>@ExperimentalMaterial3AdaptiveApi</code>。如果想纯 stable，可降版到 <code>1.2.0</code>（无 navigation3 集成）；本计划默认 beta01，因为 nav3 集成是关键收益。
+</blockquote>
+
+<h3>3.2 <code>libs.versions.toml</code> 改动草案</h3>
+<pre><code>[versions]
+material3Adaptive = "1.3.0-beta01"
+
+[libraries]
+compose-material3-adaptive          = { module = "org.jetbrains.compose.material3.adaptive:adaptive",            version.ref = "material3Adaptive" }
+compose-material3-adaptive-layout   = { module = "org.jetbrains.compose.material3.adaptive:adaptive-layout",     version.ref = "material3Adaptive" }
+compose-material3-adaptive-navigation = { module = "org.jetbrains.compose.material3.adaptive:adaptive-navigation", version.ref = "material3Adaptive" }
+compose-material3-adaptive-nav3     = { module = "org.jetbrains.compose.material3.adaptive:adaptive-navigation3", version.ref = "material3Adaptive" }
+
+[bundles]
+compose-adaptive = [
+  "compose-material3-adaptive",
+  "compose-material3-adaptive-layout",
+  "compose-material3-adaptive-navigation",
+  "compose-material3-adaptive-nav3",
+]</code></pre>
+
+<p><code>compose-app/build.gradle.kts</code> 在 <code>commonMain</code> 增加 <code>implementation(libs.bundles.compose.adaptive)</code>。</p>
+
+<h3>3.3 Opt-in 集中声明</h3>
+<pre><code>kotlin {
+  sourceSets.all {
+    languageSettings.optIn("androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi")
+  }
+}</code></pre>
+
+<!-- ============== 4 ============== -->
+<h2 id="sec-4">4. 阶段划分与里程碑</h2>
+
+<table>
+  <thead>
+    <tr><th>阶段</th><th>主题</th><th>交付物</th><th>预估</th><th>可独立 ship</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>0</td><td>依赖接入 + 编译验证</td><td>gradle 构建通过 · 烟雾测试</td><td>0.5d</td><td>✅</td></tr>
+    <tr><td>1</td><td>新 <code>WindowSizeClass</code> + 适配层</td><td>新旧两套并存，新 API 上线</td><td>1d</td><td>✅（无视觉变化）</td></tr>
+    <tr><td>2</td><td>导航 Shell 切到 <code>NavigationSuiteScaffold</code></td><td>NavBar/NavRail 由框架托管</td><td>1.5d</td><td>✅</td></tr>
+    <tr><td>3</td><td>Candle → ListDetailPaneScaffold</td><td>K 线页面接入 canonical</td><td>2d</td><td>✅</td></tr>
+    <tr><td>4</td><td>AgentAnalysis → ListDetailPaneScaffold</td><td>分析历史接入 canonical</td><td>1d</td><td>✅</td></tr>
+    <tr><td>5</td><td>Agent 独立工作区方案撤销</td><td>聊天三栏接入 canonical</td><td>2d</td><td>✅</td></tr>
+    <tr><td>6</td><td>Sentiment → Feed</td><td>情绪 Grid 用 Adaptive</td><td>0.5d</td><td>✅</td></tr>
+    <tr><td>7</td><td>StrategyTracking / Login / Profile 校准</td><td>断点表重新映射</td><td>0.5d</td><td>✅</td></tr>
+    <tr><td>8</td><td>清理旧 API + 文档同步</td><td>删除旧 <code>ListDetailLayout</code> 等</td><td>0.5d</td><td>✅</td></tr>
+  </tbody>
+</table>
+
+<p class="small">总工作量 ≈ 9.5 人日（不含集成测试与设计 review）。每阶段独立 PR。</p>
+
+<!-- ============== 5 ============== -->
+<h2 id="sec-5">5. 阶段 0：基线校准与依赖接入</h2>
+
+<h3>5.1 任务</h3>
+<ul class="checklist">
+  <li>在 <code>libs.versions.toml</code> 加入 §3.2 的依赖；</li>
+  <li><code>compose-app/build.gradle.kts</code> 的 <code>commonMain</code> 引入 <code>libs.bundles.compose.adaptive</code>；</li>
+  <li>在 <code>compose-app</code> module 全局声明 opt-in（§3.3）；</li>
+  <li>新建 <code>ui/core/adaptive/m3/</code> 目录，作为新 API 的承载位置（避免污染旧文件）；</li>
+  <li>跑 <code>./gradlew :compose-app:wasmJsBrowserDevelopmentRun</code> 与 <code>./gradlew :compose-app:assembleDebug</code> 二次验证；</li>
+  <li>新建烟雾页 <code>SmokeAdaptive</code>（临时，第 8 阶段删）：内部仅用 <code>currentWindowAdaptiveInfo()</code> 渲染断点文本，确认 Wasm 与 Android 都跑得起来。</li>
+</ul>
+
+<h3>5.2 验收</h3>
+<ul>
+  <li>Wasm 浏览器刷新后能看到 SmokeAdaptive 显示正确的 <code>WindowWidthSizeClass</code>（800dp 浏览器 → Medium）；</li>
+  <li>Android 设备旋转能触发重组并切换标签；</li>
+  <li>没有引入任何 Kotlin 编译警告（除官方已知的 deprecation）。</li>
+</ul>
+
+<!-- ============== 6 ============== -->
+<h2 id="sec-6">6. 阶段 1：WindowSizeClass 重写</h2>
+
+<h3>6.1 设计</h3>
+<p>
+  新 <code>ui/core/adaptive/m3/AdaptiveInfo.kt</code> 完全用官方 <code>currentWindowAdaptiveInfo()</code>，
+  对外暴露和现有 <code>AdaptiveLayoutConfig</code> <strong>语义兼容</strong>的接口，使老页面无须立刻改。
+</p>
+
+<pre><code>@Stable
+data class AdaptiveLayoutConfig(
+  val widthSizeClass: WindowWidthSizeClass,
+  val heightSizeClass: WindowHeightSizeClass,
+  val posture: Posture,
+) {
+  val isCompact:  Boolean get() = widthSizeClass == WindowWidthSizeClass.COMPACT
+  val isMedium:   Boolean get() = widthSizeClass == WindowWidthSizeClass.MEDIUM   // 600..839
+  val isExpanded: Boolean get() = widthSizeClass == WindowWidthSizeClass.EXPANDED // 840..1199
+  val isLarge:    Boolean get() = widthSizeClass == WindowWidthSizeClass.LARGE    // 1200..1599
+  val isXLarge:   Boolean get() = widthSizeClass == WindowWidthSizeClass.EXTRA_LARGE // >=1600
+
+  /** 兼容旧语义：Compact 单栏；其余双栏 */
+  val useTwoPane: Boolean get() = !isCompact
+
+  /** 兼容旧语义：底部导航仅 Compact */
+  val useBottomNavigation: Boolean get() = isCompact
+  val useNavigationRail:   Boolean get() = isMedium || isExpanded
+  val useNavigationDrawer: Boolean get() = isLarge  || isXLarge
+}
+
+@Composable
+fun rememberAdaptiveLayoutConfig(): AdaptiveLayoutConfig {
+  val info = currentWindowAdaptiveInfo(supportLargeAndXLargeWidth = true)
+  return remember(info) {
+    AdaptiveLayoutConfig(info.windowSizeClass.windowWidthSizeClass,
+                        info.windowSizeClass.windowHeightSizeClass,
+                        info.windowPosture)
+  }
+}</code></pre>
+
+<h3>6.2 兼容层</h3>
+<ul>
+  <li>旧 <code>org.shiroumi.quant_kmp.ui.core.adaptive.AdaptiveLayoutConfig</code> 改为 <code>typealias</code> 指向新类型；</li>
+  <li>旧 <code>rememberAdaptiveLayoutConfig()</code> 函数体改为转发到新实现，<strong>不删函数签名</strong>；</li>
+  <li><code>WindowSizeClass.kt</code> 中的 <code>sealed class</code> 三档保留，但每个 <code>data object</code> 多加一个 <code>fromM3()</code> 工厂，把 LARGE/XL 折叠到 Expanded（语义降级），保证现有所有页面分支不爆。</li>
+</ul>
+
+<h3>6.3 任务</h3>
+<ul class="checklist">
+  <li>新增 <code>ui/core/adaptive/m3/AdaptiveInfo.kt</code>；</li>
+  <li>把 <code>AdaptiveLayoutConfig</code> 改成 typealias，删除 expect/actual 实现（commonMain 已能拿到 windowInfo）；</li>
+  <li>删除 <code>WindowSizeClass.js.kt</code> 中手写的 <code>window.innerWidth</code> 监听（M3 库已内置）；</li>
+  <li>Android <code>WindowSizeClass.android.kt</code> 的 <code>LocalConfiguration</code> 取数同样删除；</li>
+  <li>全量编译 + 烟雾页验证 700/900/1100/1300/1700 dp 都能分到正确档；</li>
+  <li>更新 <code>.claude/skills/adaptive-layout/references/adaptive-layout-architecture.md</code> 第 2、3、7 节。</li>
+</ul>
+
+<blockquote>
+  <strong>关键收益：</strong>这一步独立完成后，<code>useTwoPane</code> 在 700dp 浏览器从 <em>true</em> 变成 <em>false</em>（M3 Medium 是单栏），
+  CandleScreen 现有的"列表挤压、详情过窄"问题在此阶段就消失大半。
+</blockquote>
+
+<!-- ============== 7 ============== -->
+<h2 id="sec-7">7. 阶段 2：导航 Shell 重构</h2>
+
+<h3>7.1 目标</h3>
+<p>
+  把 <code>Navigation.kt</code> 中手写的三个 NavigationLayout（Compact / Medium / Rail）合并成单一
+  <code>NavigationSuiteScaffold</code>，由 M3 自动决定 NavBar / NavRail / NavDrawer。
+</p>
+
+<h3>7.2 改造前 vs 改造后</h3>
+<div class="grid-2">
+<pre><code>// 改造前
+when {
+  config.isCompact -> CompactNavigationLayout(...)
+  config.isMedium  -> MediumNavigationLayout(...)
+  else             -> RailNavigationLayout(...)
+}</code></pre>
+<pre><code>// 改造后
+NavigationSuiteScaffold(
+  navigationSuiteItems = {
+    navDests.forEach { dest -&gt;
+      item(
+        selected = currentRoute == dest,
+        onClick  = { navigator.navigate(dest) },
+        icon     = { Icon(dest.icon, null) },
+        label    = { Text(dest.label) },
+      )
+    }
+  },
+  layoutType = NavigationSuiteScaffoldDefaults
+                 .calculateFromAdaptiveInfo(currentWindowAdaptiveInfo()),
+) {
+  AppContent(...)  // 含 NavDisplay + 全局 AgentSidebar + Toast
+}</code></pre>
+</div>
+
+<h3>7.3 注意事项</h3>
+<ul>
+  <li><strong>Compact 模式的 MobileTitleBar 仍要在 content 内部用 <code>Scaffold(topBar = ...)</code> 承载</strong>，<code>NavigationSuiteScaffold</code> 不提供 topBar slot；</li>
+  <li><strong>AgentSidebar</strong> 不是 Material 标准导航组件，必须挂在 <em>content lambda</em> 内，与 <code>NavDisplay</code> 并列；</li>
+  <li><strong>AgentFloatingCard</strong>（Compact）改为根据 <code>config.useBottomNavigation</code> 显示；</li>
+  <li>5 档断点要决定 NavRail 何时变 NavDrawer：M3 默认 Large/XL 才用 NavDrawer。若产品上不需要 Drawer，可强制 <code>layoutType = NavigationSuiteType.NavigationRail</code> 在 Medium..XL 全用 Rail；</li>
+  <li>auth 未登录时直接 <code>LoginScreen</code>，不进入 scaffold（与现状一致）。</li>
+</ul>
+
+<h3>7.4 任务</h3>
+<ul class="checklist">
+  <li>在 <code>ui/navigation/AppNavigationSuite.kt</code> 新建顶层 shell；</li>
+  <li><code>AppNavigation</code> 入口改为调用新 shell；</li>
+  <li>删除 <code>CompactNavigationLayout</code> / <code>MediumNavigationLayout</code> / <code>RailNavigationLayout</code>，把它们的 content lambda 抽到 <code>AppContent.kt</code> 共享；</li>
+  <li>验证：</li>
+  <ul>
+    <li>Wasm 浏览器 440 / 700 / 900 / 1300 / 1700 dp 五档下 NavBar/NavRail/NavDrawer 行为正确；</li>
+    <li>路由 + back stack 行为与旧实现一致；</li>
+    <li>AgentSidebar / AgentFloatingCard 在三个区间都按预期挂载；</li>
+  </ul>
+  <li>更新 skill 文档第 5 节"全局导航架构"。</li>
+</ul>
+
+<!-- ============== 8 ============== -->
+<h2 id="sec-8">8. 阶段 3：Candle 页面迁移到 ListDetailPaneScaffold</h2>
+
+<h3>8.1 现状分析</h3>
+<p>
+  当前 <code>CandleScreen.kt</code> 在 Compact 下走"<code>CandleChartSection</code> 全屏 + 顶部按钮拉出 <code>StockListBottomSheet</code>"，
+  在 Medium/Expanded 下走"<code>Row(StockListPanel, CandleChartSection)</code>"。列表选中态由 <code>CandleViewModel</code> 维护。
+</p>
+
+<h3>8.2 目标结构</h3>
+<pre><code>val navigator = rememberListDetailPaneScaffoldNavigator&lt;String&gt;() // contentKey = tsCode
+
+NavigableListDetailPaneScaffold(
+  navigator = navigator,
+  listPane  = {
+    AnimatedPane {
+      StockListPanel(
+        stocks         = state.stocks,
+        selectedTsCode = navigator.currentDestination?.contentKey,
+        onSelect       = { tsCode -&gt;
+          viewModel.dispatch(SelectStock(tsCode))
+          scope.launch { navigator.navigateTo(ListDetailPaneScaffoldRole.Detail, tsCode) }
+        },
+      )
+    }
+  },
+  detailPane = {
+    AnimatedPane {
+      val tsCode = navigator.currentDestination?.contentKey
+      if (tsCode != null) {
+        CandleChartSection(
+          state     = state,
+          tsCode    = tsCode,
+          isCompact = scaffoldValueIsSinglePane(navigator),
+          onBack    = if (scaffoldValueIsSinglePane(navigator))
+                        { { scope.launch { navigator.navigateBack() } } }
+                      else null,
+        )
+      } else {
+        EmptyDetailHint()
+      }
+    }
+  },
+)</code></pre>
+
+<h3>8.3 处理要点</h3>
+<ul>
+  <li><strong>navigator 与 ViewModel 的双向同步：</strong>
+    选中态依然以 ViewModel 为准（涉及 WebSocket 订阅切换），navigator 只承担 UI 姿态。<code>navigateTo</code> 是触发 UI 切换，<code>dispatch(SelectStock)</code> 才触发数据订阅。
+  </li>
+  <li><strong>Compact 不再用 BottomSheet：</strong>scaffold 已经在 Compact 下自动单栏切换；
+    可去掉 <code>StockListBottomSheet</code> 与 <code>isStockListExpanded</code> 状态。如果产品强烈希望保留"列表抽屉"手感，
+    可以在 listPane 内裹一个全屏 Container，但更建议遵循 canonical。
+  </li>
+  <li><strong>顶部栏：</strong>Compact 下用 <code>ProvideMobileTitleBar</code>，返回箭头绑定到 <code>navigator.navigateBack()</code>；Medium+ 不显示返回箭头。
+    需要写一个 helper <code>fun ThreePaneScaffoldNavigator&lt;*&gt;.isCurrentlySinglePane(): Boolean</code> 判断单栏态。
+  </li>
+  <li><strong>列表与详情共享 state：</strong>listPane 里读 <code>state.stocks</code>，detailPane 里读 <code>state.candleData</code>。
+    不要把整个 <code>CandleScreen</code> 拆分到两个 file，保持单文件管理 contract。
+  </li>
+  <li><strong>K 线指标 BottomSheet 不变</strong>，仍由 <code>CandleChartSection</code> 内部处理。</li>
+</ul>
+
+<h3>8.4 任务</h3>
+<ul class="checklist">
+  <li><code>ui/core/adaptive/m3/PaneHelpers.kt</code> 提供 <code>isCurrentlySinglePane</code>、<code>animatedPaneOrNull</code>；</li>
+  <li><code>CandleScreen.kt</code> 整体重写为单一 <code>NavigableListDetailPaneScaffold</code>，移除 <code>StockListBottomSheet</code>；</li>
+  <li>测试：</li>
+  <ul>
+    <li>Wasm 440dp：仅列表，点项进详情，返回箭头回到列表；</li>
+    <li>Wasm 800dp（M3 Medium，单栏）：与 440dp 行为一致；</li>
+    <li>Wasm 1000dp（M3 Expanded，双栏）：列表 + 详情并列，点项无返回；</li>
+    <li>Wasm 1500dp（M3 Large）：相同双栏，scaffold 自动扩列表宽度上限；</li>
+    <li>Android 旋转横竖各档自动切换；</li>
+  </ul>
+  <li>验证 WebSocket 订阅切换在 navigator 切详情时不掉链；</li>
+  <li>更新 skill 文档 §6.2。</li>
+</ul>
+
+<!-- ============== 9 ============== -->
+<h2 id="sec-9">9. 阶段 4：AgentAnalysis 迁移到 ListDetail</h2>
+
+<h3>9.1 现状</h3>
+<p>
+  Compact 走 <code>AnimatedContent</code> + 自管 <code>state.isDetailOpen</code>，Medium/Expanded 走双栏 Card。
+</p>
+
+<h3>9.2 目标</h3>
+<pre><code>val navigator = rememberListDetailPaneScaffoldNavigator&lt;AgentAnalysisResultDto&gt;()
+
+NavigableListDetailPaneScaffold(
+  navigator = navigator,
+  listPane = {
+    AnimatedPane {
+      AgentAnalysisListPanel(
+        results       = state.results,
+        selectedId    = navigator.currentDestination?.contentKey?.id,
+        onItemClick   = { dto -&gt; scope.launch { navigator.navigateTo(Role.Detail, dto) } },
+      )
+    }
+  },
+  detailPane = {
+    AnimatedPane {
+      navigator.currentDestination?.contentKey?.let { dto -&gt;
+        AgentAnalysisDetailPanel(
+          result = dto,
+          onBack = if (isSinglePane) { { scope.launch { navigator.navigateBack() } } } else null,
+        )
+      } ?: EmptyDetailHint()
+    }
+  },
+)</code></pre>
+
+<h3>9.3 要点</h3>
+<ul>
+  <li>移除 <code>state.isDetailOpen</code>、<code>Action.CloseDetail</code>、<code>Action.SelectResult</code> 等 UI 状态（详情态由 navigator 接管）。
+    contract 改造点：<code>SelectResult</code> 仍保留（用于触发 fetch 详情），但不再控制可见性；</li>
+  <li>外层 <code>Scaffold</code> 与 <code>SnackbarHost</code> 保留；</li>
+  <li><code>ProvideMobileTitleBar</code> 的返回 lambda 改为 <code>navigator.navigateBack</code>。</li>
+</ul>
+
+<h3>9.4 任务</h3>
+<ul class="checklist">
+  <li>contract 清理：删 <code>isDetailOpen</code>，但保留 <code>SelectResult</code>；</li>
+  <li><code>AgentAnalysisScreen.kt</code> 重写为 scaffold；</li>
+  <li>验证四档窗口的转场动画、SnackBar 不被覆盖；</li>
+  <li>更新 skill 文档 §6.5。</li>
+</ul>
+
+<!-- ============== 10 ============== -->
+<h2 id="sec-10">10. 阶段 5：Agent 独立工作区方案撤销</h2>
+
+<h3>10.1 现状难点</h3>
+<p>
+  原 Agent 独立工作区方案曾计划使用 Compact 单列、Medium 双列、Expanded 三列，
+  且每个分隔条都用 <code>DraggableDivider</code> 手动维护宽度。这不是 ListDetail 的形态（list 不是数据选择），更像
+  "main = chat" + 两个 supporting（左：会话历史；右：详情）。
+</p>
+
+<h3>10.2 方案选择</h3>
+<table>
+  <thead><tr><th>方案</th><th>组件</th><th>优点</th><th>缺点</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>A. 单 ListDetail，三 pane</td>
+      <td><code>ListDetail + extraPane</code></td>
+      <td>原生支持 list/detail/extra</td>
+      <td>语义错位（chat 是 detail？session 是 list？extra 又是详情？三者优先级不对）</td>
+    </tr>
+    <tr>
+      <td>B. 单 SupportingPane，左侧 supporting 折叠</td>
+      <td><code>SupportingPaneScaffold</code></td>
+      <td>main = chat 语义干净</td>
+      <td>无法同时挂两个 supporting</td>
+    </tr>
+    <tr>
+      <td><strong>C. SupportingPane 嵌套 SupportingPane</strong>（推荐）</td>
+      <td>外层 main=chat / supporting=details；内层 main=外层全部 / supporting=sessionList</td>
+      <td>语义正确；两个 supporting 各自按断点折叠；可保留 Drag 行为</td>
+      <td>两个 navigator，需要状态同步</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>10.3 当前结论</h3>
+<p>独立 Agent 工作区方案已撤销，不再作为顶级导航入口；当前保留 Sidebar/FloatingCard 快捷入口承载对话、工具审批和上下文分析。</p>
+
+<h3>10.4 要点</h3>
+<ul>
+  <li><strong>放弃 <code>DraggableDivider</code> 的拖拽宽度调节</strong>（M3 1.2+ 才有官方 <code>paneExpansionDraggable</code>，且仍 Experimental）。
+    如果业务上拖拽是刚需，单独立项；本计划默认<strong>不保留</strong>拖拽；</li>
+  <li>不再维护页面级 session/detail supporting pane；相关能力收敛到 Sidebar/FloatingCard。</li>
+</ul>
+
+<h3>10.5 任务</h3>
+<ul class="checklist">
+  <li>删除独立 Agent 工作区顶级入口和页面专属 Composable；</li>
+  <li>保留 Sidebar/FloatingCard 对话入口；</li>
+  <li>更新 skill 文档，避免后续按旧方案恢复顶级 tab。</li>
+</ul>
+
+<!-- ============== 11 ============== -->
+<h2 id="sec-11">11. 阶段 6：Sentiment 迁移到 Feed</h2>
+
+<h3>11.1 改造方案</h3>
+<pre><code>LazyVerticalGrid(
+  columns = GridCells.Adaptive(minSize = 320.dp),
+  contentPadding = PaddingValues(horizontal = pagePadding, vertical = 16.dp),
+  verticalArrangement   = Arrangement.spacedBy(16.dp),
+  horizontalArrangement = Arrangement.spacedBy(16.dp),
+) {
+  item(span = { GridItemSpan(maxLineSpan) }) { SentimentHeader(...) }
+  item(span = { GridItemSpan(maxLineSpan) }) { FeaturedSentimentCard(...) }
+  items(metricsCards) { card -&gt; MetricsCard(card) }
+}</code></pre>
+
+<h3>11.2 要点</h3>
+<ul>
+  <li>移除原"按断点写死 1/2/3 列"的逻辑；列数由 <code>minSize</code> 自动决定；</li>
+  <li><code>SentimentHeader</code>、<code>FeaturedSentimentCard</code> 用 <code>maxLineSpan</code> 横跨整行；</li>
+  <li>原 Expanded 下的"FeaturedCard + SecondaryMetricsCard 合并跨 2 列"特殊排布在新规范下变成普通 item，简化代码（如产品坚持要保留，再用 <code>span</code> 局部处理）；</li>
+  <li>card 内部布局保持不变。</li>
+</ul>
+
+<h3>11.3 任务</h3>
+<ul class="checklist">
+  <li><code>SentimentScreen.kt</code> 改为 <code>LazyVerticalGrid.Adaptive</code>；</li>
+  <li>移除 <code>calculateGridColumns</code>（如无其他调用方）；</li>
+  <li>验证 Wasm 五档显示效果，确认无空白条；</li>
+  <li>更新 skill 文档 §6.3。</li>
+</ul>
+
+<!-- ============== 12 ============== -->
+<h2 id="sec-12">12. 阶段 7：StrategyTracking / Login / Profile 校准</h2>
+
+<h3>12.1 StrategyTracking</h3>
+<p>不属于 canonical，仅做断点重映射：</p>
+<table>
+  <thead><tr><th>spec</th><th>新 Compact</th><th>新 Medium (600-839)</th><th>新 Expanded (≥840)</th></tr></thead>
+  <tbody>
+    <tr><td>columnWidth</td><td>224</td><td>240</td><td>284</td></tr>
+    <tr><td>columnGap</td><td>72</td><td>96</td><td>112</td></tr>
+    <tr><td>pagePadding</td><td>16</td><td>24</td><td>40</td></tr>
+  </tbody>
+</table>
+
+<h3>12.2 Login</h3>
+<p>
+  保留自写 Row，但改用新 <code>config</code>：<code>config.isCompact</code> 单栏；
+  <code>config.isMedium</code> 仍单栏（M3 规范下 BrandPanel 在 600-839dp 不展示）；
+  <code>config.isExpanded || isLarge || isXLarge</code> 才并排 BrandPanel + Form。这能消除 700dp 浏览器下 BrandPanel 被压扁的问题。
+</p>
+
+<h3>12.3 Profile</h3>
+<p>保留 <code>AdaptivePageContainer</code>，仅把 <code>contentMaxWidth</code> 升级到与新 5 档对齐的映射表。</p>
+
+<!-- ============== 13 ============== -->
+<h2 id="sec-13">13. 阶段 8：旧 API 清理与文档同步</h2>
+
+<ul class="checklist">
+  <li>删除 <code>ui/core/adaptive/WindowSizeClass.kt</code>（sealed class 版本）；</li>
+  <li>删除 <code>ui/core/adaptive/WindowSizeClass.js.kt</code> / <code>WindowSizeClass.android.kt</code>；</li>
+  <li>删除 <code>ui/core/adaptive/AdaptiveLayouts.kt</code> 中的 <code>ListDetailLayout</code>、<code>TwoPaneListDetailLayout</code>、<code>CompactListDetailLayout</code>；保留 <code>AdaptivePageContainer</code>；</li>
+  <li>删除独立 Agent 工作区页面专属布局文件；</li>
+  <li>把烟雾页 <code>SmokeAdaptive</code> 一并移除；</li>
+  <li>重写 <code>.claude/skills/adaptive-layout/references/adaptive-layout-architecture.md</code>：</li>
+  <ul>
+    <li>第 2 节断点表替换为 M3 五档；</li>
+    <li>第 3 节 <code>AdaptiveLayoutConfig</code> 重写；</li>
+    <li>第 4 节增加"Canonical scaffold 速查"；</li>
+    <li>第 5 节导航架构改为 <code>NavigationSuiteScaffold</code>；</li>
+    <li>第 6 节每页布局映射全部刷新；</li>
+    <li>第 7 节"平台实现细节"删除（M3 库已封装）；</li>
+    <li>第 8 节反模式追加"禁止再手写 ListDetail Row"。</li>
+  </ul>
+  <li>更新 <code>memory/MEMORY.md</code> 中关于自适应布局的记忆条目；</li>
+  <li>提交 PR 标题：<code>refactor(ui): migrate adaptive layout to M3 canonical scaffolds</code>。</li>
+</ul>
+
+<!-- ============== 14 ============== -->
+<h2 id="sec-14">14. 风险、回滚与验收</h2>
+
+<h3>14.1 风险表</h3>
+<table>
+  <thead><tr><th>风险</th><th>等级</th><th>缓解</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>Material 3 Adaptive 1.3 beta，<br>WasmJS 上某 API 触发崩溃</td>
+      <td><span class="pill must">高</span></td>
+      <td>阶段 0 烟雾页验证 + 必要时回退到 1.2.0 stable（牺牲 nav3 集成）</td>
+    </tr>
+    <tr>
+      <td>NavigationSuiteScaffold 不支持<br>topBar slot，<br>Compact 顶栏排版回归</td>
+      <td><span class="pill should">中</span></td>
+      <td>content lambda 内自挂 <code>Scaffold(topBar = MobileNavTitleBar)</code>，分阶段 PR 独立验收</td>
+    </tr>
+    <tr>
+      <td>Agent 独立工作区已撤销<br>不再接入顶级导航</td>
+      <td><span class="pill should">中</span></td>
+      <td>阶段 5 独立分支验证；预留单层 SupportingPane fallback（左 supporting 自管，右 detail 退化为对话内 BottomSheet）</td>
+    </tr>
+    <tr>
+      <td>WebSocket 订阅在 navigator<br>切详情时被打断</td>
+      <td><span class="pill should">中</span></td>
+      <td>选中态仍由 ViewModel 主导，navigator 只反映 UI；阶段 3 加专项测试</td>
+    </tr>
+    <tr>
+      <td>Sentiment 自适应列数<br>导致单页空白比过大</td>
+      <td><span class="pill nice">低</span></td>
+      <td>调 <code>minSize</code>，必要时不同 widthClass 改不同 minSize</td>
+    </tr>
+    <tr>
+      <td>Wasm predictive back<br>不可用，返回手势缺失</td>
+      <td><span class="pill nice">低</span></td>
+      <td>保留按钮 + 浏览器 BFCache + nav3 back stack 兜底</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>14.2 回滚策略</h3>
+<ul>
+  <li>每阶段独立 PR，独立 revert；</li>
+  <li>阶段 1（兼容层）一旦合并，所有页面仍能跑老代码，<strong>这是一个稳定锚点</strong>；</li>
+  <li>阶段 3/4/5 任一页面出问题，单独 revert 该页面 PR，不影响其他页面与 shell；</li>
+  <li>阶段 8 之前，旧 API 都不删，回滚成本接近零。</li>
+</ul>
+
+<h3>14.3 验收清单</h3>
+<ul class="checklist">
+  <li>Wasm Chrome 五档窗口（440 / 700 / 900 / 1300 / 1700 dp）逐档手动 smoke；</li>
+  <li>Android 真机 + 折叠屏模拟器双向旋转通过；</li>
+  <li>用 Chrome DevTools 录制 Lighthouse → Cumulative Layout Shift &lt; 0.1；</li>
+  <li>K 线订阅链路在切换详情时不掉连接（断网测试 + 控制台不报错）；</li>
+  <li>所有页面在新 5 档下都没有横向滚动条；</li>
+  <li>skill 文档 + MEMORY.md 同步更新；</li>
+  <li>PR 描述列出"消失的旧文件 / 新增的 scaffold / 5 档断点截图"。</li>
+</ul>
+
+<!-- ============== 15 ============== -->
+<h2 id="sec-15">15. 参考资料</h2>
+<ul>
+  <li><a href="https://m3.material.io/foundations/layout/applying-layout/window-size-classes">M3 · Window Size Classes</a></li>
+  <li><a href="https://m3.material.io/foundations/layout/canonical-layouts/overview">M3 · Canonical Layouts Overview</a></li>
+  <li><a href="https://developer.android.com/develop/ui/compose/layouts/adaptive/canonical-layouts">Android Dev · Canonical layouts in Compose</a></li>
+  <li><a href="https://developer.android.com/develop/ui/compose/layouts/adaptive/list-detail">Android Dev · Build a list-detail layout</a></li>
+  <li><a href="https://developer.android.com/develop/ui/compose/layouts/adaptive/build-a-supporting-pane-layout">Android Dev · Build a supporting pane layout</a></li>
+  <li><a href="https://developer.android.com/jetpack/androidx/releases/compose-material3-adaptive">Compose Material 3 Adaptive · Release notes</a></li>
+  <li><a href="https://kotlinlang.org/docs/multiplatform/compose-adaptive-layouts.html">Kotlin Multiplatform · Adaptive layouts</a></li>
+  <li><a href="https://central.sonatype.com/artifact/org.jetbrains.compose.material3.adaptive/adaptive-layout-wasm-js">Maven Central · adaptive-layout-wasm-js</a></li>
+  <li><a href="https://central.sonatype.com/artifact/org.jetbrains.compose.material3.adaptive/adaptive-navigation-wasm-js">Maven Central · adaptive-navigation-wasm-js</a></li>
+</ul>
+
+<hr class="sep">
+<p class="small">本文档由 Claude (Opus 4.7) 起草，落地前需经过 UI / 架构师 review，并在阶段 0 的烟雾测试通过后再正式排期。</p>
+
+</main>
+</body>
+</html>

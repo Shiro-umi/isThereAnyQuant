@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <group
+        android:name="mark"
+        android:pivotX="54"
+        android:pivotY="54">
+        <path
+            android:fillColor="@android:color/transparent"
+            android:pathData="M31.6,72.4 L31.6,80.4 M49.2,59.6 L49.2,80.4 M66.8,46.8 L66.8,80.4"
+            android:strokeColor="#8F766E"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:strokeWidth="8.32" />
+        <path
+            android:fillColor="@android:color/transparent"
+            android:pathData="M25.2,66.0 L44.4,46.8 L57.2,53.2 L82.8,27.6 M82.8,27.6 L82.8,50.0 M82.8,27.6 L60.4,27.6"
+            android:strokeColor="#E4C8BF"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:strokeWidth="8.32" />
+    </group>
+</vector>

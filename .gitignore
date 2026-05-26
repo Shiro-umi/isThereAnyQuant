@@ -1,0 +1,98 @@
+.gradle
+.gradle-local/
+.gradle_home/
+.gradle-home/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### IntelliJ IDEA ###
+.idea
+.idea/modules.xml
+.idea/jarRepositories.xml
+.idea/compiler.xml
+.idea/libraries/
+*.iws
+*.iml
+*.ipr
+out/
+!**/src/main/**/out/
+!**/src/test/**/out/
+
+### Kotlin ###
+.kotlin
+
+### Eclipse ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+### VS Code ###
+.vscode/
+
+### Mac OS ###
+.DS_Store
+
+/local.properties
+/.idea/libraries/Permanent_Script_Dependencies.xml
+/.idea/inspectionProfiles/Project_Default.xml
+
+# 允许跟踪prompt配置文件，但排除其他assets
+assets/*
+!assets/**/
+!assets/prompt_*
+!assets/*/
+!assets/*/*
+/ktor-server/src/main/resources/static
+
+### Deploy & Build Artifacts ###
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/libs/*.jar
+deploy/local/quant-server/lib/*.jar
+deploy/local/quant-server/logs/
+*.log
+*.log.*
+
+### Configuration ###
+# 忽略实际配置文件（可能包含敏感信息）
+/config.yaml*
+!/config.example.yaml
+/.env.model
+/private/
+/compose-app/release.keystore
+/compose-app/keystore.properties
+
+### Agent / Claude artifacts ###
+/.claude/
+# 公开仓库不跟踪私有 Agent 分析 skill；本地可通过 private submodule 装配。
+/agent/analysis-skills
+/agent/analysis-skills/
+# 防止将 shell home 目录别名误写入仓库内
+~/
+*/~/
+
+### Local tool binaries ###
+tools/gh
+.backtest/
+
+### Local planning / scratch artifacts ###
+/plans
+/plans/
+/temp
+/temp/

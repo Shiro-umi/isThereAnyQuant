@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Quant.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#1A0F0E</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/avd_splash_icon</item>
+        <item name="windowSplashScreenAnimationDuration">420</item>
+        <item name="postSplashScreenTheme">@style/Theme.Quant</item>
+    </style>
+</resources>

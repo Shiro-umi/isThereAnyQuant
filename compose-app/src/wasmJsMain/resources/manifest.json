@@ -1,0 +1,42 @@
+{
+  "name": "BigSmart",
+  "short_name": "BigSmart",
+  "description": "AI驱动的量化分析平台",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#1A110F",
+  "theme_color": "#1A110F",
+  "categories": ["finance", "productivity", "utilities"],
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "新建任务",
+      "short_name": "新建",
+      "description": "快速创建新的分析任务",
+      "url": "/?page=home",
+      "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "历史记录",
+      "short_name": "历史",
+      "description": "查看分析历史记录",
+      "url": "/?page=history",
+      "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    }
+  ],
+  "related_applications": [],
+  "features": ["cross-origin-isolated"]
+}

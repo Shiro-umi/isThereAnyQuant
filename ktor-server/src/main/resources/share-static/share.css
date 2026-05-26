@@ -1,0 +1,557 @@
+/*
+ * 分享页样式：对齐 Compose 端 warmBrownRedDark 主题（Material 3）。
+ *
+ * 设计原则：
+ * - 暗色背景，暖棕红 primary，温和的对比度
+ * - 排版：Noto Sans SC，与 Compose 端 AppTypography 一致
+ * - 自定义块（涨停 / 量价 / 市场情绪）样式 1:1 还原 Compose 渲染
+ * - 整页只包含正文本身，无导航、无登录入口
+ */
+
+:root, [data-theme="dark"] {
+    /* === Material 3 系统色 token（同步 Compose warmBrownRedDark） === */
+    --md-sys-color-primary: #FFB5A0;
+    --md-sys-color-on-primary: #561F0F;
+    --md-sys-color-primary-container: #723523;
+    --md-sys-color-on-primary-container: #FFDBD1;
+    --md-sys-color-secondary: #E7BDB2;
+    --md-sys-color-on-secondary: #442A22;
+    --md-sys-color-secondary-container: #5D4037;
+    --md-sys-color-on-secondary-container: #FFDBD1;
+    --md-sys-color-tertiary: #D8C58D;
+    --md-sys-color-on-tertiary: #3B2F05;
+    --md-sys-color-tertiary-container: #534619;
+    --md-sys-color-on-tertiary-container: #F5E1A7;
+    --md-sys-color-error: #FFB4AB;
+    --md-sys-color-on-error: #690005;
+    --md-sys-color-error-container: #93000A;
+    --md-sys-color-on-error-container: #FFDAD6;
+    --md-sys-color-background: #1A110F;
+    --md-sys-color-on-background: #F1DFDA;
+    --md-sys-color-surface: #1A110F;
+    --md-sys-color-on-surface: #F1DFDA;
+    --md-sys-color-surface-variant: #53433F;
+    --md-sys-color-on-surface-variant: #D8C2BC;
+    --md-sys-color-outline: #A08C87;
+    --md-sys-color-outline-variant: #53433F;
+    --md-sys-color-surface-container-lowest: #140C0A;
+    --md-sys-color-surface-container-low: #231917;
+    --md-sys-color-surface-container: #271D1B;
+    --md-sys-color-surface-container-high: #322825;
+    --md-sys-color-surface-container-highest: #3D322F;
+
+    /* === 业务语义色（与 Compose QuantColors 对齐：A 股红涨绿跌） === */
+    --color-bullish: #E57373;
+    --color-bearish: #81C784;
+    --color-warning: #FFB74D;
+    --color-neutral: #B0BEC5;
+
+    /* === Typography === */
+    --font-sans: "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --line-height-base: 1.65;
+}
+
+/* ===== Reset / Base ===== */
+
+* {
+    box-sizing: border-box;
+}
+
+html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--md-sys-color-background);
+    color: var(--md-sys-color-on-surface);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: var(--line-height-base);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+    min-height: 100vh;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+a {
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+p {
+    margin: 0;
+}
+
+ul, ol {
+    margin: 0;
+    padding-left: 1.5rem;
+}
+
+li + li {
+    margin-top: 4px;
+}
+
+code {
+    font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", "Cascadia Mono", Menlo, monospace;
+    background: var(--md-sys-color-surface-container);
+    color: var(--md-sys-color-on-surface);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.92em;
+}
+
+blockquote {
+    margin: 0;
+    padding: 12px 16px;
+    border-left: 3px solid var(--md-sys-color-tertiary);
+    background: var(--md-sys-color-surface-container-low);
+    color: var(--md-sys-color-on-surface-variant);
+    border-radius: 0 8px 8px 0;
+}
+
+hr {
+    border: 0;
+    height: 1px;
+    background: var(--md-sys-color-outline-variant);
+    margin: 24px 0;
+}
+
+/* ===== Layout ===== */
+
+.share-report {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 32px 24px 120px;
+}
+
+@media (max-width: 600px) {
+    .share-report {
+        padding: 16px 16px 100px;
+    }
+}
+
+.share-md > * + * {
+    margin-top: 12px;
+}
+
+.share-md h1,
+.share-md h2,
+.share-md h3,
+.share-md h4,
+.share-md h5,
+.share-md h6 {
+    color: var(--md-sys-color-on-surface);
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+    margin: 0;
+}
+
+.share-md h1 { font-size: 24px; margin-top: 24px; }
+.share-md h2 { font-size: 20px; margin-top: 20px; }
+.share-md h3 { font-size: 17px; margin-top: 16px; color: var(--md-sys-color-primary); }
+.share-md h4 { font-size: 15px; margin-top: 14px; color: var(--md-sys-color-secondary); }
+.share-md h5, .share-md h6 { font-size: 14px; color: var(--md-sys-color-on-surface-variant); }
+
+.share-md p {
+    color: var(--md-sys-color-on-surface-variant);
+}
+
+/* ===== Markdown 表格 ===== */
+
+.share-table-wrap {
+    margin: 16px 0;
+    overflow-x: auto;
+    border-radius: 12px;
+    border: 1px solid var(--md-sys-color-outline-variant);
+    background: var(--md-sys-color-surface-container-low);
+}
+
+.share-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    color: var(--md-sys-color-on-surface);
+}
+
+.share-table thead th {
+    padding: 12px 14px;
+    text-align: left;
+    font-weight: 600;
+    background: var(--md-sys-color-surface-container);
+    color: var(--md-sys-color-on-surface);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+    white-space: nowrap;
+}
+
+.share-table tbody td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+    color: var(--md-sys-color-on-surface-variant);
+    vertical-align: top;
+}
+
+.share-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.share-table tbody tr:hover {
+    background: var(--md-sys-color-surface-container);
+}
+
+.share-table strong {
+    color: var(--md-sys-color-primary);
+}
+
+.share-md strong {
+    color: var(--md-sys-color-on-surface);
+    font-weight: 600;
+}
+
+.share-md em {
+    color: var(--md-sys-color-on-surface-variant);
+    font-style: italic;
+}
+
+/* ===== quant-header ===== */
+
+.qh-header {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    padding: 32px 0;
+}
+
+.qh-title-group {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.qh-stock-name {
+    font-size: 32px;
+    line-height: 40px;
+    font-weight: 700;
+    color: var(--md-sys-color-on-surface);
+    margin: 0;
+    letter-spacing: -0.5px;
+}
+
+.qh-title {
+    margin: 0;
+    color: var(--md-sys-color-on-surface);
+}
+
+.qh-title-main {
+    font-size: 32px;
+    line-height: 40px;
+    font-weight: 700;
+}
+
+.qh-title-sub {
+    font-size: 20px;
+    line-height: 28px;
+    font-weight: 400;
+    color: rgba(241, 223, 218, 0.7);
+}
+
+.qh-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: center;
+    font-size: 14px;
+}
+
+.qh-meta-type {
+    color: var(--md-sys-color-primary);
+    font-weight: 500;
+}
+
+.qh-meta-code {
+    color: var(--md-sys-color-on-surface-variant);
+}
+
+.qh-meta-date {
+    color: rgba(216, 194, 188, 0.6);
+    font-size: 13px;
+}
+
+/* ===== Custom analysis cards (limit-up / volume-price / market-sentiment) ===== */
+
+.qb-card {
+    margin: 24px 0;
+    padding: 20px;
+    background: var(--md-sys-color-surface-container);
+    border-radius: 16px;
+    border: 1px solid var(--md-sys-color-outline-variant);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.qb-card-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.qb-card-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.qb-title-text {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--md-sys-color-on-surface);
+}
+
+.qb-title-sub {
+    font-size: 12px;
+    color: var(--md-sys-color-on-surface-variant);
+    letter-spacing: 0.04em;
+}
+
+.qb-card-title-only {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--md-sys-color-on-surface);
+    margin: 0;
+}
+
+.qb-card-badges {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.qb-badge {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.qb-badge-bullish { background: rgba(229, 115, 115, 0.16); color: var(--color-bullish); }
+.qb-badge-bearish { background: rgba(129, 199, 132, 0.16); color: var(--color-bearish); }
+.qb-badge-warning { background: rgba(255, 183, 77, 0.16); color: var(--color-warning); }
+.qb-badge-neutral { background: rgba(176, 190, 197, 0.16); color: var(--color-neutral); }
+.qb-badge-secondary { background: rgba(231, 189, 178, 0.16); color: var(--md-sys-color-secondary); }
+.qb-badge-tertiary  { background: rgba(216, 197, 141, 0.16); color: var(--md-sys-color-tertiary); }
+
+.qb-body {
+    color: var(--md-sys-color-on-surface-variant);
+    line-height: var(--line-height-base);
+}
+
+.qb-caption {
+    font-size: 13px;
+    color: rgba(216, 194, 188, 0.74);
+}
+
+.qb-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.qb-section-title {
+    font-size: 13px;
+    font-weight: 600;
+    margin: 0;
+}
+
+.qb-accent-secondary { color: var(--md-sys-color-secondary); }
+.qb-accent-tertiary { color: var(--md-sys-color-tertiary); }
+
+.qb-section-body {
+    color: var(--md-sys-color-on-surface-variant);
+}
+
+.qb-callout {
+    position: relative;
+    padding: 16px 20px 16px 24px;
+    background: rgba(61, 50, 47, 0.72);
+    border-radius: 0 16px 16px 0;
+    color: var(--md-sys-color-on-surface-variant);
+    font-style: italic;
+    font-weight: 500;
+    line-height: var(--line-height-base);
+}
+
+.qb-callout::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 4px;
+    bottom: 4px;
+    width: 3px;
+    border-radius: 2px;
+    background: var(--md-sys-color-tertiary);
+}
+
+.qb-callout-tertiary::before { background: var(--md-sys-color-tertiary); }
+
+.qb-callout > p { margin: 0; }
+
+.qb-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+}
+
+.qb-chip {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 8px;
+}
+
+.qb-chip-bullish { background: rgba(229, 115, 115, 0.08); }
+.qb-chip-bearish { background: rgba(129, 199, 132, 0.08); }
+.qb-chip-warning { background: rgba(255, 183, 77, 0.08); }
+.qb-chip-neutral { background: rgba(176, 190, 197, 0.08); }
+.qb-chip-secondary { background: rgba(231, 189, 178, 0.08); }
+
+.qb-chip-label {
+    font-size: 12px;
+    color: rgba(216, 194, 188, 0.72);
+}
+
+.qb-chip-value {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.qb-chip-bullish .qb-chip-value { color: var(--color-bullish); }
+.qb-chip-bearish .qb-chip-value { color: var(--color-bearish); }
+.qb-chip-warning .qb-chip-value { color: var(--color-warning); }
+.qb-chip-neutral .qb-chip-value { color: var(--color-neutral); }
+.qb-chip-secondary .qb-chip-value { color: var(--md-sys-color-secondary); }
+
+/* ===== quant-kline (Canvas chart) ===== */
+
+.qk-chart {
+    --qk-height: 360px;
+    position: relative;
+    margin: 28px 0;
+    padding: 0;
+    background: var(--md-sys-color-surface-container-low);
+    border-radius: 16px;
+    border: 1px solid var(--md-sys-color-outline-variant);
+    overflow: hidden;
+}
+
+.qk-canvas {
+    display: block;
+    width: 100%;
+    height: var(--qk-height);
+}
+
+.qk-caption {
+    padding: 10px 16px 14px;
+    font-size: 12px;
+    color: var(--md-sys-color-on-surface-variant);
+    text-align: center;
+    border-top: 1px solid var(--md-sys-color-outline-variant);
+    background: var(--md-sys-color-surface-container);
+}
+
+.qk-placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(216, 194, 188, 0.55);
+    font-size: 13px;
+    pointer-events: none;
+}
+
+.qk-chart.is-ready .qk-placeholder,
+.qk-chart.is-error .qk-placeholder {
+    display: none;
+}
+
+.qk-chart.is-error::after {
+    content: attr(data-error);
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-bearish);
+    font-size: 13px;
+}
+
+/* ===== 底部常驻浮窗（Card 形态，水平居中悬浮） ===== */
+
+.share-float-bar {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 14px 28px;
+    background: var(--md-sys-color-surface-container-high);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: 16px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28), 0 1px 4px rgba(0, 0, 0, 0.18);
+    z-index: 100;
+    font-size: 14px;
+    white-space: nowrap;
+}
+
+.share-float-text {
+    color: var(--md-sys-color-on-surface-variant);
+}
+
+.share-float-link {
+    color: var(--md-sys-color-primary);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.share-float-link:hover {
+    text-decoration: underline;
+}
+
+/* ===== Empty / not-found 页 ===== */
+
+.share-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: var(--md-sys-color-background);
+}
+
+.share-empty-inner {
+    text-align: center;
+}
+
+.share-empty-icon {
+    font-size: 48px;
+    color: var(--md-sys-color-outline);
+    margin: 0 0 8px;
+}
+
+.share-empty-message {
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0;
+}

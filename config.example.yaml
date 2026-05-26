@@ -1,0 +1,226 @@
+# Quant Server 统一配置文件
+# 放置位置: 项目根目录 /config.yaml
+
+# ==================== 服务器配置 ====================
+server:
+  port: 9870
+  testMode: false
+  host: "0.0.0.0"
+  # 数据更新通知 WebSocket 路径
+  dataUpdateWsPath: /ws/data-update
+
+# ==================== 部署模式配置 ====================
+# 跨平台客户端环境、Ktor 运行时 QUANT_MODE 覆盖、部署包模式都从这里解析。
+deployment:
+  defaultMode: "debug"
+  modes:
+    debug:
+      testMode: true
+      host: "localhost"
+      port: 9871
+      publicScheme: "http"
+      publicPort: 9871
+    debug-wan:
+      testMode: true
+      # 服务监听所有网卡，供公网 IP / DDNS / 内网穿透入口访问。
+      host: "0.0.0.0"
+      port: 9871
+      publicScheme: "http"
+      # 客户端实际访问地址，不要填 0.0.0.0；改成公网 IP、DDNS 或域名。
+      publicHost: "your-public-domain-or-ip"
+      publicPort: 9871
+    release:
+      testMode: false
+      host: "0.0.0.0"
+      port: 9870
+      publicScheme: "https"
+      publicHost: "your-domain.example"
+      # null 表示公网 URL 不显式带端口，例如 https://your-domain.example
+      publicPort: null
+
+# ==================== Strategy Service 配置 ====================
+strategy:
+  scriptBaseDir: ".claude/scripts"
+  scriptBaseClientDir: "py_backtest"
+  strategyServiceHost: "127.0.0.1"
+  strategyServiceBindHost: "127.0.0.1"
+  strategyServicePort: 9971
+
+# ==================== 大语言模型配置 ====================
+llm:
+  # 默认使用的模型（指向 models 中的 key）
+  defaultModel: deepseek-chat
+  
+  # 模型定义
+  models:
+    deepseek-chat:
+      provider: DEEPSEEK        # 提供商: DEEPSEEK | OLLAMA
+      modelId: deepseek-chat    # 模型 ID
+      apiKey: ""  # 填写实际的 API Key  # 从环境变量读取，或填写实际 key
+      baseUrl: https://api.deepseek.com/v1
+      thinkingLevel: MEDIUM     # 思考级别: LOW | MEDIUM | HIGH
+      timeoutMs: 120000         # 请求超时（毫秒）
+      maxTokens: 8192           # 最大输出 token 数
+      temperature: 0.7          # 温度参数
+      
+    deepseek-reasoner:
+      provider: DEEPSEEK
+      modelId: deepseek-reasoner
+      apiKey: ""  # 空字符串时使用 
+      baseUrl: https://api.deepseek.com/v1
+      thinkingLevel: HIGH
+      timeoutMs: 180000
+      maxTokens: 8192
+      temperature: 0.7
+      
+    gpt-oss-20b:
+      provider: OLLAMA
+      modelId: gpt-oss:20b
+      apiKey: ""  # 本地 Ollama 不需要 API Key，或填写 ollama
+      baseUrl: http://localhost:11434/v1
+      thinkingLevel: HIGH
+      timeoutMs: 120000
+      maxTokens: 4096
+      temperature: 0.7
+      
+    qwen2.5-14b:
+      provider: OLLAMA
+      modelId: qwen2.5:14b
+      apiKey: ""  # 本地 Ollama 不需要 API Key，或填写 ollama
+      baseUrl: http://localhost:11434/v1
+      thinkingLevel: MEDIUM
+      timeoutMs: 120000
+      maxTokens: 4096
+      temperature: 0.7
+
+# ==================== 工作流配置 ====================
+workflow:
+  # 股票分析工作流配置
+  stockAnalysis:
+    # 并发限制
+    concurrentLimit: 2
+    # 单个步骤超时（毫秒）
+    stepTimeoutMs: 300000
+    # 最大重试次数
+    maxRetries: 3
+    # 是否启用流式输出
+    enableStreaming: true
+    # 此工作流使用的模型（null 表示使用 llm.defaultModel）
+    model: null
+    
+  # 策略选股工作流配置
+  strategyStockPick:
+    concurrentLimit: 1
+    stepTimeoutMs: 600000
+    maxRetries: 2
+    enableStreaming: true
+    model: null
+
+# ==================== 任务调度配置 ====================
+scheduler:
+  # 待处理队列轮询间隔（毫秒）
+  pendingPollIntervalMs: 1000
+  # 任务列表广播间隔（毫秒）
+  taskListBroadcastIntervalMs: 1000
+  # 状态检查间隔（毫秒）
+  statusCheckIntervalMs: 5000
+
+# ==================== 数据库配置 ====================
+database:
+  # SQLite 数据库文件路径（相对路径或绝对路径）
+  path: data/quant.db
+  # 连接池配置
+  pool:
+    maxConnections: 10
+    connectionTimeoutMs: 5000
+    socketTimeoutMs: 60000
+
+# ==================== 日志配置 ====================
+logging:
+  level: INFO  # DEBUG | INFO | WARN | ERROR
+  # 日志文件配置
+  file:
+    enabled: true
+    path: logs/quant-server.log
+    maxSize: 100MB
+    maxHistory: 30
+  # 控制台输出
+  console:
+    enabled: true
+    color: true
+
+# ==================== 技能配置 ====================
+skills:
+  # Skill 文件所在目录（相对路径）
+  basePath: private/agent-analysis-skills
+  # 是否缓存 Skill 内容
+  cacheEnabled: true
+  # 缓存过期时间（毫秒，-1 表示永不过期）
+  cacheExpireMs: -1
+  
+# ==================== 特性开关 ====================
+features:
+  # 启用数据自动更新
+  autoDataUpdate: true
+  # 启用 WebSocket 流式输出
+  websocketStreaming: true
+  # 启用任务持久化
+  taskPersistence: true
+  # 启用 Skill 系统
+  skillSystem: true
+
+
+# ==================== Agent 配置 ====================
+agent:
+  # Anthropic API Key，用于 Claude Code 进程鉴权
+  # 留空则自动继承系统环境变量 ANTHROPIC_API_KEY（推荐，避免明文写入配置文件）
+  apiKey: ""
+  # Claude Code 可执行文件路径，null 时自动检测 PATH 中的 claude / claude-agent-acp
+  claudeCommand: null
+  # Agent 工作目录，null 时使用服务进程工作目录
+  workDir: null
+  # 是否隔离全局 skill/MCP，只加载 workDir/.claude/ 下的配置
+  isolated: true
+  # 前端设置页默认选中的 Agent 模型预设
+  defaultModelKey: "kimi-for-coding"
+  # 服务端可用模型预设；apiKey 只在后端用于启动 Claude Code 进程，不会返回给前端
+  modelPresets:
+    kimi-for-coding:
+      displayName: "Kimi for Coding"
+      modelId: "kimi-for-coding"
+      baseUrl: "https://api.kimi.com/coding"
+      provider: "kimi"
+      apiKey: ""
+    deepseek-v4-flash:
+      displayName: "DeepSeek V4 Flash"
+      modelId: "deepseek-v4-flash"
+      baseUrl: "https://api.deepseek.com/anthropic"
+      provider: "deepseek"
+      apiKey: ""
+    deepseek-v4-pro:
+      displayName: "DeepSeek V4 Pro"
+      modelId: "deepseek-v4-pro"
+      baseUrl: "https://api.deepseek.com/anthropic"
+      provider: "deepseek"
+      apiKey: ""
+
+# ==================== 认证配置 ====================
+auth:
+  jwt:
+    # JWT 密钥（生产环境务必修改！至少 32 位字符）
+    secret: "your-super-secret-key-change-in-production"
+    issuer: "quant-server"
+    audience: "quant-client"
+    realm: "Quant Trading System"
+  
+  password:
+    # 密码最小长度
+    minLength: 8
+    # 是否要求大写字母
+    requireUppercase: true
+    # 是否要求小写字母
+    requireLowercase: true
+    # 是否要求数字
+    requireDigit: true
+    # BCrypt 加密轮数（越大越安全但越慢）
+    bcryptRounds: 12

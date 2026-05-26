@@ -1,0 +1,173 @@
+/* =============================================================================
+ * BigSmart - 沉浸式设计样式
+ * 适配刘海屏、灵动岛、圆角屏幕
+ * ============================================================================= */
+
+/* CSS 变量：主题色和安全区域 */
+:root {
+    /* 主题色 - 与 Compose App 的 backgroundDark (0xFF1A110F) 保持一致 */
+    --color-bg: #1A110F;
+    --color-surface: #231917;
+    
+    /* 安全区域变量（由浏览器自动设置） */
+    --safe-area-top: env(safe-area-inset-top, 0px);
+    --safe-area-right: env(safe-area-inset-right, 0px);
+    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-area-left: env(safe-area-inset-left, 0px);
+}
+
+/* 基础重置 */
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    
+    /* 字体设置：支持 Emoji */
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, 
+                 "Helvetica Neue", Arial, "Noto Sans", "Noto Color Emoji", 
+                 "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+    
+    /* 防止文本选择和弹性滚动 */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: none;
+}
+
+/* 设置背景色 - 与 App 主题色保持一致 */
+html, body {
+    background-color: var(--color-bg);
+}
+
+/* Compose Canvas 样式：
+ * 关键决策：canvas 跟随 #compose-root 父容器布局，不再 position:fixed 全屏。
+ * 原因：fixed 会让 canvas 完全无视 #compose-root 的 safe-area padding，
+ *      导致 iOS PWA 上 Compose 内部的 NavigationBar 被 Home Indicator 物理遮挡。
+ * 现在状态栏沉浸效果由 body 渐变背景 + #compose-root 同色 padding 共同实现，
+ * canvas 渲染区域 = 视口 - safe-area，所有 Compose 内部布局都安全。 */
+canvas {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+
+    /* 防止 Canvas 被选中 */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+}
+
+/* 隐藏滚动条但保持滚动功能 */
+::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    background: transparent;
+}
+
+/* 防止 iOS 双击缩放 */
+* {
+    touch-action: manipulation;
+}
+
+/* 防止 iOS 橡皮筋效果 */
+html {
+    position: fixed;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+body {
+    position: fixed;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* 打印样式隐藏 */
+@media print {
+    html, body {
+        display: none;
+    }
+}
+
+/* =============================================================================
+ * Markdown 表格样式优化
+ * 解决列宽平均分配问题
+ * ============================================================================= */
+
+/* 表格容器：允许水平滚动 */
+.markdown-table-wrapper,
+[data-test-tag="markdown-table"] {
+    overflow-x: auto;
+    max-width: 100%;
+}
+
+/* 表格基础样式 */
+table {
+    border-collapse: collapse;
+    width: auto;
+    min-width: 100%;
+    font-size: 14px;
+}
+
+/* 表头样式 */
+th {
+    background-color: rgba(255, 255, 255, 0.05);
+    font-weight: 600;
+    text-align: left;
+    padding: 12px 16px;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+    white-space: nowrap;
+}
+
+/* 单元格样式 */
+td {
+    padding: 10px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    vertical-align: top;
+    /* 允许内容决定列宽，但设置最小宽度 */
+    min-width: 60px;
+    /* 长内容自动换行 */
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    max-width: 300px;
+}
+
+/* 短内容列（如评分、等级）自动收缩 */
+td:first-child,
+th:first-child {
+    white-space: nowrap;
+    width: 1%;
+}
+
+/* 表格行悬停效果 */
+tr:hover td {
+    background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* 表格 zebra 条纹 */
+tr:nth-child(even) td {
+    background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* =============================================================================
+ * Emoji 显示优化
+ * ============================================================================= */
+
+/* 确保 Emoji 正确显示 */
+.emoji,
+[data-emoji] {
+    font-family: "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+    font-style: normal;
+}
+
+/* 强制使用彩色 Emoji */
+* {
+    font-variant-emoji: emoji;
+}

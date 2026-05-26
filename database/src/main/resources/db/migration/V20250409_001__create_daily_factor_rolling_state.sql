@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS daily_factor_rolling_state (
+    trade_date DATE NOT NULL,
+    ts_code VARCHAR(15) NOT NULL,
+    signal_basis VARCHAR(16) NOT NULL,
+    execution_basis VARCHAR(16) NOT NULL,
+    required_history INT NOT NULL,
+    bars_count INT NOT NULL,
+    ema_short DOUBLE NOT NULL,
+    ema_long DOUBLE NOT NULL,
+    atr DOUBLE NOT NULL,
+    holding TINYINT(1) NOT NULL,
+    stop_price DOUBLE NOT NULL,
+    holding_days INT NOT NULL,
+    short_volume_sum DOUBLE NOT NULL,
+    long_volume_sum DOUBLE NOT NULL,
+    prev_close DOUBLE NOT NULL,
+    recent_returns_json TEXT NOT NULL,
+    recent_closes_json TEXT NOT NULL,
+    recent_volumes_json TEXT NOT NULL,
+    momentum_base_close DOUBLE NOT NULL DEFAULT 0.0,
+    PRIMARY KEY (trade_date, ts_code),
+    KEY idx_ts_code (ts_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
