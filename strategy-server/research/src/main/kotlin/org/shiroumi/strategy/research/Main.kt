@@ -30,6 +30,10 @@ fun main(args: Array<String>) {
         val rows = SentimentFactorDailyRepository.rebuildCGroup(ctx.startDate, ctx.endDate)
         println("sentiment_factor_daily_c_group_rows=$rows")
     }
+    if (options["rebuild-d-group"] == "true") {
+        val rows = SentimentFactorDailyRepository.rebuildDGroup(ctx.startDate, ctx.endDate)
+        println("sentiment_factor_daily_d_group_rows=$rows")
+    }
 
     val written = SkeletonPipeline.run(ctx)
     println("run_id=${ctx.runId}")

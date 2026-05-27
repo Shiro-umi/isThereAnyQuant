@@ -89,6 +89,8 @@ object SentimentFactorDailyCalculator {
         val b3Ema = ema(rows.map { it.b3 }, span = 3)
         val e1Ema = ema(rows.map { it.e1 }, span = 5)
         val c2Ema = ema(rows.map { it.c2 }, span = 5)
+        val d1Ema = ema(rows.map { it.a1 }, span = 5)
+        val d2Ema = ema(rows.map { it.a1 }, span = 10)
 
         return rows.mapIndexed { index, row ->
             val factors = linkedMapOf<String, Double?>(
@@ -121,6 +123,13 @@ object SentimentFactorDailyCalculator {
                 "C5" to row.c5,
                 "C6" to row.c6,
                 "C7" to row.c7,
+                "D1" to d1Ema[index],
+                "D2" to d2Ema[index],
+                "D3" to d2Ema[index]?.let { d2 -> row.a1?.minus(d2) },
+                "D4" to percentileRank(rows.map { it.a1 }, index, window = 20),
+                "D5" to divergenceSignal(row.a1, row.a3),
+                "D6" to signedStreak(rows.map { it.a1 }, index),
+                "D7" to momentumDecaySignal(rows.map { it.a1 }, index),
                 "E1" to row.e1,
                 "E2" to e1Ema[index]?.let { ema -> row.e1?.minus(ema) },
             )
@@ -240,6 +249,53 @@ object SentimentFactorDailyCalculator {
         if (previous.isEmpty()) return null
         return previous.count { it !in currentLimitUp }.toDouble() / previous.size
     }
+
+    private fun percentileRank(values: List<Double?>, index: Int, window: Int): Double? {
+        val current = values[index] ?: return null
+        val sample = values.subList(kotlin.math.max(0, index - window + 1), index + 1).filterNotNull()
+        if (sample.isEmpty()) return null
+        val rank = sample.count { it <= current }
+        return rank.toDouble() / sample.size
+    }
+
+    private fun divergenceSignal(a1: Double?, a3: Double?): Double? {
+        if (a1 == null || a3 == null) return null
+        return if (sign(a1) * sign(a3) < 0) 1.0 else 0.0
+    }
+
+    private fun signedStreak(values: List<Double?>, index: Int): Double? {
+        val currentSign = sign(values[index] ?: return null)
+        if (currentSign == 0) return 0.0
+        var streak = 0
+        var cursor = index
+        while (cursor >= 0 && sign(values[cursor]) == currentSign) {
+            streak++
+            cursor--
+        }
+        return streak.toDouble() * currentSign
+    }
+
+    private fun momentumDecaySignal(values: List<Double?>, index: Int): Double? {
+        if (index < 2) return null
+        val current = values[index] ?: return null
+        val previous = values[index - 1] ?: return null
+        val beforePrevious = values[index - 2] ?: return null
+        return when {
+            current > 0.0 && previous > 0.0 && beforePrevious > 0.0 &&
+                current < previous && previous < beforePrevious -> 1.0
+            current < 0.0 && previous < 0.0 && beforePrevious < 0.0 &&
+                current > previous && previous > beforePrevious -> -1.0
+            else -> 0.0
+        }
+    }
+
+    private fun sign(value: Double?): Int =
+        when {
+            value == null -> 0
+            value > 0.0 -> 1
+            value < 0.0 -> -1
+            else -> 0
+        }
 
     private fun List<SentimentStockDailyFact>.weightedMean(value: (SentimentStockDailyFact) -> Double?): Double? {
         var weighted = 0.0

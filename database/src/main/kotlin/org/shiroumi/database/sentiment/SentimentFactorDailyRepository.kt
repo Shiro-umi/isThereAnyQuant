@@ -59,6 +59,19 @@ object SentimentFactorDailyRepository {
         return records.size
     }
 
+    fun rebuildDGroup(startDate: LocalDate, endDate: LocalDate): Int {
+        val stockFacts = findStockFactsForAGroup(startDate, endDate)
+        val limits = findLimitSummaries(startDate, endDate)
+        val records = SentimentFactorDailyCalculator.calculate(
+            facts = stockFacts,
+            limitSummaries = limits,
+            startDate = startDate,
+            endDate = endDate,
+        )
+        upsertDGroup(records)
+        return records.size
+    }
+
     fun upsertAGroup(records: List<SentimentFactorDailyRecord>) {
         if (records.isEmpty()) return
         stockDb.transaction(SentimentFactorDailyTable, log = false) {
@@ -94,6 +107,18 @@ object SentimentFactorDailyRepository {
                     this[SentimentFactorDailyTable.factorColumns.getValue(name)] = record.factors[name]
                 }
                 this[SentimentFactorDailyTable.y3Raw] = record.y3Raw
+            }
+        }
+    }
+
+    fun upsertDGroup(records: List<SentimentFactorDailyRecord>) {
+        if (records.isEmpty()) return
+        stockDb.transaction(SentimentFactorDailyTable, log = false) {
+            SentimentFactorDailyTable.batchUpsert(records) { record ->
+                this[SentimentFactorDailyTable.tradeDate] = record.tradeDate
+                D_GROUP_FACTOR_NAMES.forEach { name ->
+                    this[SentimentFactorDailyTable.factorColumns.getValue(name)] = record.factors[name]
+                }
             }
         }
     }
@@ -318,5 +343,15 @@ object SentimentFactorDailyRepository {
         "C5",
         "C6",
         "C7",
+    )
+
+    private val D_GROUP_FACTOR_NAMES = listOf(
+        "D1",
+        "D2",
+        "D3",
+        "D4",
+        "D5",
+        "D6",
+        "D7",
     )
 }

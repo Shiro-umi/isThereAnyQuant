@@ -136,6 +136,76 @@ class SentimentFactorDailyCalculatorTest {
     }
 
     @Test
+    fun `D group factors describe A1 time-series memory and divergence`() {
+        val d1 = LocalDate.parse("2026-01-05")
+        val d2 = LocalDate.parse("2026-01-06")
+        val d3 = LocalDate.parse("2026-01-07")
+        val d4 = LocalDate.parse("2026-01-08")
+        val records = SentimentFactorDailyCalculator.calculate(
+            facts = listOf(
+                fact(d1, "000001.SZ", close = 110.0, previousClose = 100.0, volume = 100.0, previousVolume = 100.0),
+                fact(d2, "000001.SZ", close = 108.0, previousClose = 100.0, volume = 80.0, previousVolume = 100.0),
+                fact(d3, "000001.SZ", close = 106.0, previousClose = 100.0, volume = 70.0, previousVolume = 100.0),
+                fact(d4, "000001.SZ", close = 95.0, previousClose = 100.0, volume = 120.0, previousVolume = 100.0),
+            ),
+            limitSummaries = emptyList(),
+            startDate = d1,
+            endDate = d4,
+        )
+
+        val first = records[0].factors
+        assertClose(0.10, first["D1"])
+        assertClose(0.10, first["D2"])
+        assertClose(0.0, first["D3"])
+        assertClose(1.0, first["D4"])
+        assertClose(0.0, first["D5"])
+        assertClose(1.0, first["D6"])
+        assertEquals(null, first["D7"])
+
+        val second = records[1].factors
+        assertClose(0.09333333333333334, second["D1"])
+        assertClose(0.09636363636363637, second["D2"])
+        assertClose(-0.016363636363636372, second["D2"]?.let { records[1].factors["A1"]?.minus(it) })
+        assertClose(0.5, second["D4"])
+        assertClose(1.0, second["D5"])
+        assertClose(2.0, second["D6"])
+        assertEquals(null, second["D7"])
+
+        val third = records[2].factors
+        assertClose(1.0 / 3.0, third["D4"])
+        assertClose(1.0, third["D5"])
+        assertClose(3.0, third["D6"])
+        assertClose(1.0, third["D7"])
+
+        val fourth = records[3].factors
+        assertClose(0.25, fourth["D4"])
+        assertClose(1.0, fourth["D5"])
+        assertClose(-1.0, fourth["D6"])
+        assertClose(0.0, fourth["D7"])
+    }
+
+    @Test
+    fun `D7 marks symmetric negative momentum decay`() {
+        val d1 = LocalDate.parse("2026-01-05")
+        val d2 = LocalDate.parse("2026-01-06")
+        val d3 = LocalDate.parse("2026-01-07")
+        val records = SentimentFactorDailyCalculator.calculate(
+            facts = listOf(
+                fact(d1, "000001.SZ", close = 94.0, previousClose = 100.0),
+                fact(d2, "000001.SZ", close = 96.0, previousClose = 100.0),
+                fact(d3, "000001.SZ", close = 98.0, previousClose = 100.0),
+            ),
+            limitSummaries = emptyList(),
+            startDate = d1,
+            endDate = d3,
+        )
+
+        val third = records[2].factors
+        assertClose(-1.0, third["D7"])
+        assertClose(-3.0, third["D6"])
+    }
+
+    @Test
     fun `pct norm applies board caps and ST priority`() {
         val d = LocalDate.parse("2026-01-05")
         val records = SentimentFactorDailyCalculator.calculate(
