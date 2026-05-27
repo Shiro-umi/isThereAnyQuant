@@ -49,3 +49,11 @@ tasks.test {
         showStandardStreams = true
     }
 }
+
+tasks.register<JavaExec>("runResearch") {
+    group = "research"
+    description = "Run the sentiment-factor resonance research pipeline."
+    mainClass.set("org.shiroumi.strategy.research.MainKt")
+    classpath = sourceSets["main"].runtimeClasspath
+    workingDir = rootProject.projectDir
+}
