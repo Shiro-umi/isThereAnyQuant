@@ -54,6 +54,9 @@ fun Application.ktorRouting() {
         shareStaticResources()
         publicShareRoutes()
 
+        // 独立简历页：直接读取运行机本地 HTML，不进入 Compose SPA 或 git 跟踪资源。
+        resumeRoute()
+
         // SPA 应该放在最后，以免拦截 API 请求
         composeApp(route = "/")
     }

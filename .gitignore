@@ -3,6 +3,8 @@
 .gradle_home/
 .gradle-home/
 build/
+# 模块内本地占位（如 resume 软链接指向运行机真实文件，不进仓库，避免泄露本地路径）
+.local/
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/
 !**/src/test/**/build/
