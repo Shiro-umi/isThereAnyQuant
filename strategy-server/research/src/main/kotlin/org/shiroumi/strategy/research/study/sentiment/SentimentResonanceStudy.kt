@@ -1,0 +1,449 @@
+package org.shiroumi.strategy.research.study.sentiment
+
+import org.shiroumi.database.sentiment.SentimentFactorDailyRecord
+import org.shiroumi.database.sentiment.SentimentFactorDailyRepository
+import org.shiroumi.database.sentiment.SentimentTargetLabelCalculator
+import org.shiroumi.strategy.research.output.ResonanceIdentity
+import org.shiroumi.strategy.research.output.ResonanceMetric
+import org.shiroumi.strategy.research.pipeline.ResearchContext
+import org.shiroumi.strategy.research.pipeline.ResearchStudy
+import org.shiroumi.strategy.research.signal.BandpassFilter
+import org.shiroumi.strategy.research.signal.BlockPermutation
+import org.shiroumi.strategy.research.signal.Coherence
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.sign
+import kotlin.math.sqrt
+
+class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
+    override val name: String = "study:sentiment-resonance"
+
+    override fun run(ctx: ResearchContext, input: Unit): List<ResonanceMetric> {
+        val records = SentimentFactorDailyRepository.findBetween(ctx.startDate, ctx.endDate)
+            .sortedBy { it.tradeDate }
+        return runRecords(ctx, records)
+    }
+
+    internal fun runRecords(ctx: ResearchContext, records: List<SentimentFactorDailyRecord>): List<ResonanceMetric> {
+        if (records.isEmpty()) return emptyList()
+
+        val labels = SentimentTargetLabelCalculator.build(records)
+        val factorNames = ctx.param("factors", FACTOR_NAMES.joinToString(","))
+            .split(',')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && it in FACTOR_NAMES }
+        val targets = ctx.param("targets", "Y1,Y2,Y3")
+            .split(',')
+            .map { it.trim() }
+            .filter { it in TARGETS }
+        val horizons = ctx.param("horizons", "1,3,5")
+            .split(',')
+            .mapNotNull { it.trim().toIntOrNull() }
+            .filter { it in setOf(1, 3, 5) }
+        val bands = ctx.param("bands", "F1b,F2a")
+            .split(',')
+            .map { it.trim() }
+            .filter { it in BANDS }
+
+        val metrics = ArrayList<ResonanceMetric>()
+        for (factor in factorNames) {
+            val rawFactor = records.map { it.factors[factor] }
+            for (target in targets) {
+                val rawTarget = records.map { targetRaw(it, target) }
+                for (horizon in horizons) {
+                    val futureTarget = labels.map { targetNext(it, target, horizon) }
+                    for (band in bands) {
+                        buildMetric(
+                            ctx = ctx,
+                            factor = factor,
+                            target = target,
+                            horizon = horizon,
+                            band = band,
+                            rawFactor = rawFactor,
+                            rawTarget = rawTarget,
+                            futureTarget = futureTarget,
+                        )?.let(metrics::add)
+                    }
+                }
+            }
+        }
+        return withBenjaminiHochbergQ(metrics)
+    }
+
+    private fun buildMetric(
+        ctx: ResearchContext,
+        factor: String,
+        target: String,
+        horizon: Int,
+        band: String,
+        rawFactor: List<Double?>,
+        rawTarget: List<Double?>,
+        futureTarget: List<Double?>,
+    ): ResonanceMetric? {
+        val aligned = rawFactor.indices.mapNotNull { index ->
+            val x = rawFactor[index]
+            val y = rawTarget[index]
+            val fy = futureTarget[index]
+            if (x == null || y == null || fy == null) null else Triple(index, x, y)
+        }
+        if (aligned.size < MIN_SERIES_SIZE) return null
+
+        val validIndexes = aligned.map { it.first }
+        val xRaw = aligned.map { it.second }.toDoubleArray()
+        val yRaw = aligned.map { it.third }.toDoubleArray()
+        val future = validIndexes.map { futureTarget[it] ?: return null }.toDoubleArray()
+
+        val xNorm = preprocess(xRaw)
+        val yNorm = preprocess(yRaw)
+        val spec = BANDS.getValue(band)
+        val coeff = BandpassFilter.design(order = 4, lowWn = spec.low / 0.5, highWn = spec.high / 0.5)
+        val xFf = BandpassFilter.filtfilt(coeff, xNorm)
+        val yFf = BandpassFilter.filtfilt(coeff, yNorm)
+        val xLf = BandpassFilter.lfilter(coeff, xNorm)
+        val yLf = BandpassFilter.lfilter(coeff, yNorm)
+
+        val rolling = rollingCorrelationStats(xFf, yFf, horizon, window = 30)
+        val coherence = coherenceStats(xFf, yFf, band, stftWindow = 40)
+        val leadLag = leadByLagCorrelation(xFf, yFf, maxLag = 5)
+        val leadPhase = coherence.leadDaysPhase
+        val leadStable = leadPhase == null || abs(leadLag.leadDays - leadPhase) <= 1.0
+        val oos = oosStats(xLf, future)
+        val p = permutationPValue(xLf, future, band, ctx.randomSeed + factor.hashCode() + target.hashCode() + horizon)
+        val ffCorr = shiftedCorrelation(xFf, yFf, horizon)
+        val lfCorr = shiftedCorrelation(xLf, yLf, horizon)
+        val causalConsistent = ffCorr == null || lfCorr == null ||
+            (ffCorr == 0.0 && lfCorr == 0.0) ||
+            (sign(ffCorr) == sign(lfCorr) && abs(lfCorr) >= abs(ffCorr) * 0.35)
+
+        return ResonanceMetric(
+            identity = ResonanceIdentity(
+                factor_name = factor,
+                factor_type = "single",
+                factor_i = factor,
+                target_y = target,
+                horizon = horizon,
+                band = band,
+                state_id = "trend=all,disp=all,vol=all",
+            ),
+            stft_window = 40,
+            norm_version = "Z_60_detrend",
+            state_window = 60,
+            rolling_corr_mean = rolling.mean,
+            rolling_corr_stability = rolling.stability,
+            mean_coherence = coherence.mean,
+            max_coherence = coherence.max,
+            coherence_coverage = coherence.coverage,
+            phase_std = coherence.phaseStd,
+            lead_days_lag = leadLag.leadDays,
+            lead_days_phase = leadPhase,
+            lead_relation_stable = leadStable,
+            beta = oos.beta,
+            oos_ic = oos.ic,
+            rank_ic_oos = oos.rankIc,
+            hit_rate = oos.hitRate,
+            baseline = oos.baseline,
+            top_bottom_spread = oos.topBottomSpread,
+            top_bottom_spread_consistency = oos.topBottomSpreadConsistency,
+            p_value = p,
+            q_value = p,
+            sample_count = oos.sampleCount,
+            filtfilt_lfilter_consistent = causalConsistent,
+            regime = "all",
+        )
+    }
+
+    private fun preprocess(values: DoubleArray): DoubleArray {
+        val clipped = rollingWinsorize(values, window = 252)
+        val z = rollingZ(clipped, window = 60)
+        val ema = ema(z, span = 20)
+        return DoubleArray(z.size) { z[it] - ema[it] }
+    }
+
+    private fun rollingWinsorize(values: DoubleArray, window: Int): DoubleArray =
+        DoubleArray(values.size) { index ->
+            val start = max(0, index - window + 1)
+            val sample = values.copyOfRange(start, index + 1).sortedArray()
+            val lo = sample[(sample.lastIndex * 0.01).toInt()]
+            val hi = sample[(sample.lastIndex * 0.99).toInt()]
+            values[index].coerceIn(lo, hi)
+        }
+
+    private fun rollingZ(values: DoubleArray, window: Int): DoubleArray =
+        DoubleArray(values.size) { index ->
+            val start = max(0, index - window + 1)
+            val sample = values.copyOfRange(start, index + 1)
+            val mean = sample.average()
+            val std = sqrt(sample.sumOf { (it - mean) * (it - mean) } / sample.size)
+            if (std == 0.0) 0.0 else (values[index] - mean) / std
+        }
+
+    private fun ema(values: DoubleArray, span: Int): DoubleArray {
+        if (values.isEmpty()) return values
+        val alpha = 2.0 / (span + 1.0)
+        val out = DoubleArray(values.size)
+        out[0] = values[0]
+        for (i in 1 until values.size) out[i] = alpha * values[i] + (1.0 - alpha) * out[i - 1]
+        return out
+    }
+
+    private fun rollingCorrelationStats(x: DoubleArray, y: DoubleArray, lag: Int, window: Int): RollingStats {
+        val values = ArrayList<Double>()
+        var start = 0
+        while (start + window + lag <= x.size) {
+            val xs = x.copyOfRange(start, start + window)
+            val ys = y.copyOfRange(start + lag, start + lag + window)
+            pearson(xs, ys)?.let(values::add)
+            start++
+        }
+        if (values.isEmpty()) return RollingStats(null, null)
+        val mean = values.average()
+        val dominant = if (mean >= 0.0) 1.0 else -1.0
+        return RollingStats(
+            mean = mean,
+            stability = values.count { it == 0.0 || sign(it) == dominant }.toDouble() / values.size,
+        )
+    }
+
+    private fun coherenceStats(x: DoubleArray, y: DoubleArray, band: String, stftWindow: Int): CoherenceStats {
+        val result = Coherence.compute(x, y, nperseg = min(stftWindow, x.size), noverlap = min(stftWindow, x.size) / 2)
+        val spec = BANDS.getValue(band)
+        val indexes = result.frequencies.indices.filter { result.frequencies[it] in spec.low..spec.high }
+        if (indexes.isEmpty()) return CoherenceStats(null, null, null, null, null)
+        val cohs = indexes.map { result.coherence[it].coerceIn(0.0, 1.0) }
+        val phases = indexes.map { result.phase[it] }
+        val weights = cohs.map { max(it, 1e-9) }
+        val mean = cohs.average()
+        val lead = indexes.indices.sumOf { i ->
+            val freq = result.frequencies[indexes[i]]
+            val days = if (freq > 0.0) phases[i] / (2.0 * PI * freq) else 0.0
+            days * weights[i]
+        } / weights.sum()
+        return CoherenceStats(
+            mean = mean,
+            max = cohs.maxOrNull(),
+            coverage = cohs.count { it > 0.5 }.toDouble() / cohs.size,
+            phaseStd = circularStd(phases),
+            leadDaysPhase = lead,
+        )
+    }
+
+    private fun leadByLagCorrelation(x: DoubleArray, y: DoubleArray, maxLag: Int): LeadLag {
+        var bestLag = 0
+        var bestCorr = Double.NEGATIVE_INFINITY
+        for (lag in -maxLag..maxLag) {
+            val corr = shiftedCorrelation(x, y, lag) ?: continue
+            if (abs(corr) > bestCorr) {
+                bestCorr = abs(corr)
+                bestLag = lag
+            }
+        }
+        return LeadLag(bestLag.toDouble(), bestCorr.takeIf { it.isFinite() })
+    }
+
+    private fun shiftedCorrelation(x: DoubleArray, y: DoubleArray, lag: Int): Double? {
+        val startX = if (lag >= 0) 0 else -lag
+        val startY = if (lag >= 0) lag else 0
+        val len = min(x.size - startX, y.size - startY)
+        if (len < 3) return null
+        return pearson(x.copyOfRange(startX, startX + len), y.copyOfRange(startY, startY + len))
+    }
+
+    private fun oosStats(x: DoubleArray, y: DoubleArray): OosStats {
+        val pairs = x.indices.map { x[it] to y[it] }
+        if (pairs.size < 30) return OosStats(sampleCount = pairs.size)
+        val folds = ArrayList<List<Pair<Double, Double>>>()
+        if (pairs.size >= 620) {
+            var trainStart = 0
+            while (trainStart + 500 + 120 <= pairs.size) {
+                folds.add(pairs.subList(trainStart + 500, trainStart + 620))
+                trainStart += 20
+            }
+        } else {
+            val split = max(1, (pairs.size * 0.7).toInt())
+            if (pairs.size - split >= 10) folds.add(pairs.subList(split, pairs.size))
+        }
+        if (folds.isEmpty()) return OosStats(sampleCount = pairs.size)
+
+        val validation = folds.flatten()
+        val trainEnd = pairs.size - validation.size
+        val train = pairs.subList(0, max(1, trainEnd))
+        val orientation = sign(pearson(train.map { it.first }.toDoubleArray(), train.map { it.second }.toDoubleArray()) ?: 0.0)
+            .let { if (it == 0.0) 1.0 else it }
+        val oriented = validation.map { (px, py) -> px * orientation to py }
+        val pred = oriented.map { it.first }.toDoubleArray()
+        val actual = oriented.map { it.second }.toDoubleArray()
+        val ic = pearson(pred, actual)
+        val rankIc = pearson(ranks(pred), ranks(actual))
+        val hitRate = oriented.count { sign(it.first) == sign(it.second) && sign(it.second) != 0.0 }
+            .toDouble() / oriented.count { sign(it.second) != 0.0 }.coerceAtLeast(1)
+        val positive = oriented.count { it.second > 0.0 }.toDouble() / oriented.size
+        val negative = oriented.count { it.second < 0.0 }.toDouble() / oriented.size
+        val spreads = folds.mapNotNull { fold ->
+            val orientedFold = fold.map { (px, py) -> px * orientation to py }
+            topBottomSpread(orientedFold)
+        }
+        return OosStats(
+            ic = ic,
+            rankIc = rankIc,
+            hitRate = hitRate,
+            baseline = max(positive, negative),
+            topBottomSpread = spreads.takeIf { it.isNotEmpty() }?.average(),
+            topBottomSpreadConsistency = spreads.takeIf { it.isNotEmpty() }
+                ?.let { values -> values.count { it > 0.0 }.toDouble() / values.size },
+            beta = beta(pred, actual),
+            sampleCount = validation.size,
+        )
+    }
+
+    private fun topBottomSpread(pairs: List<Pair<Double, Double>>): Double? {
+        if (pairs.size < 10) return null
+        val sorted = pairs.sortedBy { it.first }
+        val n = max(1, sorted.size / 5)
+        val bottom = sorted.take(n).map { it.second }.average()
+        val top = sorted.takeLast(n).map { it.second }.average()
+        return top - bottom
+    }
+
+    private fun permutationPValue(x: DoubleArray, y: DoubleArray, band: String, seed: Long): Double? {
+        if (x.size < 30) return null
+        val product = DoubleArray(x.size) { x[it] * y[it] }
+        val block = min(BlockPermutation.blockSizeByBand.getValue(band), product.size)
+        return BlockPermutation.test(
+            series = product,
+            blockSize = block,
+            iterations = 500,
+            seed = seed,
+            statistic = { values -> abs(values.average()) },
+        ).pValue
+    }
+
+    private fun withBenjaminiHochbergQ(metrics: List<ResonanceMetric>): List<ResonanceMetric> {
+        val indexed = metrics.mapIndexedNotNull { index, metric -> metric.p_value?.let { Triple(index, it, metric) } }
+            .sortedBy { it.second }
+        if (indexed.isEmpty()) return metrics
+        val qByIndex = DoubleArray(metrics.size) { Double.NaN }
+        var minQ = 1.0
+        for (rankIndex in indexed.indices.reversed()) {
+            val (originalIndex, p, _) = indexed[rankIndex]
+            val rank = rankIndex + 1
+            minQ = min(minQ, p * indexed.size / rank)
+            qByIndex[originalIndex] = minQ.coerceIn(0.0, 1.0)
+        }
+        return metrics.mapIndexed { index, metric ->
+            if (qByIndex[index].isNaN()) metric else metric.copy(q_value = qByIndex[index])
+        }
+    }
+
+    private fun pearson(x: DoubleArray, y: DoubleArray): Double? {
+        if (x.size != y.size || x.size < 3) return null
+        val mx = x.average()
+        val my = y.average()
+        var num = 0.0
+        var dx = 0.0
+        var dy = 0.0
+        for (i in x.indices) {
+            val vx = x[i] - mx
+            val vy = y[i] - my
+            num += vx * vy
+            dx += vx * vx
+            dy += vy * vy
+        }
+        val den = sqrt(dx * dy)
+        return if (den == 0.0) null else num / den
+    }
+
+    private fun ranks(values: DoubleArray): DoubleArray {
+        val sorted = values.withIndex().sortedBy { it.value }
+        val out = DoubleArray(values.size)
+        var i = 0
+        while (i < sorted.size) {
+            var j = i + 1
+            while (j < sorted.size && sorted[j].value == sorted[i].value) j++
+            val rank = (i + j + 1).toDouble() / 2.0
+            for (k in i until j) out[sorted[k].index] = rank
+            i = j
+        }
+        return out
+    }
+
+    private fun beta(x: DoubleArray, y: DoubleArray): Double? {
+        if (x.size != y.size || x.size < 3) return null
+        val mx = x.average()
+        val my = y.average()
+        val variance = x.sumOf { (it - mx) * (it - mx) }
+        if (variance == 0.0) return null
+        return x.indices.sumOf { (x[it] - mx) * (y[it] - my) } / variance
+    }
+
+    private fun circularStd(phases: List<Double>): Double? {
+        if (phases.isEmpty()) return null
+        val sinMean = phases.sumOf { kotlin.math.sin(it) } / phases.size
+        val cosMean = phases.sumOf { kotlin.math.cos(it) } / phases.size
+        val r = sqrt(sinMean * sinMean + cosMean * cosMean).coerceIn(1e-12, 1.0)
+        return sqrt(-2.0 * kotlin.math.ln(r))
+    }
+
+    private fun targetRaw(record: SentimentFactorDailyRecord, target: String): Double? =
+        when (target) {
+            "Y1" -> record.y1Raw
+            "Y2" -> record.y2Raw
+            "Y3" -> record.y3Raw
+            else -> null
+        }
+
+    private fun targetNext(label: org.shiroumi.database.sentiment.SentimentTargetLabels, target: String, horizon: Int): Double? =
+        when (target to horizon) {
+            "Y1" to 1 -> label.y1Next1
+            "Y1" to 3 -> label.y1Next3
+            "Y1" to 5 -> label.y1Next5
+            "Y2" to 1 -> label.y2Next1
+            "Y2" to 3 -> label.y2Next3
+            "Y2" to 5 -> label.y2Next5
+            "Y3" to 1 -> label.y3Next1
+            "Y3" to 3 -> label.y3Next3
+            "Y3" to 5 -> label.y3Next5
+            else -> null
+        }
+
+    private data class BandSpec(val low: Double, val high: Double)
+    private data class RollingStats(val mean: Double?, val stability: Double?)
+    private data class CoherenceStats(
+        val mean: Double?,
+        val max: Double?,
+        val coverage: Double?,
+        val phaseStd: Double?,
+        val leadDaysPhase: Double?,
+    )
+    private data class LeadLag(val leadDays: Double, val corr: Double?)
+    private data class OosStats(
+        val ic: Double? = null,
+        val rankIc: Double? = null,
+        val hitRate: Double? = null,
+        val baseline: Double? = null,
+        val topBottomSpread: Double? = null,
+        val topBottomSpreadConsistency: Double? = null,
+        val beta: Double? = null,
+        val sampleCount: Int? = null,
+    )
+
+    companion object {
+        private const val MIN_SERIES_SIZE = 90
+
+        private val TARGETS = setOf("Y1", "Y2", "Y3")
+        private val BANDS = linkedMapOf(
+            "F1b" to BandSpec(0.200, 0.333),
+            "F2a" to BandSpec(0.125, 0.200),
+            "F1a" to BandSpec(0.333, 0.499),
+            "F2b" to BandSpec(0.100, 0.125),
+        )
+        private val FACTOR_NAMES = listOf(
+            "A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9a", "A9b", "A10", "A11", "A11a", "A12",
+            "B1", "B3", "B3p", "B4", "B5", "B6", "B7",
+            "C1", "C2", "C2p", "C3", "C4", "C5", "C6", "C7",
+            "D1", "D2", "D3", "D4", "D5", "D6", "D7",
+            "E1", "E2",
+        )
+    }
+}

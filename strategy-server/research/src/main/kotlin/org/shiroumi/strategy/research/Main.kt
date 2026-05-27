@@ -3,6 +3,7 @@ package org.shiroumi.strategy.research
 import kotlinx.datetime.LocalDate
 import org.shiroumi.database.sentiment.SentimentFactorDailyRepository
 import org.shiroumi.strategy.research.pipeline.ResearchContext
+import org.shiroumi.strategy.research.study.sentiment.SentimentResearchPipeline
 import java.time.ZoneId
 import kotlin.io.path.Path
 
@@ -39,7 +40,11 @@ fun main(args: Array<String>) {
         println("sentiment_factor_daily_label_rows=$rows")
     }
 
-    val written = SkeletonPipeline.run(ctx)
+    val written = if (options["skeleton"] == "true") {
+        SkeletonPipeline.run(ctx)
+    } else {
+        SentimentResearchPipeline.run(ctx)
+    }
     println("run_id=${ctx.runId}")
     println("workspace=${ctx.workspace}")
     println("cards_written=${written.size}")
