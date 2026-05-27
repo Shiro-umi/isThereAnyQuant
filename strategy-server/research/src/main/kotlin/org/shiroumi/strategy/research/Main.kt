@@ -1,6 +1,7 @@
 package org.shiroumi.strategy.research
 
 import kotlinx.datetime.LocalDate
+import org.shiroumi.database.sentiment.SentimentFactorDailyRepository
 import org.shiroumi.strategy.research.pipeline.ResearchContext
 import java.time.ZoneId
 import kotlin.io.path.Path
@@ -16,6 +17,11 @@ fun main(args: Array<String>) {
         workspace = Path(options["workspace"] ?: DEFAULT_WORKSPACE).toAbsolutePath().normalize(),
         params = options.filterKeys { it !in setOf("start", "end", "workspace") },
     )
+
+    if (options["rebuild-a-group"] == "true") {
+        val rows = SentimentFactorDailyRepository.rebuildAGroup(ctx.startDate, ctx.endDate)
+        println("sentiment_factor_daily_a_group_rows=$rows")
+    }
 
     val written = SkeletonPipeline.run(ctx)
     println("run_id=${ctx.runId}")
