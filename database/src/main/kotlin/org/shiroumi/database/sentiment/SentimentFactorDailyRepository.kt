@@ -46,6 +46,19 @@ object SentimentFactorDailyRepository {
         return records.size
     }
 
+    fun rebuildCGroup(startDate: LocalDate, endDate: LocalDate): Int {
+        val stockFacts = findStockFactsForAGroup(startDate, endDate)
+        val limits = findLimitSummaries(startDate, endDate)
+        val records = SentimentFactorDailyCalculator.calculate(
+            facts = stockFacts,
+            limitSummaries = limits,
+            startDate = startDate,
+            endDate = endDate,
+        )
+        upsertCGroup(records)
+        return records.size
+    }
+
     fun upsertAGroup(records: List<SentimentFactorDailyRecord>) {
         if (records.isEmpty()) return
         stockDb.transaction(SentimentFactorDailyTable, log = false) {
@@ -68,6 +81,19 @@ object SentimentFactorDailyRepository {
                     this[SentimentFactorDailyTable.factorColumns.getValue(name)] = record.factors[name]
                 }
                 this[SentimentFactorDailyTable.y2Raw] = record.y2Raw
+            }
+        }
+    }
+
+    fun upsertCGroup(records: List<SentimentFactorDailyRecord>) {
+        if (records.isEmpty()) return
+        stockDb.transaction(SentimentFactorDailyTable, log = false) {
+            SentimentFactorDailyTable.batchUpsert(records) { record ->
+                this[SentimentFactorDailyTable.tradeDate] = record.tradeDate
+                C_GROUP_FACTOR_NAMES.forEach { name ->
+                    this[SentimentFactorDailyTable.factorColumns.getValue(name)] = record.factors[name]
+                }
+                this[SentimentFactorDailyTable.y3Raw] = record.y3Raw
             }
         }
     }
@@ -193,19 +219,34 @@ object SentimentFactorDailyRepository {
                 .map { row ->
                     LimitFact(
                         tradeDate = row[LimitListDTable.tradeDate],
+                        tsCode = row[LimitListDTable.tsCode],
                         limitType = row[LimitListDTable.limitType],
                         openTimes = row[LimitListDTable.openTimes] ?: 0,
+                        upStat = parseUpStat(row[LimitListDTable.upStat]),
                     )
                 }
                 .groupBy { it.tradeDate }
                 .map { (tradeDate, rows) ->
+                    val limitUpRows = rows.filter { it.limitType == "U" }
+                    val consecutiveRows = limitUpRows.filter { (it.upStat ?: 0) >= 2 }
                     SentimentLimitDailySummary(
                         tradeDate = tradeDate,
                         limitUpClean = rows.count { it.limitType == "U" && it.openTimes == 0 },
+                        limitUpTotal = limitUpRows.size,
+                        triggered = rows.count { it.limitType == "U" || it.limitType == "Z" },
                         limitDown = rows.count { it.limitType == "D" },
+                        consecutiveMax = limitUpRows.mapNotNull { it.upStat }.maxOrNull() ?: 0,
+                        consecutiveCount = consecutiveRows.size,
+                        limitUpTsCodes = limitUpRows.mapTo(linkedSetOf()) { it.tsCode },
+                        consecutiveTsCodes = consecutiveRows.mapTo(linkedSetOf()) { it.tsCode },
                     )
                 }
         }
+
+    private fun parseUpStat(raw: String?): Int? {
+        if (raw.isNullOrBlank()) return null
+        return raw.substringBefore('/').toIntOrNull()
+    }
 
     private fun parseCompactDate(raw: String?): LocalDate? {
         if (raw == null || raw.length != 8) return null
@@ -233,8 +274,10 @@ object SentimentFactorDailyRepository {
 
     private data class LimitFact(
         val tradeDate: LocalDate,
+        val tsCode: String,
         val limitType: String,
         val openTimes: Int,
+        val upStat: Int?,
     )
 
     private val A_GROUP_FACTOR_NAMES = listOf(
@@ -264,5 +307,16 @@ object SentimentFactorDailyRepository {
         "B7",
         "E1",
         "E2",
+    )
+
+    private val C_GROUP_FACTOR_NAMES = listOf(
+        "C1",
+        "C2",
+        "C2p",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7",
     )
 }

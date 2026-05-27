@@ -23,7 +23,13 @@ data class SentimentStockDailyFact(
 data class SentimentLimitDailySummary(
     val tradeDate: LocalDate,
     val limitUpClean: Int,
+    val limitUpTotal: Int,
+    val triggered: Int,
     val limitDown: Int,
+    val consecutiveMax: Int,
+    val consecutiveCount: Int,
+    val limitUpTsCodes: Set<String> = emptySet(),
+    val consecutiveTsCodes: Set<String> = emptySet(),
 )
 
 object SentimentFactorDailyCalculator {
@@ -45,6 +51,7 @@ object SentimentFactorDailyCalculator {
             if (valid.isEmpty()) continue
             val limit = limitByDate[tradeDate]
             val pctValues = valid.map { it.pctNorm }
+            val currentLimitUp = limit?.limitUpTsCodes.orEmpty()
             rows += DailySeed(
                 tradeDate = tradeDate,
                 a1 = valid.weightedMean { it.pctNorm },
@@ -59,6 +66,19 @@ object SentimentFactorDailyCalculator {
                 b5 = pctValues.count { it > STRONG_MOVE_THRESHOLD }.toDouble() / pctValues.size,
                 b6 = pctValues.count { it < -STRONG_MOVE_THRESHOLD }.toDouble() / pctValues.size,
                 e1 = valid.weightedMean { it.amplitude },
+                c1 = if (limit != null && limit.triggered > 0) {
+                    limit.limitUpClean.toDouble() / limit.triggered
+                } else {
+                    null
+                },
+                c2 = limit?.consecutiveMax?.toDouble(),
+                c3 = limit?.consecutiveCount?.toDouble(),
+                c4 = recentLimitReturn(valid, rows, lookback = 3),
+                c5 = limit?.let { it.limitUpClean.toDouble() / kotlin.math.max(it.limitDown, 1).toDouble() },
+                c6 = currentConsecutiveReturn(valid, limit),
+                c7 = previousBreakRate(rows.lastOrNull()?.limitUpTsCodes, currentLimitUp),
+                y3Raw = (limit?.let { it.limitUpClean - it.limitDown } ?: 0).toDouble() / valid.size,
+                limitUpTsCodes = currentLimitUp,
             )
         }
 
@@ -68,6 +88,7 @@ object SentimentFactorDailyCalculator {
         val a6Ema = ema(rows.map { it.a6Base }, span = 5)
         val b3Ema = ema(rows.map { it.b3 }, span = 3)
         val e1Ema = ema(rows.map { it.e1 }, span = 5)
+        val c2Ema = ema(rows.map { it.c2 }, span = 5)
 
         return rows.mapIndexed { index, row ->
             val factors = linkedMapOf<String, Double?>(
@@ -92,6 +113,14 @@ object SentimentFactorDailyCalculator {
                 "B5" to row.b5,
                 "B6" to row.b6,
                 "B7" to breadthPersistence(rows, index),
+                "C1" to row.c1,
+                "C2" to row.c2,
+                "C2p" to c2Ema[index],
+                "C3" to row.c3,
+                "C4" to row.c4,
+                "C5" to row.c5,
+                "C6" to row.c6,
+                "C7" to row.c7,
                 "E1" to row.e1,
                 "E2" to e1Ema[index]?.let { ema -> row.e1?.minus(ema) },
             )
@@ -100,7 +129,7 @@ object SentimentFactorDailyCalculator {
                 factors = factors,
                 y1Raw = row.a1,
                 y2Raw = row.b4,
-                y3Raw = null,
+                y3Raw = row.y3Raw,
                 yComposite = null,
             )
         }
@@ -181,6 +210,37 @@ object SentimentFactorDailyCalculator {
         return values.sumOf { it - 0.5 }
     }
 
+    private fun recentLimitReturn(
+        facts: List<SentimentStockDailyFact>,
+        previousRows: List<DailySeed>,
+        lookback: Int,
+    ): Double? {
+        val recentLimitCodes = previousRows
+            .takeLast(lookback)
+            .flatMap { it.limitUpTsCodes }
+            .toSet()
+        if (recentLimitCodes.isEmpty()) return null
+        return facts.filter { it.tsCode in recentLimitCodes }.weightedMean { it.pctNorm }
+    }
+
+    private fun currentConsecutiveReturn(
+        facts: List<SentimentStockDailyFact>,
+        limit: SentimentLimitDailySummary?,
+    ): Double? {
+        val codes = limit?.consecutiveTsCodes.orEmpty()
+        if (codes.isEmpty()) return null
+        return facts.filter { it.tsCode in codes }.weightedMean { it.pctNorm }
+    }
+
+    private fun previousBreakRate(
+        previousLimitUp: Set<String>?,
+        currentLimitUp: Set<String>,
+    ): Double? {
+        val previous = previousLimitUp.orEmpty()
+        if (previous.isEmpty()) return null
+        return previous.count { it !in currentLimitUp }.toDouble() / previous.size
+    }
+
     private fun List<SentimentStockDailyFact>.weightedMean(value: (SentimentStockDailyFact) -> Double?): Double? {
         var weighted = 0.0
         var totalWeight = 0.0
@@ -227,6 +287,15 @@ object SentimentFactorDailyCalculator {
         val b5: Double?,
         val b6: Double?,
         val e1: Double?,
+        val c1: Double?,
+        val c2: Double?,
+        val c3: Double?,
+        val c4: Double?,
+        val c5: Double?,
+        val c6: Double?,
+        val c7: Double?,
+        val y3Raw: Double?,
+        val limitUpTsCodes: Set<String>,
     )
 
     private enum class ValueKind {

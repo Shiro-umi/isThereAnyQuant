@@ -17,8 +17,8 @@ class SentimentFactorDailyCalculatorTest {
                 fact(d2, "000002.SZ", close = 99.0, previousClose = 90.0, volume = 400.0, previousVolume = 400.0, turnover = 2.0, previousTurnover = 2_000_000_000.0, mv = 300.0),
             ),
             limitSummaries = listOf(
-                SentimentLimitDailySummary(d1, limitUpClean = 10, limitDown = 2),
-                SentimentLimitDailySummary(d2, limitUpClean = 4, limitDown = 8),
+                SentimentLimitDailySummary(d1, limitUpClean = 10, limitUpTotal = 10, triggered = 12, limitDown = 2, consecutiveMax = 1, consecutiveCount = 0),
+                SentimentLimitDailySummary(d2, limitUpClean = 4, limitUpTotal = 4, triggered = 5, limitDown = 8, consecutiveMax = 1, consecutiveCount = 0),
             ),
             startDate = d1,
             endDate = d2,
@@ -45,6 +45,94 @@ class SentimentFactorDailyCalculatorTest {
         assertClose(1.0, second["A10"])
         assertClose(0.0, second["A11"])
         assertClose(1.0, records[1].y2Raw)
+    }
+
+    @Test
+    fun `C group factors describe limit board ecosystem and y3 raw`() {
+        val d1 = LocalDate.parse("2026-01-05")
+        val d2 = LocalDate.parse("2026-01-06")
+        val d3 = LocalDate.parse("2026-01-07")
+        val records = SentimentFactorDailyCalculator.calculate(
+            facts = listOf(
+                fact(d1, "000001.SZ", close = 110.0, previousClose = 100.0, mv = 100.0),
+                fact(d1, "000002.SZ", close = 105.0, previousClose = 100.0, mv = 200.0),
+                fact(d1, "000003.SZ", close = 95.0, previousClose = 100.0, mv = 300.0),
+                fact(d2, "000001.SZ", close = 103.0, previousClose = 100.0, mv = 100.0),
+                fact(d2, "000002.SZ", close = 110.0, previousClose = 100.0, mv = 200.0),
+                fact(d2, "000003.SZ", close = 97.0, previousClose = 100.0, mv = 300.0),
+                fact(d3, "000001.SZ", close = 99.0, previousClose = 100.0, mv = 100.0),
+                fact(d3, "000002.SZ", close = 104.0, previousClose = 100.0, mv = 200.0),
+                fact(d3, "000003.SZ", close = 110.0, previousClose = 100.0, mv = 300.0),
+            ),
+            limitSummaries = listOf(
+                SentimentLimitDailySummary(
+                    tradeDate = d1,
+                    limitUpClean = 2,
+                    limitUpTotal = 2,
+                    triggered = 3,
+                    limitDown = 1,
+                    consecutiveMax = 1,
+                    consecutiveCount = 0,
+                    limitUpTsCodes = setOf("000001.SZ", "000002.SZ"),
+                ),
+                SentimentLimitDailySummary(
+                    tradeDate = d2,
+                    limitUpClean = 1,
+                    limitUpTotal = 1,
+                    triggered = 2,
+                    limitDown = 1,
+                    consecutiveMax = 2,
+                    consecutiveCount = 1,
+                    limitUpTsCodes = setOf("000002.SZ"),
+                    consecutiveTsCodes = setOf("000002.SZ"),
+                ),
+                SentimentLimitDailySummary(
+                    tradeDate = d3,
+                    limitUpClean = 2,
+                    limitUpTotal = 2,
+                    triggered = 4,
+                    limitDown = 0,
+                    consecutiveMax = 3,
+                    consecutiveCount = 2,
+                    limitUpTsCodes = setOf("000002.SZ", "000003.SZ"),
+                    consecutiveTsCodes = setOf("000002.SZ", "000003.SZ"),
+                ),
+            ),
+            startDate = d1,
+            endDate = d3,
+        )
+
+        val first = records[0].factors
+        assertClose(2.0 / 3.0, first["C1"])
+        assertClose(1.0, first["C2"])
+        assertClose(1.0, first["C2p"])
+        assertClose(0.0, first["C3"])
+        assertEquals(null, first["C4"])
+        assertEquals(null, first["C6"])
+        assertEquals(null, first["C7"])
+        assertClose(1.0 / 3.0, records[0].y3Raw)
+
+        val second = records[1].factors
+        assertClose(0.5, second["C1"])
+        assertClose(2.0, second["C2"])
+        assertClose(1.3333333333333335, second["C2p"])
+        assertClose(1.0, second["C3"])
+        assertClose(0.07666666666666666, second["C4"])
+        assertClose(1.0, second["C5"])
+        assertClose(0.10, second["C6"])
+        assertClose(0.5, second["C7"])
+        assertClose(0.0, records[1].y3Raw)
+
+        val third = records[2].factors
+        assertClose(0.5, third["C1"])
+        assertClose(3.0, third["C2"])
+        assertClose(1.888888888888889, third["C2p"])
+        assertClose(2.0, third["C3"])
+        assertClose(0.023333333333333355, third["C4"])
+        assertClose(2.0, third["C5"])
+        assertClose(0.076, third["C6"])
+        assertClose(0.0, third["C7"])
+        assertClose(2.0 / 3.0, records[2].y3Raw)
     }
 
     @Test
