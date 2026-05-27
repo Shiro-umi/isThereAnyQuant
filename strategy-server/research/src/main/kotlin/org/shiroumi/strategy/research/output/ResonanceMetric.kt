@@ -58,9 +58,15 @@ data class ResonanceMetric(
     val oos_ic: Double? = null,
     val rank_ic_oos: Double? = null,
     val hit_rate: Double? = null,
+    /** 方向命中率基准 = max(P(Y>0), P(Y<0))（手册 §6.5 baseline 定义）。eval 第 7 项独立复核 hit_rate > baseline+0.05 需要它。 */
+    val baseline: Double? = null,
     val top_bottom_spread: Double? = null,
+    /** top_bottom_spread 滚动窗口同号占比 ∈ [0,1]。eval 第 8 项「稳定为正(同号>70%)」需要它，单个 spread 值判不了稳定性。 */
+    val top_bottom_spread_consistency: Double? = null,
     val delta_score_vs_base: Double? = null,
     val delta_ic_vs_base: Double? = null,
+    /** 因子对 β3 同号占比（手册 §12.3）。eval 第 12 项（因子对额外）独立复核 beta3_stability>0.70 需要它。单因子留空。 */
+    val beta3_stability: Double? = null,
     val p_value: Double? = null,
     val q_value: Double? = null,
     val sample_count: Int? = null,
