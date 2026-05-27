@@ -14,6 +14,7 @@ import model.candle.CandlePeriod
 import model.ws.*
 import org.shiroumi.quant_kmp.createPlatformHttpClient
 import org.shiroumi.quant_kmp.util.TokenManager
+import org.shiroumi.quant_kmp.util.TokenRefreshHandler
 import org.shiroumi.config.AppConfig
 import kotlin.concurrent.Volatile
 import kotlin.concurrent.atomics.AtomicLong
@@ -157,14 +158,6 @@ object GlobalWebSocketClient {
      * 该方法具有幂等性，App 生命周期框架可在回到前台时多次调用而不会创建重复连接。
      */
     fun connect() {
-        if (TokenManager.getAccessToken() == null) {
-            println("[GlobalWebSocket] No access token, skip protected WebSocket connection.")
-            // 早退前显式把状态拉回 DISCONNECTED，避免上一次留下的 RECONNECTING 状态
-            // 让 UI 永远显示"重连中"。
-            _connectionStateFlow.value = ConnectionState.DISCONNECTED
-            return
-        }
-
         if (isConnected || connectJob?.isActive == true) {
             println("[GlobalWebSocket] Connection already established or connecting, skip connect request.")
             return
@@ -175,9 +168,10 @@ object GlobalWebSocketClient {
         connectJob = scope.launch {
             while (!isManualDisconnect) {
                 try {
-                    val token = TokenManager.getAccessToken()
+                    val token = resolveAccessToken()
                     if (token == null) {
                         println("[GlobalWebSocket] Access token unavailable, stopping reconnection loop.")
+                        _connectionStateFlow.value = ConnectionState.DISCONNECTED
                         isManualDisconnect = true
                         break
                     }
@@ -246,6 +240,12 @@ object GlobalWebSocketClient {
                 }
             }
         }
+    }
+
+    private suspend fun resolveAccessToken(): String? {
+        TokenManager.getAccessToken()?.let { return it }
+        println("[GlobalWebSocket] Access token unavailable, attempting refresh before WebSocket connect.")
+        return TokenRefreshHandler.refresh(force = true).getOrNull()
     }
 
     /**
