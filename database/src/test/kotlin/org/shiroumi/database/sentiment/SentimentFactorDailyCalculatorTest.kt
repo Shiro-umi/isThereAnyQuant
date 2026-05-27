@@ -45,6 +45,8 @@ class SentimentFactorDailyCalculatorTest {
         assertClose(1.0, second["A10"])
         assertClose(0.0, second["A11"])
         assertClose(1.0, records[1].y2Raw)
+        assertClose(0.0, records[0].yComposite)
+        assertClose(1.0 / 3.0, records[1].yComposite)
     }
 
     @Test
@@ -206,6 +208,42 @@ class SentimentFactorDailyCalculatorTest {
     }
 
     @Test
+    fun `target labels are generated dynamically from future rows`() {
+        val start = LocalDate.parse("2026-01-05")
+        val records = (0 until 6).map { offset ->
+            SentimentFactorDailyRecord(
+                tradeDate = start.plusDays(offset),
+                factors = emptyMap(),
+                y1Raw = (offset + 1).toDouble(),
+                y2Raw = (offset + 10).toDouble(),
+                y3Raw = (offset - 3).toDouble(),
+                yComposite = offset.toDouble() / 10.0,
+            )
+        }
+
+        val labels = SentimentTargetLabelCalculator.build(records)
+
+        val first = labels.first()
+        assertClose(2.0, first.y1Next1)
+        assertClose(3.0, first.y1Next3)
+        assertClose(4.0, first.y1Next5)
+        assertClose(11.0, first.y2Next1)
+        assertClose(-1.0, first.y3Next3)
+        assertClose(0.1, first.yCompositeNext1)
+        assertClose(0.2, first.yCompositeNext3)
+        assertClose(4.0, first.yMax3)
+        assertClose(2.0, first.yMin3)
+        assertClose(6.0, first.yMax5)
+        assertClose(2.0, first.yMin5)
+        assertClose(0.0, first.yDrawdown5)
+        assertClose(1.0, first.yDirection3)
+        assertClose(1.0, first.yDirection5)
+
+        assertEquals(null, labels[3].y1Next3)
+        assertEquals(null, labels[5].y1Next1)
+    }
+
+    @Test
     fun `pct norm applies board caps and ST priority`() {
         val d = LocalDate.parse("2026-01-05")
         val records = SentimentFactorDailyCalculator.calculate(
@@ -303,4 +341,7 @@ class SentimentFactorDailyCalculatorTest {
         require(actual != null) { "Expected $expected but was null" }
         assertEquals(expected, actual, absoluteTolerance = 1e-9)
     }
+
+    private fun LocalDate.plusDays(days: Int): LocalDate =
+        kotlinx.datetime.LocalDate.fromEpochDays(toEpochDays() + days)
 }

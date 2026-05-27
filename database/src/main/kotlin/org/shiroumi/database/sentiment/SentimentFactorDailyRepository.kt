@@ -72,6 +72,19 @@ object SentimentFactorDailyRepository {
         return records.size
     }
 
+    fun rebuildLabels(startDate: LocalDate, endDate: LocalDate): Int {
+        val stockFacts = findStockFactsForAGroup(startDate, endDate)
+        val limits = findLimitSummaries(startDate, endDate)
+        val records = SentimentFactorDailyCalculator.calculate(
+            facts = stockFacts,
+            limitSummaries = limits,
+            startDate = startDate,
+            endDate = endDate,
+        )
+        upsertLabels(records)
+        return records.size
+    }
+
     fun upsertAGroup(records: List<SentimentFactorDailyRecord>) {
         if (records.isEmpty()) return
         stockDb.transaction(SentimentFactorDailyTable, log = false) {
@@ -119,6 +132,19 @@ object SentimentFactorDailyRepository {
                 D_GROUP_FACTOR_NAMES.forEach { name ->
                     this[SentimentFactorDailyTable.factorColumns.getValue(name)] = record.factors[name]
                 }
+            }
+        }
+    }
+
+    fun upsertLabels(records: List<SentimentFactorDailyRecord>) {
+        if (records.isEmpty()) return
+        stockDb.transaction(SentimentFactorDailyTable, log = false) {
+            SentimentFactorDailyTable.batchUpsert(records) { record ->
+                this[SentimentFactorDailyTable.tradeDate] = record.tradeDate
+                this[SentimentFactorDailyTable.y1Raw] = record.y1Raw
+                this[SentimentFactorDailyTable.y2Raw] = record.y2Raw
+                this[SentimentFactorDailyTable.y3Raw] = record.y3Raw
+                this[SentimentFactorDailyTable.yComposite] = record.yComposite
             }
         }
     }

@@ -91,6 +91,7 @@ object SentimentFactorDailyCalculator {
         val c2Ema = ema(rows.map { it.c2 }, span = 5)
         val d1Ema = ema(rows.map { it.a1 }, span = 5)
         val d2Ema = ema(rows.map { it.a1 }, span = 10)
+        val yComposite = compositeY(rows)
 
         return rows.mapIndexed { index, row ->
             val factors = linkedMapOf<String, Double?>(
@@ -139,7 +140,7 @@ object SentimentFactorDailyCalculator {
                 y1Raw = row.a1,
                 y2Raw = row.b4,
                 y3Raw = row.y3Raw,
-                yComposite = null,
+                yComposite = yComposite[index],
             )
         }
     }
@@ -288,6 +289,27 @@ object SentimentFactorDailyCalculator {
             else -> 0.0
         }
     }
+
+    private fun compositeY(rows: List<DailySeed>): List<Double?> {
+        val z1 = rollingZ(rows.map { it.a1 }, window = 252)
+        val z2 = rollingZ(rows.map { it.b4 }, window = 252)
+        val z3 = rollingZ(rows.map { it.y3Raw }, window = 252)
+        return rows.indices.map { index ->
+            val parts = listOfNotNull(z1[index], z2[index], z3[index])
+            if (parts.isEmpty()) null else parts.average()
+        }
+    }
+
+    private fun rollingZ(values: List<Double?>, window: Int): List<Double?> =
+        values.indices.map { index ->
+            val current = values[index] ?: return@map null
+            val sample = values.subList(kotlin.math.max(0, index - window + 1), index + 1).filterNotNull()
+            if (sample.isEmpty()) return@map null
+            val mean = sample.average()
+            val variance = sample.sumOf { (it - mean) * (it - mean) } / sample.size
+            val std = kotlin.math.sqrt(variance)
+            if (std == 0.0) 0.0 else (current - mean) / std
+        }
 
     private fun sign(value: Double?): Int =
         when {
