@@ -46,8 +46,14 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
             .split(',')
             .map { it.trim() }
             .filter { it in BANDS }
+        val stateMode = ctx.param("state-mode", "all,conditional")
+            .split(',')
+            .map { it.trim() }
+            .toSet()
+        val stateSlices = if ("conditional" in stateMode) buildStateSlices(records, ctx.param("state-window", "60").toInt()) else emptyList()
+        val maxStateCandidates = ctx.param("max-state-candidates", "80").toInt()
 
-        val metrics = ArrayList<ResonanceMetric>()
+        val globalMetrics = ArrayList<ResonanceMetric>()
         for (factor in factorNames) {
             val rawFactor = records.map { it.factors[factor] }
             for (target in targets) {
@@ -64,9 +70,37 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
                             rawFactor = rawFactor,
                             rawTarget = rawTarget,
                             futureTarget = futureTarget,
-                        )?.let(metrics::add)
+                            stateId = "trend=all,disp=all,vol=all",
+                            stateIndexes = null,
+                        )?.let(globalMetrics::add)
                     }
                 }
+            }
+        }
+        val metrics = ArrayList<ResonanceMetric>()
+        if ("all" in stateMode) metrics.addAll(globalMetrics)
+        val stateCandidates = globalMetrics
+            .filter { isStateCandidate(it) }
+            .sortedByDescending { candidateScore(it) }
+            .take(maxStateCandidates)
+        for (candidate in stateCandidates) {
+            val id = candidate.identity
+            val rawFactor = records.map { it.factors[id.factor_i] }
+            val rawTarget = records.map { targetRaw(it, id.target_y) }
+            val futureTarget = labels.map { targetNext(it, id.target_y, id.horizon) }
+            for (slice in stateSlices) {
+                buildMetric(
+                    ctx = ctx,
+                    factor = id.factor_i,
+                    target = id.target_y,
+                    horizon = id.horizon,
+                    band = id.band,
+                    rawFactor = rawFactor,
+                    rawTarget = rawTarget,
+                    futureTarget = futureTarget,
+                    stateId = slice.id,
+                    stateIndexes = slice.indexes,
+                )?.let(metrics::add)
             }
         }
         return withBenjaminiHochbergQ(metrics)
@@ -81,8 +115,11 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         rawFactor: List<Double?>,
         rawTarget: List<Double?>,
         futureTarget: List<Double?>,
+        stateId: String,
+        stateIndexes: Set<Int>?,
     ): ResonanceMetric? {
         val aligned = rawFactor.indices.mapNotNull { index ->
+            if (stateIndexes != null && index !in stateIndexes) return@mapNotNull null
             val x = rawFactor[index]
             val y = rawTarget[index]
             val fy = futureTarget[index]
@@ -125,7 +162,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
                 target_y = target,
                 horizon = horizon,
                 band = band,
-                state_id = "trend=all,disp=all,vol=all",
+                state_id = stateId,
             ),
             stft_window = 40,
             norm_version = "Z_60_detrend",
@@ -153,6 +190,88 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
             regime = "all",
         )
     }
+
+    private fun buildStateSlices(records: List<SentimentFactorDailyRecord>, stateWindow: Int): List<StateSlice> {
+        val exactStates = records.indices.mapNotNull { index ->
+            val state = stateAt(records, index, stateWindow) ?: return@mapNotNull null
+            index to state
+        }
+        val indexesByExact = exactStates.groupBy({ it.second }, { it.first })
+        val slices = linkedMapOf<String, MutableSet<Int>>()
+        for ((state, indexes) in indexesByExact) {
+            val merged = if (indexes.size >= MIN_STATE_SAMPLE) state.toMergedState() else mergeState(state, indexesByExact)
+            val mergedIndexes = indexesByExact
+                .filterKeys { candidate -> merged.includes(candidate) }
+                .values
+                .flatten()
+            if (mergedIndexes.size >= MIN_OBSERVATION_SAMPLE) {
+                slices.getOrPut(merged.id) { linkedSetOf() }.addAll(mergedIndexes)
+            }
+        }
+        return slices.entries
+            .map { (id, indexes) -> StateSlice(id = id, indexes = indexes) }
+            .sortedBy { it.id }
+    }
+
+    private fun stateAt(records: List<SentimentFactorDailyRecord>, index: Int, stateWindow: Int): MarketState? {
+        val trendValue = records[index].factors["D4"] ?: records[index].factors["A1"] ?: return null
+        val dispersionValue = records[index].factors["B3p"] ?: records[index].factors["B3"] ?: return null
+        val volumeEma = ema(records.map { it.factors["A3"] ?: 0.0 }.toDoubleArray(), span = 5)
+        val volumeValue = volumeEma[index]
+        fun bucket(name: String, value: Double, values: List<Double>): StateBucket? {
+            if (values.size < 5) return null
+            val rank = values.count { it < value }.toDouble() / values.size
+            return when {
+                rank < 0.33 -> StateBucket(0, name.split('/')[0])
+                rank < 0.67 -> StateBucket(1, name.split('/')[1])
+                else -> StateBucket(2, name.split('/')[2])
+            }
+        }
+        val start = max(0, index - stateWindow + 1)
+        return MarketState(
+            trend = bucket("low/mid/high", trendValue, records.subList(start, index + 1).mapNotNull { it.factors["D4"] ?: it.factors["A1"] })
+                ?: return null,
+            dispersion = bucket("low/mid/high", dispersionValue, records.subList(start, index + 1).mapNotNull { it.factors["B3p"] ?: it.factors["B3"] })
+                ?: return null,
+            volume = bucket("low/mid/high", volumeValue, volumeEma.copyOfRange(start, index + 1).toList())
+                ?: return null,
+        )
+    }
+
+    private fun mergeState(state: MarketState, indexesByExact: Map<MarketState, List<Int>>): MergedState {
+        val candidates = listOf(
+            MergedState(setOf(state.trend.level), adjacentLevels(state.dispersion.level), setOf(state.volume.level)),
+            MergedState(setOf(state.trend.level), setOf(state.dispersion.level), adjacentLevels(state.volume.level)),
+            MergedState(adjacentLevels(state.trend.level), setOf(state.dispersion.level), setOf(state.volume.level)),
+            MergedState(setOf(0, 1, 2), setOf(state.dispersion.level), setOf(state.volume.level)),
+            MergedState(setOf(state.trend.level), setOf(0, 1, 2), setOf(state.volume.level)),
+            MergedState(setOf(state.trend.level), setOf(state.dispersion.level), setOf(0, 1, 2)),
+            MergedState(setOf(0, 1, 2), setOf(0, 1, 2), setOf(0, 1, 2)),
+        )
+        return candidates.firstOrNull { merged ->
+            indexesByExact.filterKeys { merged.includes(it) }.values.sumOf { it.size } >= MIN_STATE_SAMPLE
+        } ?: candidates.last()
+    }
+
+    private fun MarketState.toMergedState(): MergedState =
+        MergedState(setOf(trend.level), setOf(dispersion.level), setOf(volume.level))
+
+    private fun adjacentLevels(level: Int): Set<Int> =
+        when (level) {
+            0 -> setOf(0, 1)
+            1 -> setOf(0, 1, 2)
+            else -> setOf(1, 2)
+        }
+
+    private fun isStateCandidate(metric: ResonanceMetric): Boolean =
+        (metric.mean_coherence ?: 0.0) >= 0.35 ||
+            abs(metric.rolling_corr_mean ?: 0.0) >= 0.10 ||
+            (metric.oos_ic ?: 0.0) > 0.0
+
+    private fun candidateScore(metric: ResonanceMetric): Double =
+        (metric.mean_coherence ?: 0.0) +
+            abs(metric.rolling_corr_mean ?: 0.0) +
+            max(0.0, metric.oos_ic ?: 0.0)
 
     private fun preprocess(values: DoubleArray): DoubleArray {
         val clipped = rollingWinsorize(values, window = 252)
@@ -293,7 +412,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
             topBottomSpreadConsistency = spreads.takeIf { it.isNotEmpty() }
                 ?.let { values -> values.count { it > 0.0 }.toDouble() / values.size },
             beta = beta(pred, actual),
-            sampleCount = validation.size,
+            sampleCount = pairs.size,
         )
     }
 
@@ -417,6 +536,27 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         val leadDaysPhase: Double?,
     )
     private data class LeadLag(val leadDays: Double, val corr: Double?)
+    private data class StateBucket(val level: Int, val label: String)
+    private data class MarketState(
+        val trend: StateBucket,
+        val dispersion: StateBucket,
+        val volume: StateBucket,
+    )
+    private data class MergedState(
+        val trend: Set<Int>,
+        val dispersion: Set<Int>,
+        val volume: Set<Int>,
+    ) {
+        val id: String =
+            "trend=${label(trend)},disp=${label(dispersion)},vol=${label(volume)}"
+
+        fun includes(state: MarketState): Boolean =
+            state.trend.level in trend && state.dispersion.level in dispersion && state.volume.level in volume
+
+        private fun label(levels: Set<Int>): String =
+            levels.sorted().joinToString("+") { LEVEL_LABELS.getValue(it) }
+    }
+    private data class StateSlice(val id: String, val indexes: Set<Int>)
     private data class OosStats(
         val ic: Double? = null,
         val rankIc: Double? = null,
@@ -429,9 +569,12 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
     )
 
     companion object {
-        private const val MIN_SERIES_SIZE = 90
+        private const val MIN_SERIES_SIZE = 60
+        private const val MIN_OBSERVATION_SAMPLE = 30
+        private const val MIN_STATE_SAMPLE = 60
 
         private val TARGETS = setOf("Y1", "Y2", "Y3")
+        private val LEVEL_LABELS = mapOf(0 to "low", 1 to "mid", 2 to "high")
         private val BANDS = linkedMapOf(
             "F1b" to BandSpec(0.200, 0.333),
             "F2a" to BandSpec(0.125, 0.200),
