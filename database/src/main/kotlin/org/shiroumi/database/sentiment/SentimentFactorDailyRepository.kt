@@ -33,6 +33,19 @@ object SentimentFactorDailyRepository {
         return records.size
     }
 
+    fun rebuildBAndEGroup(startDate: LocalDate, endDate: LocalDate): Int {
+        val stockFacts = findStockFactsForAGroup(startDate, endDate)
+        val limits = findLimitSummaries(startDate, endDate)
+        val records = SentimentFactorDailyCalculator.calculate(
+            facts = stockFacts,
+            limitSummaries = limits,
+            startDate = startDate,
+            endDate = endDate,
+        )
+        upsertBAndEGroup(records)
+        return records.size
+    }
+
     fun upsertAGroup(records: List<SentimentFactorDailyRecord>) {
         if (records.isEmpty()) return
         stockDb.transaction(SentimentFactorDailyTable, log = false) {
@@ -42,6 +55,19 @@ object SentimentFactorDailyRepository {
                     this[SentimentFactorDailyTable.factorColumns.getValue(name)] = record.factors[name]
                 }
                 this[SentimentFactorDailyTable.y1Raw] = record.y1Raw
+            }
+        }
+    }
+
+    fun upsertBAndEGroup(records: List<SentimentFactorDailyRecord>) {
+        if (records.isEmpty()) return
+        stockDb.transaction(SentimentFactorDailyTable, log = false) {
+            SentimentFactorDailyTable.batchUpsert(records) { record ->
+                this[SentimentFactorDailyTable.tradeDate] = record.tradeDate
+                B_E_GROUP_FACTOR_NAMES.forEach { name ->
+                    this[SentimentFactorDailyTable.factorColumns.getValue(name)] = record.factors[name]
+                }
+                this[SentimentFactorDailyTable.y2Raw] = record.y2Raw
             }
         }
     }
@@ -122,6 +148,10 @@ object SentimentFactorDailyRepository {
                         tsCode = row[StockDailyDataTable.tsCode],
                         closeQfq = positiveOrNull(row[StockDailyDataTable.closeQfq].toDouble())
                             ?: row[StockDailyDataTable.close].toDouble(),
+                        highQfq = positiveOrNull(row[StockDailyDataTable.highQfq].toDouble())
+                            ?: row[StockDailyDataTable.high].toDouble(),
+                        lowQfq = positiveOrNull(row[StockDailyDataTable.lowQfq].toDouble())
+                            ?: row[StockDailyDataTable.low].toDouble(),
                         volumeQfq = positiveOrNull(row[StockDailyDataTable.volumeQfq].toDouble())
                             ?: row[StockDailyDataTable.volume].toDouble(),
                         turnoverReal = row[StockDailyDataTable.turnoverReal].toDouble(),
@@ -139,6 +169,8 @@ object SentimentFactorDailyRepository {
                         listDate = info.listDate,
                         delistDate = info.delistDate,
                         closeQfq = current.closeQfq,
+                        highQfq = current.highQfq,
+                        lowQfq = current.lowQfq,
                         previousCloseQfq = previous.closeQfq,
                         volumeQfq = current.volumeQfq,
                         previousVolumeQfq = previous.volumeQfq,
@@ -192,6 +224,8 @@ object SentimentFactorDailyRepository {
         val tradeDate: LocalDate,
         val tsCode: String,
         val closeQfq: Double,
+        val highQfq: Double,
+        val lowQfq: Double,
         val volumeQfq: Double,
         val turnoverReal: Double,
         val mvCirc: Double,
@@ -218,5 +252,17 @@ object SentimentFactorDailyRepository {
         "A11",
         "A11a",
         "A12",
+    )
+
+    private val B_E_GROUP_FACTOR_NAMES = listOf(
+        "B1",
+        "B3",
+        "B3p",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "E1",
+        "E2",
     )
 }

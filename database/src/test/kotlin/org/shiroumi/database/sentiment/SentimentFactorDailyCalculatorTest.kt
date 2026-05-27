@@ -44,6 +44,7 @@ class SentimentFactorDailyCalculatorTest {
         assertClose(4.0, second["A6"])
         assertClose(1.0, second["A10"])
         assertClose(0.0, second["A11"])
+        assertClose(1.0, records[1].y2Raw)
     }
 
     @Test
@@ -65,12 +66,59 @@ class SentimentFactorDailyCalculatorTest {
         assertClose(0.10, first["A1"])
     }
 
+    @Test
+    fun `B and E factors describe cross-section breadth distribution and amplitude`() {
+        val d1 = LocalDate.parse("2026-01-05")
+        val d2 = LocalDate.parse("2026-01-06")
+        val d3 = LocalDate.parse("2026-01-07")
+        val records = SentimentFactorDailyCalculator.calculate(
+            facts = listOf(
+                fact(d1, "000001.SZ", close = 110.0, previousClose = 100.0, high = 112.0, low = 98.0),
+                fact(d1, "000002.SZ", close = 100.0, previousClose = 100.0, high = 103.0, low = 97.0),
+                fact(d1, "000003.SZ", close = 96.0, previousClose = 100.0, high = 101.0, low = 95.0),
+                fact(d2, "000001.SZ", close = 106.0, previousClose = 100.0, high = 108.0, low = 99.0),
+                fact(d2, "000002.SZ", close = 104.0, previousClose = 100.0, high = 105.0, low = 98.0),
+                fact(d2, "000003.SZ", close = 98.0, previousClose = 100.0, high = 102.0, low = 97.0),
+                fact(d3, "000001.SZ", close = 94.0, previousClose = 100.0, high = 101.0, low = 93.0),
+                fact(d3, "000002.SZ", close = 102.0, previousClose = 100.0, high = 104.0, low = 99.0),
+                fact(d3, "000003.SZ", close = 101.0, previousClose = 100.0, high = 103.0, low = 98.0),
+            ),
+            limitSummaries = emptyList(),
+            startDate = d1,
+            endDate = d3,
+        )
+
+        val first = records[0].factors
+        assertClose(1.0 / 3.0, first["B4"])
+        assertClose(1.0 / 3.0, first["B5"])
+        assertClose(0.0, first["B6"])
+        assertEquals(null, first["B7"])
+        assertClose(0.08666666666666667, first["E1"])
+
+        val second = records[1].factors
+        assertClose(2.0 / 3.0, second["B4"])
+        assertClose(1.0 / 3.0, second["B5"])
+        assertClose(0.0, second["B6"])
+        assertClose(0.07000000000000002, second["E1"])
+        assertClose(-0.011111111111111113, second["E2"])
+
+        val third = records[2].factors
+        assertClose(2.0 / 3.0, third["B4"])
+        assertClose(0.0, third["B5"])
+        assertClose(1.0 / 3.0, third["B6"])
+        assertClose(1.0 / 6.0, third["B7"])
+        assertClose(0.060000000000000005, third["E1"])
+        assertClose(-0.01407407407407408, third["E2"])
+    }
+
     private fun fact(
         tradeDate: LocalDate,
         tsCode: String,
         name: String = "样本",
         close: Double,
         previousClose: Double,
+        high: Double = close,
+        low: Double = close,
         volume: Double = 100.0,
         previousVolume: Double = 100.0,
         turnover: Double = 100.0,
@@ -83,6 +131,8 @@ class SentimentFactorDailyCalculatorTest {
         listDate = LocalDate.parse("2020-01-01"),
         delistDate = null,
         closeQfq = close,
+        highQfq = high,
+        lowQfq = low,
         previousCloseQfq = previousClose,
         volumeQfq = volume,
         previousVolumeQfq = previousVolume,

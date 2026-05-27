@@ -10,6 +10,8 @@ data class SentimentStockDailyFact(
     val listDate: LocalDate?,
     val delistDate: LocalDate?,
     val closeQfq: Double,
+    val highQfq: Double,
+    val lowQfq: Double,
     val previousCloseQfq: Double?,
     val volumeQfq: Double,
     val previousVolumeQfq: Double?,
@@ -37,12 +39,13 @@ object SentimentFactorDailyCalculator {
             .groupBy { it.tradeDate }
             .toSortedMap()
 
-        val rows = mutableListOf<DailyASeed>()
+        val rows = mutableListOf<DailySeed>()
         for ((tradeDate, dayFacts) in byDate) {
             val valid = dayFacts.filter { it.isTradableOn(tradeDate) }
             if (valid.isEmpty()) continue
             val limit = limitByDate[tradeDate]
-            rows += DailyASeed(
+            val pctValues = valid.map { it.pctNorm }
+            rows += DailySeed(
                 tradeDate = tradeDate,
                 a1 = valid.weightedMean { it.pctNorm },
                 a3 = marketVolumeChange(valid),
@@ -50,6 +53,12 @@ object SentimentFactorDailyCalculator {
                 a6Base = limit?.limitDown?.toDouble() ?: 0.0,
                 bucketReturns = bucketValues(valid, ValueKind.RETURN),
                 bucketVolumeChanges = bucketValues(valid, ValueKind.VOLUME_CHANGE),
+                b1 = weightedSkew(valid),
+                b3 = weightedStd(valid),
+                b4 = pctValues.count { it > 0.0 }.toDouble() / pctValues.size,
+                b5 = pctValues.count { it > STRONG_MOVE_THRESHOLD }.toDouble() / pctValues.size,
+                b6 = pctValues.count { it < -STRONG_MOVE_THRESHOLD }.toDouble() / pctValues.size,
+                e1 = valid.weightedMean { it.amplitude },
             )
         }
 
@@ -57,6 +66,8 @@ object SentimentFactorDailyCalculator {
         val a3Ema = ema(rows.map { it.a3 }, span = 3)
         val a5Ema = ema(rows.map { it.a5Base }, span = 5)
         val a6Ema = ema(rows.map { it.a6Base }, span = 5)
+        val b3Ema = ema(rows.map { it.b3 }, span = 3)
+        val e1Ema = ema(rows.map { it.e1 }, span = 5)
 
         return rows.mapIndexed { index, row ->
             val factors = linkedMapOf<String, Double?>(
@@ -74,12 +85,21 @@ object SentimentFactorDailyCalculator {
                 "A11" to row.bucketVolumeChanges[MarketCapBucket.MID],
                 "A11a" to row.bucketVolumeChanges[MarketCapBucket.MID_LARGE],
                 "A12" to row.bucketVolumeChanges[MarketCapBucket.LARGE],
+                "B1" to row.b1,
+                "B3" to row.b3,
+                "B3p" to b3Ema[index]?.let { ema -> row.b3?.minus(ema) },
+                "B4" to row.b4,
+                "B5" to row.b5,
+                "B6" to row.b6,
+                "B7" to breadthPersistence(rows, index),
+                "E1" to row.e1,
+                "E2" to e1Ema[index]?.let { ema -> row.e1?.minus(ema) },
             )
             SentimentFactorDailyRecord(
                 tradeDate = row.tradeDate,
                 factors = factors,
                 y1Raw = row.a1,
-                y2Raw = null,
+                y2Raw = row.b4,
                 y3Raw = null,
                 yComposite = null,
             )
@@ -132,6 +152,35 @@ object SentimentFactorDailyCalculator {
     private val SentimentStockDailyFact.volumeChange: Double?
         get() = previousVolumeQfq?.takeIf { it > 0.0 }?.let { volumeQfq / it - 1.0 }
 
+    private val SentimentStockDailyFact.amplitude: Double?
+        get() = previousCloseQfq?.takeIf { it > 0.0 }?.let { (highQfq - lowQfq) / it }
+
+    private fun weightedStd(facts: List<SentimentStockDailyFact>): Double? {
+        val mean = facts.weightedMean { it.pctNorm } ?: return null
+        val variance = facts.weightedMean {
+            val delta = it.pctNorm - mean
+            delta * delta
+        } ?: return null
+        return kotlin.math.sqrt(variance)
+    }
+
+    private fun weightedSkew(facts: List<SentimentStockDailyFact>): Double? {
+        val mean = facts.weightedMean { it.pctNorm } ?: return null
+        val std = weightedStd(facts) ?: return null
+        if (std == 0.0) return 0.0
+        val thirdMoment = facts.weightedMean {
+            val normalized = (it.pctNorm - mean) / std
+            normalized * normalized * normalized
+        } ?: return null
+        return thirdMoment
+    }
+
+    private fun breadthPersistence(rows: List<DailySeed>, index: Int): Double? {
+        if (index < 2) return null
+        val values = rows.subList(index - 2, index + 1).map { it.b4 ?: return null }
+        return values.sumOf { it - 0.5 }
+    }
+
     private fun List<SentimentStockDailyFact>.weightedMean(value: (SentimentStockDailyFact) -> Double?): Double? {
         var weighted = 0.0
         var totalWeight = 0.0
@@ -164,7 +213,7 @@ object SentimentFactorDailyCalculator {
         return current - previous
     }
 
-    private data class DailyASeed(
+    private data class DailySeed(
         val tradeDate: LocalDate,
         val a1: Double?,
         val a3: Double?,
@@ -172,6 +221,12 @@ object SentimentFactorDailyCalculator {
         val a6Base: Double,
         val bucketReturns: Map<MarketCapBucket, Double?>,
         val bucketVolumeChanges: Map<MarketCapBucket, Double?>,
+        val b1: Double?,
+        val b3: Double?,
+        val b4: Double?,
+        val b5: Double?,
+        val b6: Double?,
+        val e1: Double?,
     )
 
     private enum class ValueKind {
@@ -195,4 +250,6 @@ object SentimentFactorDailyCalculator {
             }
         }
     }
+
+    private const val STRONG_MOVE_THRESHOLD = 0.05
 }
