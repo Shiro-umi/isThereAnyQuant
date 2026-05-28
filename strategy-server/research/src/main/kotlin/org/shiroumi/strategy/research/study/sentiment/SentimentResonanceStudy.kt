@@ -57,7 +57,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         val discoveryFilter = ctx.param("discovery-filter", "true").toBoolean()
         val stftFilter = ctx.param("stft-filter", "true").toBoolean()
         val stftCoherenceFloor = ctx.param("stft-coherence-floor", "0.40").toDouble()
-        val stftCoverageFloor = ctx.param("stft-coverage-floor", "0.15").toDouble()
+        val stftCoverageFloor = ctx.param("stft-coverage-floor", "0.10").toDouble()
         val fdrFamily = ctx.param("fdr-family", "target-horizon-band")
         val pairMode = ctx.param("pair-mode", "true").toBoolean()
         val pairTransforms = ctx.param("pair-transforms", "diff,product,ratio")
