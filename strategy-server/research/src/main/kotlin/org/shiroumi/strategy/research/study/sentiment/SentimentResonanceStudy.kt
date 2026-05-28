@@ -181,7 +181,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         val xLf = BandpassFilter.lfilter(coeff, xNorm)
         val yLf = BandpassFilter.lfilter(coeff, yNorm)
 
-        val rolling = rollingCorrelationStats(xFf, yFf, horizon, window = 30)
+        val rolling = rollingCorrelationStats(xFf, yFf, horizon, window = 40)
         val stftWindowForBand = if (band == "F2a") 48 else 40
         val coherence = coherenceStats(xFf, yFf, band, stftWindow = stftWindowForBand)
         val leadLag = leadByLagCorrelation(xFf, yFf, horizon = horizon, maxLag = 5)
