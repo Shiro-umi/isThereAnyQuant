@@ -596,7 +596,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         return BlockPermutation.test(
             series = y,
             blockSize = block,
-            iterations = 500,
+            iterations = 2000,
             seed = seed,
             statistic = { permutedY -> abs(pearson(x, permutedY) ?: 0.0) },
         ).pValue
