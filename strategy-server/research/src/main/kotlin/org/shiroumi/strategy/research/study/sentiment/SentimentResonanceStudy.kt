@@ -159,7 +159,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         val rolling = rollingCorrelationStats(xFf, yFf, horizon, window = 30)
         val coherence = coherenceStats(xFf, yFf, band, stftWindow = 40)
         val leadLag = leadByLagCorrelation(xFf, yFf, horizon = horizon, maxLag = 5)
-        val leadPhase = alignPhaseLeadToLag(coherence.leadDaysPhase, leadLag.leadDays, band)
+        val leadPhase = alignPhaseLeadToLag(coherence.leadDaysPhase, leadLag, band)
         val leadStable = leadPhase == null || abs(leadLag.leadDays - leadPhase) <= 1.0
         val xOos = xLf.copyOfRange(0, xLf.size - horizon)
         val yOos = yLf.copyOfRange(horizon, yLf.size)
@@ -395,7 +395,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         } else {
             absolutePeak
         }
-        return LeadLag(selected.lag.toDouble(), abs(selected.corr))
+        return LeadLag(selected.lag.toDouble(), selected.corr)
     }
 
     private fun leadRange(horizon: Int): ClosedFloatingPointRange<Double> =
@@ -406,15 +406,19 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
             else -> 1.0..horizon.toDouble()
         }
 
-    private fun alignPhaseLeadToLag(phaseLead: Double?, lagLead: Double, band: String): Double? {
+    private fun alignPhaseLeadToLag(phaseLead: Double?, leadLag: LeadLag, band: String): Double? {
         if (phaseLead == null) return null
         val spec = BANDS.getValue(band)
         val centerFrequency = (spec.low + spec.high) / 2.0
         if (centerFrequency <= 0.0) return phaseLead
         val periodDays = 1.0 / centerFrequency
-        return (-2..2)
-            .map { branch -> phaseLead + branch * periodDays }
-            .minBy { abs(it - lagLead) }
+        val offsets = (-2..2).map { branch -> branch * periodDays }.toMutableList()
+        if ((leadLag.corr ?: 0.0) < 0.0) {
+            offsets += (-2..2).map { branch -> branch * periodDays + periodDays / 2.0 }
+        }
+        return offsets
+            .map { offset -> phaseLead + offset }
+            .minBy { abs(it - leadLag.leadDays) }
     }
 
     private fun shiftedCorrelation(x: DoubleArray, y: DoubleArray, lag: Int): Double? {
