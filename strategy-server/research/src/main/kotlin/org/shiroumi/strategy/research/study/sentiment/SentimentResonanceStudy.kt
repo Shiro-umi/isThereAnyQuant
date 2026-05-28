@@ -1,11 +1,8 @@
 package org.shiroumi.strategy.research.study.sentiment
 
-import kotlinx.coroutines.runBlocking
 import org.shiroumi.database.sentiment.SentimentFactorDailyRecord
+import org.shiroumi.database.sentiment.SentimentFactorDailyRepository
 import org.shiroumi.database.sentiment.SentimentTargetLabelCalculator
-import org.shiroumi.quant_kmp.strategy.daily.SentimentFactorApiLayer
-import org.shiroumi.quant_kmp.strategy.daily.model.SentimentFactorSnapshot
-import org.shiroumi.strategy.research.api.toRecord
 import org.shiroumi.strategy.research.output.ResonanceIdentity
 import org.shiroumi.strategy.research.output.ResonanceMetric
 import org.shiroumi.strategy.research.pipeline.ResearchContext
@@ -17,34 +14,16 @@ import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
-import kotlinx.datetime.LocalDate
 import kotlin.math.sign
 import kotlin.math.sqrt
 
-class SentimentResonanceStudy(
-    private val apiLayer: SentimentFactorApiLayer,
-) : ResearchStudy<Unit, List<ResonanceMetric>> {
-
-    /**
-     * 测试专用构造器：构造一个抛出异常的 stub ApiLayer。
-     * 仅用于直接调用 [runRecords] 的场景，该路径不访问 apiLayer。
-     * 生产/研究代码必须通过主构造器注入 [SentimentFactorApiLayer]。
-     */
-    @Suppress("unused")
-    constructor() : this(object : SentimentFactorApiLayer {
-        override suspend fun snapshot(tradeDate: LocalDate): SentimentFactorSnapshot? =
-            error("stub apiLayer: use runRecords() directly")
-        override suspend fun history(startDate: LocalDate, endDate: LocalDate): List<SentimentFactorSnapshot> =
-            error("stub apiLayer: use runRecords() directly")
-        override suspend fun latestTradeDate(): LocalDate? =
-            error("stub apiLayer: use runRecords() directly")
-    })
+class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
     override val name: String = "study:sentiment-resonance"
     private val metricDiscoveryRecent = mutableMapOf<ResonanceIdentity, Double?>()
 
     override fun run(ctx: ResearchContext, input: Unit): List<ResonanceMetric> {
-        val snapshots = runBlocking { apiLayer.history(ctx.startDate, ctx.endDate) }
-        val records = snapshots.map { it.toRecord() }
+        val records = SentimentFactorDailyRepository.findBetween(ctx.startDate, ctx.endDate)
+            .sortedBy { it.tradeDate }
         return runRecords(ctx, records)
     }
 
