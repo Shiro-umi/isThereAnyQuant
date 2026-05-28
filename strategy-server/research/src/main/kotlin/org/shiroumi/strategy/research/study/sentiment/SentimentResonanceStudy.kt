@@ -464,7 +464,8 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
     }
 
     private fun coherenceStats(x: DoubleArray, y: DoubleArray, band: String, stftWindow: Int): CoherenceStats {
-        val result = Coherence.compute(x, y, nperseg = min(stftWindow, x.size), noverlap = min(stftWindow, x.size) / 2)
+        val nperseg = min(stftWindow, x.size)
+        val result = Coherence.compute(x, y, nperseg = nperseg, noverlap = (nperseg * 3) / 4)
         val spec = BANDS.getValue(band)
         val indexes = result.frequencies.indices.filter { result.frequencies[it] in spec.low..spec.high }
         if (indexes.isEmpty()) return CoherenceStats(null, null, null, null, null)
