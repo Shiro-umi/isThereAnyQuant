@@ -495,7 +495,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         val validPeak = candidates
             .filter { it.lag.toDouble() in leadRange(horizon) }
             .maxByOrNull { abs(it.corr) }
-        val selected = if (validPeak != null && abs(validPeak.corr) >= abs(absolutePeak.corr) * 0.85) {
+        val selected = if (validPeak != null && abs(validPeak.corr) >= abs(absolutePeak.corr) * 0.65) {
             validPeak
         } else {
             absolutePeak
