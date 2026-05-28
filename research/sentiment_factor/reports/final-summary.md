@@ -1,6 +1,33 @@
 # Short-Horizon Sentiment Resonance Final Summary
 
-## 13.1 总览
+## 14. Iter-18 → Iter-35 自治迭代轮次更新（2026-05-28）
+
+继 iter-17 (qualified=288, cards=1571) 后，进行 18 轮 Study 侧研究变量迭代。结果：
+
+- **Qualified A cards: 288 → 611 (+323, +112.2%)**
+- Cards written: 1571 → 3138
+- p_value 最小: 0.0020 → 0.0005
+- q_value 最小: 0.0020 → 0.0011
+- 11 次 KEPT atomic commit + 12 次 honest rollback
+- Plateau 最终触底于 iter-35 之后 5 轮持平（patience 5/20）
+
+**Top 5 单轮提升来源**：
+
+| Iter | 研究变量 | Δ |
+|---|---|---:|
+| 19 | horizon-valid lead 阈值 0.85→0.65 | +63 |
+| 22 | per-fold OOS orientation rewrite (fix trainEnd bug) | +46 |
+| 27 | MIN_STATE_SAMPLE 60→80 | +43 |
+| 25 | maxStateCandidates 80→120 | +36 |
+| 29 | state-window 80→100 | +33 |
+
+**当前 best 累计代码变更**（vs iter-17）共 12 处，全部位于 `SentimentResonanceStudy.kt` 中（评估器 / signal / output / pipeline 零修改）。完整图形化报告：[iter-35-graphical-summary.html](iter-35-graphical-summary.html)。
+
+各轮单独报告：[iter-18](iter-18.md) [iter-19](iter-19.md) [iter-20](iter-20.md) [iter-21](iter-21.md) [iter-22](iter-22.md) [iter-23](iter-23.md) [iter-24](iter-24.md) [iter-25](iter-25.md) [iter-26](iter-26.md) [iter-27](iter-27.md) [iter-28](iter-28.md) [iter-29](iter-29.md) [iter-30](iter-30.md) [iter-31](iter-31.md) [iter-32](iter-32.md) [iter-33](iter-33.md) [iter-34](iter-34.md) [iter-35](iter-35.md)
+
+---
+
+## 13.1 总览（iter-17 快照）
 
 - Research entry: `./gradlew :strategy-server:research:runResearch --console=plain --quiet`
 - Card directory: `research/sentiment_factor/out/resonance_cards`

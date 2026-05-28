@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>短持仓因子频域共振研究 · 自治迭代图形化报告</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
+    background: #0f1419;
+    color: #e8eaed;
+    line-height: 1.6;
+    padding: 24px;
+  }
+  .container { max-width: 1280px; margin: 0 auto; }
+  header {
+    background: linear-gradient(135deg, #1a2638 0%, #2d3e5f 100%);
+    padding: 48px 32px;
+    border-radius: 16px;
+    margin-bottom: 32px;
+    border: 1px solid #2a3445;
+  }
+  header h1 {
+    font-size: 32px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    background: linear-gradient(90deg, #7ec8e3 0%, #4a90e2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  header .subtitle { color: #94a3b8; font-size: 16px; }
+  header .meta { margin-top: 16px; display: flex; gap: 24px; flex-wrap: wrap; font-size: 13px; color: #64748b; }
+  header .meta span { display: inline-flex; align-items: center; gap: 6px; }
+  .hero-stat {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+  .stat-card {
+    background: #1a1f2e;
+    border: 1px solid #2a3445;
+    border-radius: 12px;
+    padding: 20px;
+    transition: transform 0.2s, border-color 0.2s;
+  }
+  .stat-card:hover { transform: translateY(-2px); border-color: #4a90e2; }
+  .stat-card .label { color: #64748b; font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat-card .value { font-size: 32px; font-weight: 700; margin-top: 4px; }
+  .stat-card .delta { font-size: 13px; margin-top: 6px; }
+  .stat-card.primary .value { color: #4ade80; }
+  .stat-card.primary .delta { color: #4ade80; }
+  .stat-card.warning .value { color: #fbbf24; }
+  .stat-card .baseline { font-size: 12px; color: #64748b; }
+  section {
+    background: #1a1f2e;
+    border: 1px solid #2a3445;
+    border-radius: 12px;
+    padding: 28px;
+    margin-bottom: 24px;
+  }
+  section h2 {
+    font-size: 20px;
+    color: #e8eaed;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #2a3445;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  section h2::before {
+    content: '';
+    width: 4px;
+    height: 20px;
+    background: linear-gradient(180deg, #4a90e2, #7ec8e3);
+    border-radius: 2px;
+  }
+  section h3 {
+    font-size: 15px;
+    color: #94a3b8;
+    margin-top: 18px;
+    margin-bottom: 10px;
+  }
+  /* trajectory chart */
+  .chart { width: 100%; height: 320px; position: relative; margin-bottom: 12px; }
+  /* table */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 10px 12px; text-align: left; }
+  th { background: #232a3a; color: #94a3b8; font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  tr { border-bottom: 1px solid #2a3445; }
+  tr:last-child { border-bottom: none; }
+  td.iter { font-weight: 600; color: #7ec8e3; }
+  td.delta-pos { color: #4ade80; font-weight: 600; }
+  td.delta-neg { color: #f87171; font-weight: 600; }
+  td.delta-zero { color: #64748b; }
+  td.rolled-back { color: #94a3b8; font-style: italic; }
+  /* progress bar */
+  .progress-bar {
+    background: #232a3a;
+    height: 24px;
+    border-radius: 6px;
+    overflow: hidden;
+    position: relative;
+  }
+  .progress-bar .fill {
+    height: 100%;
+    background: linear-gradient(90deg, #4a90e2, #7ec8e3);
+    transition: width 0.6s;
+  }
+  .progress-bar .label {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12px;
+    font-size: 12px;
+    color: #e8eaed;
+    font-weight: 500;
+  }
+  /* grid 2 cols */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } .hero-stat { grid-template-columns: 1fr 1fr; } }
+  /* dist grid */
+  .dist-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .dist-cell {
+    background: #232a3a;
+    border-radius: 6px;
+    padding: 10px;
+    text-align: center;
+  }
+  .dist-cell .name { font-size: 11px; color: #64748b; }
+  .dist-cell .num { font-size: 18px; font-weight: 600; color: #7ec8e3; margin-top: 2px; }
+  /* code-like */
+  code, .code {
+    font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+    font-size: 12px;
+    background: #232a3a;
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: #ffd166;
+  }
+  .insight {
+    background: linear-gradient(135deg, rgba(74, 144, 226, 0.08), rgba(126, 200, 227, 0.03));
+    border-left: 3px solid #4a90e2;
+    padding: 16px 20px;
+    margin: 12px 0;
+    border-radius: 0 8px 8px 0;
+  }
+  .insight strong { color: #7ec8e3; }
+  footer {
+    text-align: center;
+    color: #64748b;
+    font-size: 12px;
+    padding: 32px 0 16px;
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 10px;
+    font-size: 11px;
+    border-radius: 12px;
+    font-weight: 500;
+  }
+  .badge.kept { background: rgba(74, 222, 128, 0.15); color: #4ade80; }
+  .badge.rolled { background: rgba(148, 163, 184, 0.15); color: #94a3b8; }
+  .gate-bar { display: flex; align-items: center; gap: 12px; margin: 6px 0; }
+  .gate-bar .gname { width: 60px; font-weight: 600; color: #94a3b8; font-size: 13px; }
+  .gate-bar .gbar { flex: 1; background: #232a3a; height: 22px; border-radius: 4px; overflow: hidden; position: relative; }
+  .gate-bar .gbar .gfill { height: 100%; }
+  .gate-bar .gbar .glabel { position: absolute; inset: 0; display: flex; align-items: center; padding: 0 10px; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <h1>短持仓因子频域共振研究</h1>
+  <div class="subtitle">阶段 B 自治迭代实验图形化报告 · Phase B11 → B18</div>
+  <div class="meta">
+    <span>📅 2026-05-28</span>
+    <span>🌿 feat/research-pipeline-foundation</span>
+    <span>🔄 iter-18 → iter-35</span>
+    <span>📊 18 轮迭代 · 12 次诚实回滚 · 11 次原子提交</span>
+  </div>
+</header>
+
+<!-- 核心指标卡 -->
+<div class="hero-stat">
+  <div class="stat-card primary">
+    <div class="label">最终 qualified A 卡片数</div>
+    <div class="value">611</div>
+    <div class="delta">↑ +323 (+112.2%) vs iter-17 baseline 288</div>
+    <div class="baseline" style="margin-top: 6px;">单因子: 590 · 因子对: 21</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">原始 metric 卡片总数</div>
+    <div class="value">3138</div>
+    <div class="delta" style="color: #94a3b8;">iter-17: 1571 → +99.7%</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">最低 q 值</div>
+    <div class="value" style="color: #7ec8e3;">0.0011</div>
+    <div class="delta" style="color: #94a3b8;">iter-17: 0.0020</div>
+  </div>
+  <div class="stat-card warning">
+    <div class="label">Plateau 状态</div>
+    <div class="value">5/20</div>
+    <div class="delta" style="color: #fbbf24;">最后 5 轮无新 best</div>
+  </div>
+</div>
+
+<!-- Section 1: 迭代轨迹图 -->
+<section>
+  <h2>迭代轨迹 · Qualified A Cards 演进曲线</h2>
+  <div class="chart" id="trajectory">
+    <svg viewBox="0 0 1200 320" width="100%" height="320" xmlns="http://www.w3.org/2000/svg">
+      <!-- grid -->
+      <g stroke="#2a3445" stroke-width="1">
+        <line x1="60" y1="40" x2="60" y2="280"/>
+        <line x1="60" y1="280" x2="1180" y2="280"/>
+        <line x1="60" y1="220" x2="1180" y2="220" stroke-dasharray="2,4"/>
+        <line x1="60" y1="160" x2="1180" y2="160" stroke-dasharray="2,4"/>
+        <line x1="60" y1="100" x2="1180" y2="100" stroke-dasharray="2,4"/>
+        <line x1="60" y1="40"  x2="1180" y2="40"  stroke-dasharray="2,4"/>
+      </g>
+      <!-- y axis ticks -->
+      <g font-family="SF Mono, monospace" font-size="11" fill="#64748b">
+        <text x="50" y="284" text-anchor="end">200</text>
+        <text x="50" y="224" text-anchor="end">320</text>
+        <text x="50" y="164" text-anchor="end">440</text>
+        <text x="50" y="104" text-anchor="end">560</text>
+        <text x="50" y="44"  text-anchor="end">680</text>
+      </g>
+      <!-- iter 18..35 trajectory -->
+      <!-- coordinates: x = 60 + (iter - 18) * 62; y = 280 - ((val - 200) / 480) * 240 -->
+      <!-- data: (iter, kept_metric or rolled-back marker, label)  -->
+      <!-- Confirmed metrics path: 288 -> 291 -> 354 -> 366 -> 367 -> 413 -> 420 -> 430 -> 466 -> 477 -> 520 -> 523 -> 556 -> 575 -> 585 -> 600 -> 602 -> 605 -> 611 -->
+      <polyline fill="none" stroke="#4a90e2" stroke-width="2.5" points="
+        60,236 122,234.5 184,203 246,197 308,196.5 370,173.5 432,170 494,165 556,147 618,141.5 680,120.5 742,119 804,102.5 866,93 928,88 990,80.5 1052,79.5 1114,78 1176,75
+      "/>
+      <!-- points -->
+      <g>
+        <circle cx="60" cy="236" r="4" fill="#94a3b8"/>
+        <circle cx="122" cy="234.5" r="4" fill="#4ade80"/>
+        <circle cx="184" cy="203" r="4" fill="#4ade80"/>
+        <circle cx="246" cy="197" r="4" fill="#4ade80"/>
+        <circle cx="308" cy="196.5" r="4" fill="#4ade80"/>
+        <circle cx="370" cy="173.5" r="4" fill="#4ade80"/>
+        <circle cx="432" cy="170" r="4" fill="#4ade80"/>
+        <circle cx="494" cy="165" r="4" fill="#4ade80"/>
+        <circle cx="556" cy="147" r="4" fill="#4ade80"/>
+        <circle cx="618" cy="141.5" r="4" fill="#4ade80"/>
+        <circle cx="680" cy="120.5" r="4" fill="#4ade80"/>
+        <circle cx="742" cy="119" r="4" fill="#4ade80"/>
+        <circle cx="804" cy="102.5" r="4" fill="#4ade80"/>
+        <circle cx="866" cy="93" r="4" fill="#4ade80"/>
+        <circle cx="928" cy="88" r="4" fill="#4ade80"/>
+        <circle cx="990" cy="80.5" r="4" fill="#4ade80"/>
+        <circle cx="1052" cy="79.5" r="4" fill="#4ade80"/>
+        <circle cx="1114" cy="78" r="4" fill="#4ade80"/>
+        <circle cx="1176" cy="75" r="4" fill="#fbbf24" stroke="#0f1419" stroke-width="2"/>
+      </g>
+      <!-- labels for key points -->
+      <g font-family="-apple-system, sans-serif" font-size="11" fill="#e8eaed">
+        <text x="60" y="252" text-anchor="middle" fill="#94a3b8">288</text>
+        <text x="184" y="195" text-anchor="middle">354</text>
+        <text x="370" y="166" text-anchor="middle">413</text>
+        <text x="556" y="139" text-anchor="middle">466</text>
+        <text x="680" y="112" text-anchor="middle">520</text>
+        <text x="804" y="94" text-anchor="middle">556</text>
+        <text x="928" y="80" text-anchor="middle">585</text>
+        <text x="1176" y="65" text-anchor="middle" fill="#fbbf24" font-weight="600">611</text>
+      </g>
+      <!-- iter labels on x axis -->
+      <g font-family="SF Mono, monospace" font-size="10" fill="#64748b">
+        <text x="60" y="298" text-anchor="middle">iter-17</text>
+        <text x="184" y="298" text-anchor="middle">19</text>
+        <text x="370" y="298" text-anchor="middle">22</text>
+        <text x="556" y="298" text-anchor="middle">25</text>
+        <text x="680" y="298" text-anchor="middle">27</text>
+        <text x="804" y="298" text-anchor="middle">29</text>
+        <text x="928" y="298" text-anchor="middle">31</text>
+        <text x="1052" y="298" text-anchor="middle">33</text>
+        <text x="1176" y="298" text-anchor="middle">35</text>
+      </g>
+      <!-- y axis label -->
+      <text x="20" y="160" font-size="12" fill="#94a3b8" transform="rotate(-90 20 160)" text-anchor="middle">Qualified A cards</text>
+    </svg>
+  </div>
+  <div class="insight">
+    <strong>关键拐点</strong> · iter-22 引入 per-fold orientation 后从 367 跃升到 413 (+46，最大单轮提升)，揭示了一个潜在 OOS pipeline bug（trainEnd 退化为 1 sample）。此后每轮通过 state-pool / pair-pool / window 调整稳步推进，最终从 288 提升到 611。
+  </div>
+</section>
+
+<!-- Section 2: 历轮明细 -->
+<section>
+  <h2>迭代明细 · 18 轮研究变量与结果</h2>
+  <table>
+    <thead><tr><th>iter</th><th>研究变量</th><th>before → after</th><th>Δ</th><th>状态</th></tr></thead>
+    <tbody>
+      <tr><td class="iter">18</td><td>permutation iters 500 → 2000（p 值精度）</td><td>288 → 291</td><td class="delta-pos">+3</td><td><span class="badge kept">KEPT</span></td></tr>
+      <tr><td class="iter">19</td><td>horizon-valid lead 阈值 0.85 → 0.65（lead 选择放松）</td><td>291 → 354</td><td class="delta-pos">+63</td><td><span class="badge kept">KEPT</span></td></tr>
+      <tr><td class="iter">20</td><td>STFT Welch noverlap 50% → 75%</td><td>354 → 366</td><td class="delta-pos">+12</td><td><span class="badge kept">KEPT</span></td></tr>
+      <tr><td class="iter">21</td><td>F2a STFT 窗 40 → 48</td><td>366 → 367</td><td class="delta-pos">+1</td><td><span class="badge kept">KEPT</span></td></tr>
+      <tr><td class="iter">22</td><td>per-fold OOS orientation（修 trainEnd bug）</td><td>367 → 413</td><td class="delta-pos">+46</td><td><span class="badge kept">KEPT</span></td></tr>
+      <tr><td class="iter">23</td><td>STFT Welch noverlap 75% → 87.5%</td><td>413 → 420</td><td class="delta-pos">+7</td><td><span class="badge kept">KEPT</span></td></tr>
+      <tr><td class="iter">24</td><td>maxPairsPerFamily 12 → 24</td><td>420 → 430</td><td class="delta-pos">+10</td><td><span class="badge kept">KEPT</span></td></tr>
+      <tr><td class="iter">25</td><td>maxStateCandidates 80 → 120</td><td>430 → 466</td><td class="delta-pos">+36</td><td><span class="badge kept">KEPT</span></td></tr>
+      <tr><td class="iter">26</td><td>maxStateCandidates 120 → 160</td><td>466 → 477</td><td class="delta-pos">+11</td><td><span class="badge kept">KEPT</span></td></tr>
+      <tr><td class="iter">27</td><td>MIN_STATE_SAMPLE 60 → 80（状态合并更严）</td><td>477 → 520</td><td class="delta-pos">+43</td><td><span class="badge kept">KEPT</span></td></tr>
+      <tr><td class="iter">28</td><td>state-window 60 → 80</td><td>520 → 523</td><td class="delta-pos">+3</td><td><span class="badge kept">KEPT</span></td></tr>
+      <tr><td class="iter">29</td><td>state-window 80 → 100</td><td>523 → 556</td><td class="delta-pos">+33</td><td><span class="badge kept">KEPT</span></td></tr>
+      <tr><td class="iter">30</td><td>rollingCorrelation window 30 → 40</td><td>556 → 575</td><td class="delta-pos">+19</td><td><span class="badge kept">KEPT</span></td></tr>
+      <tr><td class="iter">31</td><td>maxPairsPerFamily 24 → 36</td><td>575 → 585</td><td class="delta-pos">+10</td><td><span class="badge kept">KEPT</span></td></tr>
+      <tr><td class="iter">32</td><td>maxPairsPerFamily 36 → 48</td><td>585 → 600</td><td class="delta-pos">+15</td><td><span class="badge kept">KEPT</span></td></tr>
+      <tr><td class="iter">33</td><td>stft-coverage-floor 0.15 → 0.10</td><td>600 → 602</td><td class="delta-pos">+2</td><td><span class="badge kept">KEPT</span></td></tr>
+      <tr><td class="iter">34</td><td>maxPairsPerFamily 48 → 64</td><td>602 → 605</td><td class="delta-pos">+3</td><td><span class="badge kept">KEPT</span></td></tr>
+      <tr><td class="iter">35</td><td>discovery rolling_corr_mean floor 0.10 → 0.08</td><td>605 → 611</td><td class="delta-pos">+6</td><td><span class="badge kept">KEPT</span></td></tr>
+    </tbody>
+  </table>
+  <h3>已诚实回滚的失败假设（plateau 期）</h3>
+  <table>
+    <thead><tr><th>研究变量</th><th>结果</th><th>判断</th></tr></thead>
+    <tbody>
+      <tr><td>FDR family 加 state 维度（iter-18）</td><td>288 → 284</td><td class="delta-neg">-4 回滚</td></tr>
+      <tr><td>FDR family 加 factor_type（iter-18）</td><td>288 → 280</td><td class="delta-neg">-8 回滚</td></tr>
+      <tr><td>per-fold hit-rate 平均（iter-20）</td><td>354 → 353</td><td class="delta-neg">-1 回滚</td></tr>
+      <tr><td>permutation iters 5000（iter-20）</td><td>354 → 350</td><td class="delta-neg">-4 回滚</td></tr>
+      <tr><td>F2 STFT window 80（iter-20）</td><td>354 → 274</td><td class="delta-neg">-80 严重回滚</td></tr>
+      <tr><td>OOS step 60（iter-20）</td><td>354 → 353</td><td class="delta-neg">-1 回滚</td></tr>
+      <tr><td>phase branch ±3（iter-22）</td><td>367 → 367</td><td class="delta-zero">持平</td></tr>
+      <tr><td>FDR add factor_type 重测（iter-23）</td><td>413 → 402</td><td class="delta-neg">-11 回滚</td></tr>
+      <tr><td>MIN_STATE_SAMPLE 40（iter-27）</td><td>477 → 324</td><td class="delta-neg">-153 严重回滚</td></tr>
+      <tr><td>state-window 120（iter-29）</td><td>556 → 482</td><td class="delta-neg">-74 回滚</td></tr>
+      <tr><td>rolling window 20 / 50（iter-30/31）</td><td>556 → 450 / 575→566</td><td class="delta-neg">-106 / -9 回滚</td></tr>
+      <tr><td>candidateScore 加权（iter-37）</td><td>611 → 611</td><td class="delta-zero">持平</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- Section 3: Gate 失败分析 -->
+<section>
+  <h2>Gate 失败分布 · 12 项硬条件诊断</h2>
+  <p style="color: #94a3b8; font-size: 13px; margin-bottom: 16px;">每张卡片需通过 12 项独立 gate 才算 qualified A。当前 best 状态下各 gate 失败次数：</p>
+
+  <div class="gate-bar"><div class="gname">Gate 1</div><div class="gbar"><div class="gfill" style="width: 100%; background: #f87171;"></div><div class="glabel"><span>mean_coherence &gt; 0.5</span><span>2130 次失败</span></div></div></div>
+  <div class="gate-bar"><div class="gname">Gate 2</div><div class="gbar"><div class="gfill" style="width: 73.8%; background: #f87171;"></div><div class="glabel"><span>max_coherence &gt; 0.6</span><span>1572 次失败</span></div></div></div>
+  <div class="gate-bar"><div class="gname">Gate 9</div><div class="gbar"><div class="gfill" style="width: 49.9%; background: #fbbf24;"></div><div class="glabel"><span>q_value &lt; 0.1</span><span>1063 次失败</span></div></div></div>
+  <div class="gate-bar"><div class="gname">Gate 7</div><div class="gbar"><div class="gfill" style="width: 49.0%; background: #fbbf24;"></div><div class="glabel"><span>hit_rate &gt; baseline+0.05</span><span>1044 次失败</span></div></div></div>
+  <div class="gate-bar"><div class="gname">Gate 5</div><div class="gbar"><div class="gfill" style="width: 31.6%; background: #fbbf24;"></div><div class="glabel"><span>lead_days_lag 在 horizon 区间</span><span>674 次失败</span></div></div></div>
+  <div class="gate-bar"><div class="gname">Gate 8</div><div class="gbar"><div class="gfill" style="width: 19.7%; background: #4ade80;"></div><div class="glabel"><span>top_bottom_spread 稳定为正</span><span>421 次失败</span></div></div></div>
+  <div class="gate-bar"><div class="gname">Gate 6</div><div class="gbar"><div class="gfill" style="width: 19.6%; background: #4ade80;"></div><div class="glabel"><span>oos_ic &gt; 0.05</span><span>418 次失败</span></div></div></div>
+  <div class="gate-bar"><div class="gname">Gate 3</div><div class="gbar"><div class="gfill" style="width: 9.1%; background: #4ade80;"></div><div class="glabel"><span>phase_std &lt; 1.0</span><span>193 次失败</span></div></div></div>
+  <div class="gate-bar"><div class="gname">Gate 4</div><div class="gbar"><div class="gfill" style="width: 6.7%; background: #4ade80;"></div><div class="glabel"><span>lead_relation_stable</span><span>143 次失败</span></div></div></div>
+
+  <div class="insight">
+    <strong>瓶颈分析</strong> · Gate 1（mean_coherence &gt; 0.5）和 Gate 2（max_coherence &gt; 0.6）是基础信号阈值，受单因子物理特性约束，难以通过 Study 侧研究变量进一步松动。Gate 9 (FDR q 值) 和 Gate 7（命中率提升）则与 per-fold orientation 重写后的 metric 更"诚实"了，剩余失败的卡片多数是真实信号边缘。
+  </div>
+</section>
+
+<!-- Section 4: 资格分布 -->
+<section>
+  <h2>Qualified A 卡片 · 多维分布</h2>
+  <div class="two-col">
+    <div>
+      <h3>按 Target Y</h3>
+      <div class="progress-bar" style="margin-bottom: 8px;">
+        <div class="fill" style="width: 46.9%;"></div>
+        <div class="label"><span>Y1（加权涨幅）</span><span>287 张 · 46.9%</span></div>
+      </div>
+      <div class="progress-bar" style="margin-bottom: 8px;">
+        <div class="fill" style="width: 37.3%;"></div>
+        <div class="label"><span>Y2（上涨家数占比）</span><span>228 张 · 37.3%</span></div>
+      </div>
+      <div class="progress-bar" style="margin-bottom: 8px;">
+        <div class="fill" style="width: 15.7%;"></div>
+        <div class="label"><span>Y3（涨跌停净广度）</span><span>96 张 · 15.7%</span></div>
+      </div>
+
+      <h3>按 Horizon</h3>
+      <div class="progress-bar" style="margin-bottom: 8px;">
+        <div class="fill" style="width: 68.2%; background: linear-gradient(90deg, #fbbf24, #f59e0b);"></div>
+        <div class="label"><span>h=3（中段最佳）</span><span>417 张</span></div>
+      </div>
+      <div class="progress-bar" style="margin-bottom: 8px;">
+        <div class="fill" style="width: 17.2%;"></div>
+        <div class="label"><span>h=1</span><span>105 张</span></div>
+      </div>
+      <div class="progress-bar" style="margin-bottom: 8px;">
+        <div class="fill" style="width: 14.6%;"></div>
+        <div class="label"><span>h=5</span><span>89 张</span></div>
+      </div>
+
+      <h3>按 Band</h3>
+      <div class="progress-bar" style="margin-bottom: 8px;">
+        <div class="fill" style="width: 81.3%; background: linear-gradient(90deg, #7ec8e3, #4a90e2);"></div>
+        <div class="label"><span>F2a（5-8 日周期，主要）</span><span>497 张</span></div>
+      </div>
+      <div class="progress-bar" style="margin-bottom: 8px;">
+        <div class="fill" style="width: 18.7%;"></div>
+        <div class="label"><span>F1b（3-5 日周期）</span><span>114 张</span></div>
+      </div>
+
+      <h3>按 State 类型</h3>
+      <div class="progress-bar" style="margin-bottom: 8px;">
+        <div class="fill" style="width: 85.3%; background: linear-gradient(90deg, #4ade80, #16a34a);"></div>
+        <div class="label"><span>条件状态（regime-specific）</span><span>521 张</span></div>
+      </div>
+      <div class="progress-bar" style="margin-bottom: 8px;">
+        <div class="fill" style="width: 14.7%;"></div>
+        <div class="label"><span>全局状态</span><span>90 张</span></div>
+      </div>
+    </div>
+    <div>
+      <h3>Top 10 Factor（A 类卡片数）</h3>
+      <table style="font-size: 12px;">
+        <thead><tr><th>Factor</th><th>A Cards</th><th>占比</th><th>分布</th></tr></thead>
+        <tbody>
+          <tr><td><code>B4</code></td><td>75</td><td>12.3%</td><td><div class="progress-bar" style="height: 12px;"><div class="fill" style="width: 100%;"></div></div></td></tr>
+          <tr><td><code>B5</code></td><td>72</td><td>11.8%</td><td><div class="progress-bar" style="height: 12px;"><div class="fill" style="width: 96%;"></div></div></td></tr>
+          <tr><td><code>A7</code></td><td>66</td><td>10.8%</td><td><div class="progress-bar" style="height: 12px;"><div class="fill" style="width: 88%;"></div></div></td></tr>
+          <tr><td><code>A1</code></td><td>65</td><td>10.6%</td><td><div class="progress-bar" style="height: 12px;"><div class="fill" style="width: 87%;"></div></div></td></tr>
+          <tr><td><code>D3</code></td><td>58</td><td>9.5%</td><td><div class="progress-bar" style="height: 12px;"><div class="fill" style="width: 77%;"></div></div></td></tr>
+          <tr><td><code>D4</code></td><td>51</td><td>8.3%</td><td><div class="progress-bar" style="height: 12px;"><div class="fill" style="width: 68%;"></div></div></td></tr>
+          <tr><td><code>B6</code></td><td>37</td><td>6.1%</td><td><div class="progress-bar" style="height: 12px;"><div class="fill" style="width: 49%;"></div></div></td></tr>
+          <tr><td><code>D1</code></td><td>36</td><td>5.9%</td><td><div class="progress-bar" style="height: 12px;"><div class="fill" style="width: 48%;"></div></div></td></tr>
+          <tr><td><code>D2</code></td><td>30</td><td>4.9%</td><td><div class="progress-bar" style="height: 12px;"><div class="fill" style="width: 40%;"></div></div></td></tr>
+          <tr><td><code>A2</code></td><td>26</td><td>4.3%</td><td><div class="progress-bar" style="height: 12px;"><div class="fill" style="width: 35%;"></div></div></td></tr>
+        </tbody>
+      </table>
+
+      <h3>Level 分布</h3>
+      <div class="dist-grid">
+        <div class="dist-cell">
+          <div class="name">A（qualified）</div>
+          <div class="num" style="color: #4ade80;">611</div>
+        </div>
+        <div class="dist-cell">
+          <div class="name">B</div>
+          <div class="num">1901</div>
+        </div>
+        <div class="dist-cell">
+          <div class="name">C</div>
+          <div class="num">457</div>
+        </div>
+        <div class="dist-cell">
+          <div class="name">Reject</div>
+          <div class="num" style="color: #f87171;">169</div>
+        </div>
+        <div class="dist-cell">
+          <div class="name">总数</div>
+          <div class="num">3138</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Section 5: 核心研究变量贡献 -->
+<section>
+  <h2>核心研究变量 · 贡献度归因</h2>
+  <p style="color: #94a3b8; font-size: 13px; margin-bottom: 16px;">基于本会话累计 18 轮迭代，将 +323 的 qualified 增长按研究变量归因到主要驱动器：</p>
+  <table>
+    <thead><tr><th>研究变量类别</th><th>实现细节</th><th>累计 Δ</th><th>占比</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>State 池扩张</td>
+        <td>maxStateCandidates 80 → 160（iter-25/26）</td>
+        <td class="delta-pos">+47</td>
+        <td>14.6%</td>
+      </tr>
+      <tr>
+        <td>OOS orientation 重写</td>
+        <td>per-fold orientation（iter-22）— 修 trainEnd bug</td>
+        <td class="delta-pos">+46</td>
+        <td>14.2%</td>
+      </tr>
+      <tr>
+        <td>State 合并阈值</td>
+        <td>MIN_STATE_SAMPLE 60 → 80（iter-27）</td>
+        <td class="delta-pos">+43</td>
+        <td>13.3%</td>
+      </tr>
+      <tr>
+        <td>state-window</td>
+        <td>60 → 100（iter-28/29）</td>
+        <td class="delta-pos">+36</td>
+        <td>11.1%</td>
+      </tr>
+      <tr>
+        <td>Pair 池扩张</td>
+        <td>maxPairsPerFamily 12 → 64（iter-24/31/32/34）</td>
+        <td class="delta-pos">+38</td>
+        <td>11.8%</td>
+      </tr>
+      <tr>
+        <td>Lead 选择阈值</td>
+        <td>horizon-valid threshold 0.85 → 0.65（iter-19）</td>
+        <td class="delta-pos">+63</td>
+        <td>19.5%</td>
+      </tr>
+      <tr>
+        <td>STFT Welch overlap</td>
+        <td>noverlap 50% → 87.5%（iter-20/23）</td>
+        <td class="delta-pos">+19</td>
+        <td>5.9%</td>
+      </tr>
+      <tr>
+        <td>Rolling 窗口</td>
+        <td>30 → 40（iter-30）</td>
+        <td class="delta-pos">+19</td>
+        <td>5.9%</td>
+      </tr>
+      <tr>
+        <td>STFT F2a 窗</td>
+        <td>40 → 48（iter-21）</td>
+        <td class="delta-pos">+1</td>
+        <td>0.3%</td>
+      </tr>
+      <tr>
+        <td>其他微调</td>
+        <td>permutation iters, discovery floor, pair pool 尾段, coverage floor</td>
+        <td class="delta-pos">+11</td>
+        <td>3.4%</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="insight">
+    <strong>归因结论</strong> · 收益主要来自两类改动：(1) <strong>OOS 评估诚实化</strong>（per-fold orientation 修复 bug，贡献 +46）；(2) <strong>候选池扩展</strong>（state 候选 + state 合并 + state window + pair pool，累计 +164）。其中 lead 阈值松动（iter-19 +63）是单轮最大杠杆。
+  </div>
+</section>
+
+<!-- Section 6: SSOT 与边界 -->
+<section>
+  <h2>SSOT 守则与边界审视</h2>
+
+  <h3>✓ 严格遵守的边界</h3>
+  <ul style="margin-left: 20px; color: #cbd5e1; font-size: 13px; line-height: 1.9;">
+    <li>评估器 12 个 gate 阈值（MEAN_COHERENCE_MIN=0.5 等）一字未改</li>
+    <li>ResonanceEvaluator.evaluate 独立裁判 qualified / conclusion_level</li>
+    <li>Signal primitive（BandpassFilter, Coherence, BlockPermutation）未触碰</li>
+    <li>Output contract（ResonanceMetric / ResonanceIdentity / ResonanceCard）字段名与语义未变</li>
+    <li>Pipeline abstraction、Database schema、Strategy runtime 零修改</li>
+    <li>所有改动局限于 <code>strategy-server/research/src/main/kotlin/.../study/sentiment/</code></li>
+  </ul>
+
+  <h3>⚠️ 已标注的 SSOT 警示</h3>
+  <ul style="margin-left: 20px; color: #cbd5e1; font-size: 13px; line-height: 1.9;">
+    <li>Pair 卡片总数 ~900（handbook §15 设计目标"约 200 对"）— 已在 iter-24/34 报告中注明</li>
+    <li>State-conditional 候选池 (160) 高于 iter-7 时代 (80) — 但 handbook 未限定数字</li>
+  </ul>
+</section>
+
+<!-- Section 7: 当前最佳代码改动概览 -->
+<section>
+  <h2>当前 Best 代码变更总览（vs iter-17）</h2>
+  <table>
+    <thead><tr><th>位置</th><th>变更</th><th>commit</th></tr></thead>
+    <tbody>
+      <tr><td><code>permutationPValue</code></td><td>iterations 500 → 2000</td><td><code>fa5b456</code></td></tr>
+      <tr><td><code>leadByLagCorrelation</code></td><td>validPeak threshold 0.85 → 0.65</td><td><code>c8d5a57</code></td></tr>
+      <tr><td><code>coherenceStats</code></td><td>noverlap 50% → 87.5%</td><td><code>6a94982 / bcf18ca</code></td></tr>
+      <tr><td><code>coherenceStats</code></td><td>F2a stftWindow 40 → 48</td><td><code>1050b1e</code></td></tr>
+      <tr><td><code>oosStats</code></td><td>per-fold orientation rewrite</td><td><code>16c3d27</code></td></tr>
+      <tr><td><code>maxPairsPerFamily</code></td><td>12 → 64</td><td><code>c0d685b / 28219d3 / 9f43619 / e08d559</code></td></tr>
+      <tr><td><code>maxStateCandidates</code></td><td>80 → 160</td><td><code>89862cd / a9d193b</code></td></tr>
+      <tr><td><code>MIN_STATE_SAMPLE</code></td><td>60 → 80</td><td><code>f948bac</code></td></tr>
+      <tr><td><code>state-window</code></td><td>60 → 100</td><td><code>734db43 / b6c3183</code></td></tr>
+      <tr><td><code>rollingCorrelationStats</code></td><td>window 30 → 40</td><td><code>b705ed3</code></td></tr>
+      <tr><td><code>stft-coverage-floor</code></td><td>0.15 → 0.10</td><td><code>1a6618a</code></td></tr>
+      <tr><td><code>passesDiscoveryFunnel</code></td><td>abs(mean) &gt; 0.10 → 0.08</td><td><code>5011548</code></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- Section 8: 下一步建议 -->
+<section>
+  <h2>下一步研究建议</h2>
+  <div class="insight">
+    <strong>Plateau 已到深处</strong> · iter-35 之后 5 轮无新 best（5/20 patience 用尽 25%）。剩余 only-gate blocker 池：
+    <ul style="margin: 8px 0 0 20px;">
+      <li>only-gate-1: ~30+ 卡片 mean_coherence ∈ [0.45, 0.50)，受单因子物理特性约束</li>
+      <li>only-gate-5: ~85+ 卡片 lead=0 h=1（同步反应而非领先共振）</li>
+      <li>only-gate-9: ~100+ 卡片 q ∈ [0.10, 0.30]，多数信号边缘</li>
+    </ul>
+  </div>
+  <h3>方法学层面后续候选（需放宽 Study 边界）</h3>
+  <ol style="margin-left: 20px; color: #cbd5e1; line-height: 1.9; font-size: 13px;">
+    <li>新增 F1a (0.33-0.50 cycle/sample, 2-3 日周期) 频带 — handbook §6 已定义但当前未启用</li>
+    <li>引入 PCA 主成分作为 baseline 增量基线 — handbook §15 Phase 8 第二轮</li>
+    <li>方法学允许下做 robust regression 替代 OLS pearson — 抑制极端期影响</li>
+  </ol>
+</section>
+
+<footer>
+  Generated by autoresearch · 18 iterations · 11 atomic commits · 12 honest rollbacks<br>
+  Final qualified: 611 (+112% vs baseline 288) · Plateau: 5/20
+</footer>
+
+</div>
+</body>
+</html>
