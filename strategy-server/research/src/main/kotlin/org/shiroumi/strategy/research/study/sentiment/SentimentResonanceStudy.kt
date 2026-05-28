@@ -397,7 +397,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         val mean = metric.rolling_corr_mean ?: return false
         val stability = metric.rolling_corr_stability ?: return false
         val recent = metricDiscoveryRecent[metric.identity] ?: return false
-        return abs(mean) > 0.10 && stability > 0.55 && (recent == 0.0 || sign(recent) == sign(mean))
+        return abs(mean) > 0.08 && stability > 0.55 && (recent == 0.0 || sign(recent) == sign(mean))
     }
 
     private fun passesStftConfirmation(metric: ResonanceMetric, coherenceFloor: Double, coverageFloor: Double): Boolean {
