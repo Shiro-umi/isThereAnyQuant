@@ -64,7 +64,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
             .split(',')
             .map { it.trim() }
             .filter { it in PAIR_TRANSFORMS }
-        val maxPairsPerFamily = ctx.param("max-pairs-per-family", "12").toInt()
+        val maxPairsPerFamily = ctx.param("max-pairs-per-family", "24").toInt()
 
         val globalMetrics = ArrayList<ResonanceMetric>()
         for (factor in factorNames) {
