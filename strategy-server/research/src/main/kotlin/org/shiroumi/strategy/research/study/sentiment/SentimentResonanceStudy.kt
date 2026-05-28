@@ -19,6 +19,7 @@ import kotlin.math.sqrt
 
 class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
     override val name: String = "study:sentiment-resonance"
+    private val metricDiscoveryRecent = mutableMapOf<ResonanceIdentity, Double?>()
 
     override fun run(ctx: ResearchContext, input: Unit): List<ResonanceMetric> {
         val records = SentimentFactorDailyRepository.findBetween(ctx.startDate, ctx.endDate)
@@ -27,6 +28,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
     }
 
     internal fun runRecords(ctx: ResearchContext, records: List<SentimentFactorDailyRecord>): List<ResonanceMetric> {
+        metricDiscoveryRecent.clear()
         if (records.isEmpty()) return emptyList()
 
         val labels = SentimentTargetLabelCalculator.build(records)
@@ -52,6 +54,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
             .toSet()
         val stateSlices = if ("conditional" in stateMode) buildStateSlices(records, ctx.param("state-window", "60").toInt()) else emptyList()
         val maxStateCandidates = ctx.param("max-state-candidates", "80").toInt()
+        val discoveryFilter = ctx.param("discovery-filter", "true").toBoolean()
 
         val globalMetrics = ArrayList<ResonanceMetric>()
         for (factor in factorNames) {
@@ -77,9 +80,10 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
                 }
             }
         }
+        val globalCandidates = if (discoveryFilter) globalMetrics.filter(::passesDiscoveryFunnel) else globalMetrics
         val metrics = ArrayList<ResonanceMetric>()
-        if ("all" in stateMode) metrics.addAll(globalMetrics)
-        val stateCandidates = globalMetrics
+        if ("all" in stateMode) metrics.addAll(globalCandidates)
+        val stateCandidates = globalCandidates
             .filter { isStateCandidate(it) }
             .sortedByDescending { candidateScore(it) }
             .take(maxStateCandidates)
@@ -100,7 +104,8 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
                     futureTarget = futureTarget,
                     stateId = slice.id,
                     stateIndexes = slice.indexes,
-                )?.let(metrics::add)
+                )?.takeIf { !discoveryFilter || passesDiscoveryFunnel(it) }
+                    ?.let(metrics::add)
             }
         }
         return withBenjaminiHochbergQ(metrics)
@@ -154,16 +159,18 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
             (ffCorr == 0.0 && lfCorr == 0.0) ||
             (sign(ffCorr) == sign(lfCorr) && abs(lfCorr) >= abs(ffCorr) * 0.35)
 
+        val identity = ResonanceIdentity(
+            factor_name = factor,
+            factor_type = "single",
+            factor_i = factor,
+            target_y = target,
+            horizon = horizon,
+            band = band,
+            state_id = stateId,
+        )
+        metricDiscoveryRecent[identity] = rolling.recent
         return ResonanceMetric(
-            identity = ResonanceIdentity(
-                factor_name = factor,
-                factor_type = "single",
-                factor_i = factor,
-                target_y = target,
-                horizon = horizon,
-                band = band,
-                state_id = stateId,
-            ),
+            identity = identity,
             stft_window = 40,
             norm_version = "Z_60_detrend",
             state_window = 60,
@@ -268,6 +275,13 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
             abs(metric.rolling_corr_mean ?: 0.0) >= 0.10 ||
             (metric.oos_ic ?: 0.0) > 0.0
 
+    private fun passesDiscoveryFunnel(metric: ResonanceMetric): Boolean {
+        val mean = metric.rolling_corr_mean ?: return false
+        val stability = metric.rolling_corr_stability ?: return false
+        val recent = metricDiscoveryRecent[metric.identity] ?: return false
+        return abs(mean) > 0.10 && stability > 0.55 && (recent == 0.0 || sign(recent) == sign(mean))
+    }
+
     private fun candidateScore(metric: ResonanceMetric): Double =
         (metric.mean_coherence ?: 0.0) +
             abs(metric.rolling_corr_mean ?: 0.0) +
@@ -316,12 +330,13 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
             pearson(xs, ys)?.let(values::add)
             start++
         }
-        if (values.isEmpty()) return RollingStats(null, null)
+        if (values.isEmpty()) return RollingStats(null, null, null)
         val mean = values.average()
         val dominant = if (mean >= 0.0) 1.0 else -1.0
         return RollingStats(
             mean = mean,
             stability = values.count { it == 0.0 || sign(it) == dominant }.toDouble() / values.size,
+            recent = values.lastOrNull(),
         )
     }
 
@@ -526,7 +541,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         }
 
     private data class BandSpec(val low: Double, val high: Double)
-    private data class RollingStats(val mean: Double?, val stability: Double?)
+    private data class RollingStats(val mean: Double?, val stability: Double?, val recent: Double?)
     private data class CoherenceStats(
         val mean: Double?,
         val max: Double?,
