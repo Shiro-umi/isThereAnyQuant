@@ -53,7 +53,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
             .map { it.trim() }
             .toSet()
         val stateSlices = if ("conditional" in stateMode) buildStateSlices(records, ctx.param("state-window", "60").toInt()) else emptyList()
-        val maxStateCandidates = ctx.param("max-state-candidates", "120").toInt()
+        val maxStateCandidates = ctx.param("max-state-candidates", "160").toInt()
         val discoveryFilter = ctx.param("discovery-filter", "true").toBoolean()
         val stftFilter = ctx.param("stft-filter", "true").toBoolean()
         val stftCoherenceFloor = ctx.param("stft-coherence-floor", "0.40").toDouble()
