@@ -32,6 +32,13 @@ dependencies {
     implementation(libs.commons.math3)
     implementation(libs.kotlinx.dataframe)
 
+    // DJL：differentiable 调优用（NDArray + 反向自动微分 + Adam/SGD）
+    // 仅在 research 模块出现，不进入生产部署链路。
+    // pytorch-engine 在运行时按 OS/CPU 自动下载匹配的 native lib（auto），
+    // 因此这里无需显式声明 pytorch-native-cpu 的平台分类器。
+    implementation(libs.djl.api)
+    implementation(libs.djl.pytorch.engine)
+
     testImplementation(kotlin("test"))
     testImplementation(kotlin("reflect"))
     testImplementation(libs.junit.jupiter)

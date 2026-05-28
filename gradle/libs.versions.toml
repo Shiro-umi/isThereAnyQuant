@@ -39,6 +39,8 @@ hikari = "6.3.3"
 # 科学计算（research 模块频域分析用，均在 mavenCentral）
 commons-math3 = "3.6.1"
 kotlinx-dataframe = "1.0.0-Beta5"
+# DJL：JVM 上的深度学习/自动微分框架，research 的 differentiable tuner 用它做反向梯度
+djl = "0.36.0"
 
 [bundles]
 ktor-server = [
@@ -121,6 +123,10 @@ squareup-okio = { module = "com.squareup.okio:okio", version.ref = "okioVersion"
 # 科学计算（research 频域分析）：Apache Commons Math 提供 FFT，DataFrame 提供研究态宽表
 commons-math3 = { module = "org.apache.commons:commons-math3", version.ref = "commons-math3" }
 kotlinx-dataframe = { module = "org.jetbrains.kotlinx:dataframe", version.ref = "kotlinx-dataframe" }
+# DJL：研究层 differentiable 调优用（NDArray + 自动微分 + Adam/SGD 优化器）
+# pytorch-engine 在运行时按 OS/CPU 自动下载匹配的 native lib，无需声明 native-cpu 分类器
+djl-api = { module = "ai.djl:api", version.ref = "djl" }
+djl-pytorch-engine = { module = "ai.djl.pytorch:pytorch-engine", version.ref = "djl" }
 #compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "composeMultiplatform" }
 
 [plugins]
