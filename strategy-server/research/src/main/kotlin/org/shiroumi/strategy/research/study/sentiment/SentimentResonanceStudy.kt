@@ -1,8 +1,10 @@
 package org.shiroumi.strategy.research.study.sentiment
 
+import kotlinx.coroutines.runBlocking
 import org.shiroumi.database.sentiment.SentimentFactorDailyRecord
-import org.shiroumi.database.sentiment.SentimentFactorDailyRepository
 import org.shiroumi.database.sentiment.SentimentTargetLabelCalculator
+import org.shiroumi.quant_kmp.strategy.daily.FactorDataSource
+import org.shiroumi.quant_kmp.strategy.daily.model.FactorSnapshot
 import org.shiroumi.strategy.research.output.ResonanceIdentity
 import org.shiroumi.strategy.research.output.ResonanceMetric
 import org.shiroumi.strategy.research.pipeline.ResearchContext
@@ -10,20 +12,39 @@ import org.shiroumi.strategy.research.pipeline.ResearchStudy
 import org.shiroumi.strategy.research.signal.BandpassFilter
 import org.shiroumi.strategy.research.signal.BlockPermutation
 import org.shiroumi.strategy.research.signal.Coherence
+import org.shiroumi.strategy.research.source.toRecord
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import kotlinx.datetime.LocalDate
 import kotlin.math.sign
 import kotlin.math.sqrt
 
-class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
+class SentimentResonanceStudy(
+    private val dataSource: FactorDataSource,
+) : ResearchStudy<Unit, List<ResonanceMetric>> {
+
+    /**
+     * 测试专用构造器：构造一个抛出异常的 stub dataSource。
+     * 仅用于直接调用 [runRecords] 的场景，该路径不访问 dataSource。
+     * 生产/研究代码必须通过主构造器注入 [FactorDataSource]。
+     */
+    @Suppress("unused")
+    constructor() : this(object : FactorDataSource {
+        override suspend fun snapshot(tradeDate: LocalDate): FactorSnapshot? =
+            error("stub dataSource: use runRecords() directly")
+        override suspend fun history(startDate: LocalDate, endDate: LocalDate): List<FactorSnapshot> =
+            error("stub dataSource: use runRecords() directly")
+        override suspend fun latestTradeDate(): LocalDate? =
+            error("stub dataSource: use runRecords() directly")
+    })
     override val name: String = "study:sentiment-resonance"
     private val metricDiscoveryRecent = mutableMapOf<ResonanceIdentity, Double?>()
 
     override fun run(ctx: ResearchContext, input: Unit): List<ResonanceMetric> {
-        val records = SentimentFactorDailyRepository.findBetween(ctx.startDate, ctx.endDate)
-            .sortedBy { it.tradeDate }
+        val snapshots = runBlocking { dataSource.history(ctx.startDate, ctx.endDate) }
+        val records = snapshots.map { it.toRecord() }
         return runRecords(ctx, records)
     }
 
