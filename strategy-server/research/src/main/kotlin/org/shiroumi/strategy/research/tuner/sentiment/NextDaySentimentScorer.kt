@@ -25,7 +25,8 @@ import kotlin.math.sqrt
  *   score ← ECDF(S_sys)    (经验分位)
  */
 class NextDaySentimentScorer(
-    private val theta: ThetaConfig = ThetaConfig.IDENTITY,
+    /** 默认使用生产环境最优参数（v3 调优收敛，测试 89.2%）。传入 [ThetaConfig.IDENTITY] 回退到零训练基线 */
+    private val theta: ThetaConfig = ThetaConfig.PRODUCTION,
     private val minWindow: Int = 40,
     private val maxWindow: Int = 120,
     /** 固定窗口长度，> 0 时覆盖自适应窗口计算 */
