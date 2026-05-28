@@ -427,14 +427,13 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
 
     private fun permutationPValue(x: DoubleArray, y: DoubleArray, band: String, seed: Long): Double? {
         if (x.size < 30) return null
-        val product = DoubleArray(x.size) { x[it] * y[it] }
-        val block = min(BlockPermutation.blockSizeByBand.getValue(band), product.size)
+        val block = min(BlockPermutation.blockSizeByBand.getValue(band), y.size)
         return BlockPermutation.test(
-            series = product,
+            series = y,
             blockSize = block,
             iterations = 500,
             seed = seed,
-            statistic = { values -> abs(values.average()) },
+            statistic = { permutedY -> abs(pearson(x, permutedY) ?: 0.0) },
         ).pValue
     }
 

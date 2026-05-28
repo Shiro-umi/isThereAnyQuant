@@ -40,6 +40,7 @@ class SentimentResonanceStudyTest {
         assertNotNull(metric.mean_coherence)
         assertNotNull(metric.oos_ic)
         assertNotNull(metric.q_value)
+        assertTrue(metric.p_value!! < 0.1)
         assertTrue(metric.sample_count!! >= 30)
 
         val verdict = ResonanceEvaluator.evaluate(metric)
