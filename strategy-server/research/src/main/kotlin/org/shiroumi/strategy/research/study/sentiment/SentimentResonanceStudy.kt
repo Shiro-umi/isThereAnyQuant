@@ -158,7 +158,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
 
         val rolling = rollingCorrelationStats(xFf, yFf, horizon, window = 30)
         val coherence = coherenceStats(xFf, yFf, band, stftWindow = 40)
-        val leadLag = leadByLagCorrelation(xFf, yFf, maxLag = 5)
+        val leadLag = leadByLagCorrelation(xFf, yFf, horizon = horizon, maxLag = 5)
         val leadPhase = coherence.leadDaysPhase
         val leadStable = leadPhase == null || abs(leadLag.leadDays - leadPhase) <= 1.0
         val xOos = xLf.copyOfRange(0, xLf.size - horizon)
@@ -381,18 +381,30 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         )
     }
 
-    private fun leadByLagCorrelation(x: DoubleArray, y: DoubleArray, maxLag: Int): LeadLag {
-        var bestLag = 0
-        var bestCorr = Double.NEGATIVE_INFINITY
-        for (lag in -maxLag..maxLag) {
-            val corr = shiftedCorrelation(x, y, lag) ?: continue
-            if (abs(corr) > bestCorr) {
-                bestCorr = abs(corr)
-                bestLag = lag
-            }
+    private fun leadByLagCorrelation(x: DoubleArray, y: DoubleArray, horizon: Int, maxLag: Int): LeadLag {
+        val candidates = (-maxLag..maxLag).mapNotNull { lag ->
+            shiftedCorrelation(x, y, lag)?.let { corr -> LagCandidate(lag = lag, corr = corr) }
         }
-        return LeadLag(bestLag.toDouble(), bestCorr.takeIf { it.isFinite() })
+        if (candidates.isEmpty()) return LeadLag(0.0, null)
+        val absolutePeak = candidates.maxBy { abs(it.corr) }
+        val validPeak = candidates
+            .filter { it.lag.toDouble() in leadRange(horizon) }
+            .maxByOrNull { abs(it.corr) }
+        val selected = if (validPeak != null && abs(validPeak.corr) >= abs(absolutePeak.corr) * 0.85) {
+            validPeak
+        } else {
+            absolutePeak
+        }
+        return LeadLag(selected.lag.toDouble(), abs(selected.corr))
     }
+
+    private fun leadRange(horizon: Int): ClosedFloatingPointRange<Double> =
+        when (horizon) {
+            1 -> 0.5..1.5
+            3 -> 1.0..3.0
+            5 -> 1.0..5.0
+            else -> 1.0..horizon.toDouble()
+        }
 
     private fun shiftedCorrelation(x: DoubleArray, y: DoubleArray, lag: Int): Double? {
         val startX = if (lag >= 0) 0 else -lag
@@ -581,6 +593,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
     )
     private data class IndexedMetric(val index: Int, val pValue: Double, val familyKey: String)
     private data class LeadLag(val leadDays: Double, val corr: Double?)
+    private data class LagCandidate(val lag: Int, val corr: Double)
     private data class StateBucket(val level: Int, val label: String)
     private data class MarketState(
         val trend: StateBucket,
