@@ -187,6 +187,7 @@
     <a href="#details">历轮明细</a>
     <a href="#attribution">贡献归因</a>
     <a href="#distribution">分布图谱</a>
+    <a href="#selection">选股决策</a>
     <a href="#ssot">SSOT</a>
   </div>
 </nav>
@@ -230,6 +231,7 @@
     <a href="#method"><span>§4</span>研究方法：三层漏斗 · 三步验证 · 五维展开</a>
     <a href="#gates"><span>§5</span>12 项 A 类硬 Gate 逐条解读</a>
     <a href="#trajectory"><span>§6</span>18 轮自治迭代轨迹与 gate 驱动归因</a>
+    <a href="#selection"><span>§10</span>选股分类决策框架 · 从共振到交易</a>
   </div>
 </section>
 
@@ -853,6 +855,411 @@
         <li style="color:var(--amber)">⚠ maxPairsPerFamily=64 — 已在 iter-24/34 报告中注明</li>
       </ul>
     </div>
+  </div>
+</section>
+
+<!-- ════════════════ §10 选股决策框架 ════════════════ -->
+<section id="selection">
+  <h2>§10 选股分类决策框架 · 从共振卡片到可执行选股规则</h2>
+  <p style="color:var(--muted); margin-bottom:20px;">
+    本章将 611 张 qualified 共振卡片翻译成<strong>系统化的选股决策体系</strong>。核心命题：
+    在市场状态 S 下，应该选择什么特征的股票？持有多久？什么时候离场？
+    以下框架基于四层决策逻辑构建，每层对应研究漏斗的一个输出维度。
+  </p>
+
+  <!-- ═══ 10.1 核心发现 ═══ -->
+  <h3>10.1 核心发现：三个统一的规律</h3>
+  <div class="col2">
+    <div>
+      <div class="info">
+        <strong>规律一：h=3 天是普适最优持仓周期</strong><br>
+        所有 14 个被验证有效的因子，其 qualified 卡片中 h=3 占比均超过 60%。
+        中位数 lead=2.0-3.0 天意味着信号发出后第 2-3 天价格反映最显著。
+        建议"T 日信号触发 → T+1 日进场 → 持仓 3 天 → T+4 日评估"。
+      </div>
+    </div>
+    <div>
+      <div class="info">
+        <strong>规律二：F2a（5-8天周期）是主战场</strong><br>
+        81% 的 qualified 卡片落在 F2a 频带。这意味着有效因子在"5-8 天的波段"上领先 Y，
+        而不是在"2-3 天的日内波动"上。选股应着眼于"周度波段"而非日内择时。
+        F1b（3-5天）仅占 19%，适合更快节奏但信号可靠性更低。
+      </div>
+    </div>
+  </div>
+  <div class="info">
+    <strong>规律三：条件状态信号远超全局信号（521 vs 90）</strong><br>
+    85% 的 qualified 卡片来自特定市场状态（条件状态），仅 15% 在全局有效。
+    这意味着<strong>因子有效性高度依赖市场状态</strong>——"什么时候用什么因子"比"哪个因子最好"重要得多。
+  </div>
+
+  <!-- ═══ 10.2 决策树 ═══ -->
+  <h3>10.2 四步选股决策树</h3>
+  <p style="color:var(--muted); margin-bottom:12px;">
+    按照以下四步依次判断：先定位市场状态 → 选择主因子 → 确定选股维度 → 设定持仓参数。
+  </p>
+
+  <div style="background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:20px 24px;">
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:14px; font-size:13px;">
+      <div style="text-align:center; padding:14px; background:rgba(75,139,223,0.08); border-radius:8px;">
+        <div style="font-weight:700; color:var(--accent2); margin-bottom:6px;">Step 1</div>
+        <div style="color:var(--text);">定位市场状态</div>
+        <div style="color:var(--muted); font-size:11px; margin-top:4px;">趋势方向 × 分化度 × 量能水平<br>3×3×3 = 27 状态格</div>
+      </div>
+      <div style="text-align:center; padding:14px; background:rgba(75,139,223,0.08); border-radius:8px;">
+        <div style="font-weight:700; color:var(--accent2); margin-bottom:6px;">Step 2</div>
+        <div style="color:var(--text);">选择主因子</div>
+        <div style="color:var(--muted); font-size:11px; margin-top:4px;">该状态下 coherence 最高<br>+ A 类卡片最多的因子</div>
+      </div>
+      <div style="text-align:center; padding:14px; background:rgba(75,139,223,0.08); border-radius:8px;">
+        <div style="font-weight:700; color:var(--accent2); margin-bottom:6px;">Step 3</div>
+        <div style="color:var(--text);">确定选股特征</div>
+        <div style="color:var(--muted); font-size:11px; margin-top:4px;">因子→股票池映射<br>大小盘/动量/超跌/涨停</div>
+      </div>
+      <div style="text-align:center; padding:14px; background:rgba(75,139,223,0.08); border-radius:8px;">
+        <div style="font-weight:700; color:var(--accent2); margin-bottom:6px;">Step 4</div>
+        <div style="color:var(--text);">设定持仓参数</div>
+        <div style="color:var(--muted); font-size:11px; margin-top:4px;">持仓 3 天 · 止损 -3%<br>目标 Y 分量驱动出场</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 10.3 Step 1: 状态分类 ═══ -->
+  <h3>10.3 Step 1 · 市场状态分类体系</h3>
+  <p style="color:var(--muted); margin-bottom:12px;">
+    状态三轴度量全部使用当日可观测数据（无未来信息），可在 T 日收盘后立即计算：
+  </p>
+  <table>
+    <thead><tr><th>轴</th><th>指标</th><th>低</th><th>中</th><th>高</th><th>数据源</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>趋势方向</strong></td>
+        <td>D4 = A1 的 20 日分位数</td>
+        <td>&lt; 33% · 下跌趋势 / 低位</td>
+        <td>33–67% · 震荡</td>
+        <td>&gt; 67% · 上涨趋势 / 高位</td>
+        <td>stock_daily_data</td>
+      </tr>
+      <tr>
+        <td><strong>分化度</strong></td>
+        <td>B3' = 分化度变化</td>
+        <td>分化度收缩 · 普涨/普跌一致</td>
+        <td>分化度平稳</td>
+        <td>分化度扩大 · 市场撕裂</td>
+        <td>stock_daily_data</td>
+      </tr>
+      <tr>
+        <td><strong>量能水平</strong></td>
+        <td>EMA(A3, 5) = 5 日平滑量变率</td>
+        <td>缩量 · 交投清淡</td>
+        <td>平量</td>
+        <td>放量 · 资金活跃</td>
+        <td>stock_daily_data</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ═══ 10.4 六大市场状态与对应选股策略 ═══ -->
+  <h3>10.4 Step 2–3–4 联表 · 六大市场状态 × 选股策略完整映射</h3>
+  <p style="color:var(--muted); margin-bottom:14px;">
+    从 qualified 卡片数据中提取每个状态下的最优因子组合（按 A 类卡片数+Coherence 综合排序），
+    翻译为具体选股规则。以下六种状态覆盖了 85% 以上的条件状态 qualified 卡片。
+  </p>
+
+  <!-- Regime 1: Bearish + High Dispersion + High Vol -->
+  <div style="background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:20px 24px; margin-bottom:16px;">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+      <div style="background:var(--red); color:#fff; font-weight:700; font-size:13px; padding:4px 14px; border-radius:6px;">恐慌释放</div>
+      <div style="font-size:15px; font-weight:700; color:var(--text);">下跌趋势 + 高分化 + 放量</div>
+      <div style="font-size:12px; color:var(--muted);">54 张 qualified A 卡片 | 最强因子: A7, A1, B5, D4, B6</div>
+    </div>
+    <table>
+      <thead><tr><th>选股维度</th><th>触发因子</th><th>因子含义</th><th>选股规则</th><th>持仓</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>小盘错杀修复</strong></td>
+          <td><code>A7</code> + <code>D4</code></td>
+          <td>小盘组涨跌幅回升 + 百分位低位反弹</td>
+          <td>筛选日成交额&lt;10亿、近3日跌幅>5%、今日首日收阳的股票。A7回升+ D4<20%时触发。</td>
+          <td>3天</td>
+        </tr>
+        <tr>
+          <td><strong>恐慌后优质股</strong></td>
+          <td><code>B6</code></td>
+          <td>杀跌股占比从高位回落</td>
+          <td>B6从>15%的高位回落超3pp时，在非ST、ROE>5%、近20日跌幅<15%的池中选近3日跌幅最大但今日收阳的标的。</td>
+          <td>3天</td>
+        </tr>
+        <tr>
+          <td><strong>放量抄底</strong></td>
+          <td><code>A1</code></td>
+          <td>市场均值在放量中企稳</td>
+          <td>A1连续2日回升且A3>0（放量）时，选流通市值50-500亿、近5日跌幅前20%但今日涨幅>2%的标的。</td>
+          <td>3-5天</td>
+        </tr>
+      </tbody>
+    </table>
+    <div style="margin-top:12px; font-size:12px; color:var(--muted);">
+      出场条件：持仓3天后评估 Y2（广度）——若 B4<0.45（上涨家数不足一半），说明反弹未扩散，全部离场。若 B4>0.55，延长到 5 天。
+    </div>
+  </div>
+
+  <!-- Regime 2: Bullish + High Dispersion + High Vol -->
+  <div style="background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:20px 24px; margin-bottom:16px;">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+      <div style="background:var(--amber); color:#0b1118; font-weight:700; font-size:13px; padding:4px 14px; border-radius:6px;">强势震荡</div>
+      <div style="font-size:15px; font-weight:700; color:var(--text);">上涨趋势 + 高分化 + 放量</div>
+      <div style="font-size:12px; color:var(--muted);">52 张 qualified A 卡片 | 最强因子: B5, D3, D4, A7, A1, B4</div>
+    </div>
+    <table>
+      <thead><tr><th>选股维度</th><th>触发因子</th><th>因子含义</th><th>选股规则</th><th>持仓</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>强势跟涨</strong></td>
+          <td><code>B5</code> + <code>B4</code></td>
+          <td>强势股占比扩大 + 广度扩散</td>
+          <td>B5>8%（今日涨>5%的股票占比>8%）且B4>0.55时，选今日涨幅3-5%区间、流通市值20-200亿、量比>1.2的标的。这是"涨得不错但还没进强势组"的跟涨池。</td>
+          <td>3天</td>
+        </tr>
+        <tr>
+          <td><strong>趋势加速</strong></td>
+          <td><code>D3</code></td>
+          <td>价格偏离中期均线程度</td>
+          <td>D3为正值但<1.5σ（未极端超买）时，选5日涨幅>3%、20日涨幅>5%、今日创5日新高的标的。做趋势的"中段加速"而非"追高"。</td>
+          <td>3天</td>
+        </tr>
+        <tr>
+          <td><strong>小盘弹性</strong></td>
+          <td><code>A7</code></td>
+          <td>小盘组领涨</td>
+          <td>A7>A9b（小盘跑赢大盘）且A7>0时，选日成交额<20亿、今日涨幅前30%的标的。小盘在分化放量环境中有超额弹性。</td>
+          <td>3天</td>
+        </tr>
+      </tbody>
+    </table>
+    <div style="margin-top:12px; font-size:12px; color:var(--muted);">
+      出场条件：D3突破+2σ或B5<5%（强势厚度萎缩）时离场。止损：个股跌破进场日开盘价 -3%。
+    </div>
+  </div>
+
+  <!-- Regime 3: Bullish + Low Dispersion + Low Vol -->
+  <div style="background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:20px 24px; margin-bottom:16px;">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+      <div style="background:var(--green); color:#fff; font-weight:700; font-size:13px; padding:4px 14px; border-radius:6px;">趋势延续</div>
+      <div style="font-size:15px; font-weight:700; color:var(--text);">上涨趋势 + 低分化 + 缩量</div>
+      <div style="font-size:12px; color:var(--muted);">21 张 qualified A 卡片 | 最强因子: A7, A1</div>
+    </div>
+    <table>
+      <thead><tr><th>选股维度</th><th>触发因子</th><th>选股规则</th><th>持仓</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>普涨跟随</strong></td>
+          <td><code>A7</code> + <code>A1</code></td>
+          <td>低分化意味着多数股票一起涨——这是最简单的环境。选今日涨幅1-5%、近5日涨幅排列前30%、流通市值<100亿的标的。不需要复杂的因子筛选，控制仓位即可。</td>
+          <td>3天</td>
+        </tr>
+      </tbody>
+    </table>
+    <div style="margin-top:12px; font-size:12px; color:var(--muted);">
+      风险提示：低分化+缩量的上涨往往量能不足。B3'（分化度变化）突然转正时立即离场——这是趋势转折的早期预警。
+    </div>
+  </div>
+
+  <!-- Regime 4: Bearish + Low Dispersion + Low Vol -->
+  <div style="background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:20px 24px; margin-bottom:16px;">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+      <div style="background:var(--muted); color:#fff; font-weight:700; font-size:13px; padding:4px 14px; border-radius:6px;">底部守望</div>
+      <div style="font-size:15px; font-weight:700; color:var(--text);">下跌趋势 + 低分化 + 缩量</div>
+      <div style="font-size:12px; color:var(--muted);">28 张 qualified A 卡片 | 最强因子: B5, B4, D4, A1, A7</div>
+    </div>
+    <table>
+      <thead><tr><th>选股维度</th><th>触发因子</th><th>选股规则</th><th>持仓</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>底部反转候选</strong></td>
+        <td><code>D4</code> + <code>B4</code></td>
+        <td>D4<20%（低位）+ B4从<0.35回升到>0.45时，选近20日跌幅>10%、今日涨幅>1%、流通市值>50亿（防小盘流动性风险）的标的。这是"底部等风来"策略。</td>
+        <td>5天</td>
+      </tr>
+      <tr>
+        <td><strong>强势抗跌</strong></td>
+        <td><code>B5</code></td>
+        <td>在普跌环境中B5>3%（还有少数强势股），选这些强势股中近5日跌幅<2%且今日收阳的标的。这些是"跌市中资金抱团的方向"。</td>
+        <td>3天</td>
+      </tr>
+    </tbody>
+    </table>
+    <div style="margin-top:12px; font-size:12px; color:var(--muted);">
+      出场条件：D4回升到>50%（脱离低位区）或B4>0.6（广度确认恢复）后逐步止盈。此状态不设硬止损，因为底部区域波动大。
+    </div>
+  </div>
+
+  <!-- Regime 5: Neutral + High Dispersion + High Vol -->
+  <div style="background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:20px 24px; margin-bottom:16px;">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+      <div style="background:var(--purple); color:#fff; font-weight:700; font-size:13px; padding:4px 14px; border-radius:6px;">极端博弈</div>
+      <div style="font-size:15px; font-weight:700; color:var(--text);">震荡趋势 + 高分化 + 放量</div>
+      <div style="font-size:12px; color:var(--muted);">33 张 qualified A 卡片 | 最强因子: B4, B6, B5, D1, A6</div>
+    </div>
+    <table>
+      <thead><tr><th>选股维度</th><th>触发因子</th><th>选股规则</th><th>持仓</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>涨停接力</strong></td>
+          <td><code>A5</code> + <code>B4</code></td>
+          <td>A5>0（涨停热度高于均值）且B4>0.5时，选昨日涨停（非一字板）、今日高开2-5%、流通市值<50亿、封板率C1>0.6的标的。这是"涨停潮中做接力"的条件。</td>
+          <td>1-3天</td>
+        </tr>
+        <tr>
+          <td><strong>跌停反向</strong></td>
+          <td><code>A6</code> + <code>B6</code></td>
+          <td>A6从高值回落（跌停潮退去）且B6同步下降时，选近3日跌幅>8%、今日止跌收阳、非ST的标的。这是"恐慌踩踏后的反向交易"。</td>
+          <td>3天</td>
+        </tr>
+      </tbody>
+    </table>
+    <div style="margin-top:12px; font-size:12px; color:var(--muted);">
+      此状态风险最高，仓位控制在正常仓位的 50% 以下。止损严格：进场后次日若跌幅>2%，无条件离场。
+    </div>
+  </div>
+
+  <!-- Regime 6: Global (any state) -->
+  <div style="background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:20px 24px; margin-bottom:16px;">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+      <div style="background:var(--accent); color:#fff; font-weight:700; font-size:13px; padding:4px 14px; border-radius:6px;">跨状态基线</div>
+      <div style="font-size:15px; font-weight:700; color:var(--text);">全状态通用（不区分趋势/分化/量能）</div>
+      <div style="font-size:12px; color:var(--muted);">90 张 qualified A 卡片 | 最强因子: A1, B7, A7, D1, D2, B4</div>
+    </div>
+    <table>
+      <thead><tr><th>选股维度</th><th>触发因子</th><th>选股规则</th><th>持仓</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>趋势跟随基线</strong></td>
+          <td><code>D1</code> + <code>D2</code></td>
+          <td>D1>D2（短多长多）且D1>0时，选5日涨幅>2%、今日创5日新高、流通市值>100亿的标的。这是跨状态通用的"顺势而为"基线。</td>
+          <td>3-5天</td>
+        </tr>
+        <tr>
+          <td><strong>广度改善</strong></td>
+          <td><code>B7</code></td>
+          <td>B7连续3天>0（3日累计净广度为正）时，选今日涨幅>1%、近3日涨幅<5%（尚未大涨）、量比>1.0的标的。</td>
+          <td>3天</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ═══ 10.5 因子-选股维度映射速查表 ═══ -->
+  <h3>10.5 因子 → 选股维度速查表</h3>
+  <p style="color:var(--muted); margin-bottom:12px;">
+    每个 qualified 因子背后对应一条具体的股票筛选逻辑。以下为完整映射：
+  </p>
+  <table>
+    <thead><tr><th>因子</th><th>A卡</th><th>选股特征</th><th>筛选条件</th><th>适用状态</th><th>持仓</th></tr></thead>
+    <tbody>
+      <tr><td><code>A7</code></td><td>66</td><td>小盘领涨</td><td>日成交额&lt;10亿, 今日涨幅前30%</td><td>下跌+高分化 / 上涨+低分化</td><td>3天</td></tr>
+      <tr><td><code>B4</code></td><td>75</td><td>广度补涨</td><td>涨幅1-3%, 近3日涨幅<5%, 流通市值20-200亿</td><td>全状态（尤其中位震荡）</td><td>3天</td></tr>
+      <tr><td><code>B5</code></td><td>72</td><td>跟涨标的</td><td>涨幅3-5%, 量比>1.2, 流通市值20-200亿</td><td>强势震荡 / 底部守望</td><td>3天</td></tr>
+      <tr><td><code>A1</code></td><td>65</td><td>市场方向</td><td>A1>0选多头池, A1<0选防御/空头池</td><td>全状态</td><td>3天</td></tr>
+      <tr><td><code>D3</code></td><td>58</td><td>超跌反弹 / 趋势中段</td><td>D3<0: 选超跌标的; D3 0~1.5σ: 选趋势加速标的</td><td>下跌+高分化 / 上涨+高分化</td><td>3天</td></tr>
+      <tr><td><code>D4</code></td><td>51</td><td>位置信号</td><td>&lt;20%: 选超跌反弹; 20-80%: 趋势跟随; &gt;80%: 强势延续</td><td>全状态（自适应）</td><td>3天</td></tr>
+      <tr><td><code>B6</code></td><td>37</td><td>错杀修复</td><td>近3日跌幅>8%, 今日收阳, 非ST, ROE>5%</td><td>恐慌释放 / 极端博弈</td><td>3天</td></tr>
+      <tr><td><code>D1</code></td><td>36</td><td>趋势惯性</td><td>5日涨幅>2%, 今日创5日新高, 流通市值>100亿</td><td>全状态</td><td>3-5天</td></tr>
+      <tr><td><code>D2</code></td><td>30</td><td>短多长多确认</td><td>D1>D2做多, 选5日涨幅>2%且20日涨幅>5%的标的</td><td>强势震荡 / 跨状态基线</td><td>3-5天</td></tr>
+      <tr><td><code>A2</code></td><td>26</td><td>加速动量</td><td>A2>0(涨速在加快), 选3日涨幅>2%且今日涨幅>昨日的标的</td><td>强势震荡</td><td>3天</td></tr>
+      <tr><td><code>B7</code></td><td>25</td><td>持续性确认</td><td>B7连续>0, 选今日涨幅>1%且近3日涨幅<5%的标的</td><td>跨状态基线</td><td>3天</td></tr>
+      <tr><td><code>A5</code></td><td>25</td><td>涨停接力</td><td>昨涨停(非一字板), 今高开2-5%, 流通市值<50亿, C1>0.6</td><td>极端博弈</td><td>1-3天</td></tr>
+      <tr><td><code>A6</code></td><td>15</td><td>恐慌反向</td><td>跌停潮退去, 选近3日跌>8%今止跌收阳, 非ST</td><td>极端博弈 / 恐慌释放</td><td>3天</td></tr>
+      <tr><td><code>C4</code></td><td>7</td><td>打板盈亏</td><td>C4>0(昨日涨停股今天赚钱), 选昨涨停今未板的标的</td><td>强势震荡 / 极端博弈</td><td>3天</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ═══ 10.6 完整操作流程 ═══ -->
+  <h3>10.6 每日操作流程（T 日收盘后 → T+4 日收盘）</h3>
+  <table>
+    <thead><tr><th>时间点</th><th>操作</th><th>输入</th><th>输出</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>T 日 15:00</strong></td>
+        <td>计算当日 38 个因子值 + 3 轴状态分类</td>
+        <td>stock_daily_data + tushare_limit_list_d</td>
+        <td>当日市场状态标签（如"恐慌释放"）</td>
+      </tr>
+      <tr>
+        <td><strong>T 日 15:30</strong></td>
+        <td>匹配状态→选股规则表（见 §10.4–10.5），运行股票筛选</td>
+        <td>当前状态 + 选股规则 + 全市场股票池</td>
+        <td>候选股票列表（通常 5-30 只）</td>
+      </tr>
+      <tr>
+        <td><strong>T 日 16:00</strong></td>
+        <td>人工复核：剔除停牌/ST/*ST、重大利空公告、一字板无法买入</td>
+        <td>候选池 + 公告 + 交易状态</td>
+        <td>可执行股票池（通常 3-15 只）</td>
+      </tr>
+      <tr>
+        <td><strong>T+1 日 9:25</strong></td>
+        <td>集合竞价后确认开盘价，等权重建仓</td>
+        <td>可执行池 + 开盘价</td>
+        <td>持仓组合</td>
+      </tr>
+      <tr>
+        <td><strong>T+1 ~ T+3 日</strong></td>
+        <td>持仓期间每日更新因子值，监控出场条件（见 §10.4 各状态底部出场规则）</td>
+        <td>每日因子更新</td>
+        <td>持仓/减仓/清仓决策</td>
+      </tr>
+      <tr>
+        <td><strong>T+4 日 14:50</strong></td>
+        <td>默认持仓到期，尾盘清仓。统计本周期收益。</td>
+        <td>清仓价格</td>
+        <td>收益统计 → 反馈下次选股</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ═══ 10.7 仓位与风控 ═══ -->
+  <h3>10.7 仓位管理与风险控制</h3>
+  <div class="col2">
+    <div>
+      <h3 style="margin-top:0; color:var(--green);">仓位建议</h3>
+      <table>
+        <thead><tr><th>状态</th><th>建议仓位</th><th>理由</th></tr></thead>
+        <tbody>
+          <tr><td>趋势延续</td><td>80-100%</td><td>普涨+低分化，胜率最高</td></tr>
+          <tr><td>强势震荡</td><td>60-80%</td><td>上涨+分化，选股可获超额</td></tr>
+          <tr><td>底部守望</td><td>30-50%</td><td>底部区域波动大，逐步建仓</td></tr>
+          <tr><td>恐慌释放</td><td>30-40%</td><td>高波动环境，严格止损</td></tr>
+          <tr><td>极端博弈</td><td>20-30%</td><td>最高风险，半仓以下</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <h3 style="margin-top:0; color:var(--red);">统一止损规则</h3>
+      <table>
+        <thead><tr><th>条件</th><th>动作</th></tr></thead>
+        <tbody>
+          <tr><td>个股跌穿进场日开盘价 -3%</td><td>该股无条件清仓</td></tr>
+          <tr><td>组合当日整体跌幅 >2%</td><td>全部清仓，当日不再开新仓</td></tr>
+          <tr><td>D4 单日下跌超过 15pp</td><td>市场状态可能剧变，减仓 50%</td></tr>
+          <tr><td>连续 2 个周期亏损</td><td>暂停交易 1 天，复核状态分类</td></tr>
+          <tr><td>B3'（分化度变化）单日跳升 >2σ</td><td>趋势转折预警，全部清仓</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ═══ 10.8 局限性 ═══ -->
+  <h3>10.8 当前框架的局限性（诚实声明）</h3>
+  <div class="info">
+    <ol style="margin:0 0 0 16px; color:var(--muted); line-height:2;">
+      <li><strong>信号到个股的映射是间接的</strong> — 研究验证的是"因子→Y"的领先关系（市场层面），不是"因子→个股收益率"的截面预测。上述选股规则是基于因子业务语义的<strong>合理翻译</strong>，尚未经过个股层面的 OOS 验证。</li>
+      <li><strong>没有做仓位优化</strong> — 当前等权重建仓。未来可引入因子强度加权（coherence 越高的状态，仓位越重）。</li>
+      <li><strong>状态转换未建模</strong> — 当前每天独立判断状态，未利用状态转移概率。状态会连续数天保持同一标签，状态切换本身可能是更强的交易信号。</li>
+      <li><strong>未覆盖涨停板限制</strong> — 涨停股和一字板在实践中无法买入，当前筛选只做了简单排除，实际执行需要更严格的流动性过滤。</li>
+      <li><strong>样本外研究区间有限</strong> — 共振卡片基于 walk-forward OOS，但整个研究区间仍然有限。在极端行情（如 2020 疫情冲击、2022 系统性下跌）下，因子行为可能超出历史模式。</li>
+      <li><strong>这是研究结论，不是交易系统</strong> — 在正式投入实盘前，需要至少完成：(a) 个股截面验证；(b) 考虑交易成本后的净收益回测；(c) 状态切换稳定性和信号频率评估。</li>
+    </ol>
   </div>
 </section>
 
