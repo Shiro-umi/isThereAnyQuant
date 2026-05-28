@@ -539,25 +539,28 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
     private fun oosStats(x: DoubleArray, y: DoubleArray): OosStats {
         val pairs = x.indices.map { x[it] to y[it] }
         if (pairs.size < 30) return OosStats(sampleCount = pairs.size)
-        val folds = ArrayList<List<Pair<Double, Double>>>()
+        val foldsWithTrainEnd = ArrayList<Pair<Int, List<Pair<Double, Double>>>>()
         if (pairs.size >= 620) {
             var trainStart = 0
             while (trainStart + 500 + 120 <= pairs.size) {
-                folds.add(pairs.subList(trainStart + 500, trainStart + 620))
+                val trainEnd = trainStart + 500
+                foldsWithTrainEnd.add(trainEnd to pairs.subList(trainEnd, trainEnd + 120))
                 trainStart += 20
             }
         } else {
             val split = max(1, (pairs.size * 0.7).toInt())
-            if (pairs.size - split >= 10) folds.add(pairs.subList(split, pairs.size))
+            if (pairs.size - split >= 10) foldsWithTrainEnd.add(split to pairs.subList(split, pairs.size))
         }
-        if (folds.isEmpty()) return OosStats(sampleCount = pairs.size)
+        if (foldsWithTrainEnd.isEmpty()) return OosStats(sampleCount = pairs.size)
+        val folds = foldsWithTrainEnd.map { it.second }
 
-        val validation = folds.flatten()
-        val trainEnd = pairs.size - validation.size
-        val train = pairs.subList(0, max(1, trainEnd))
-        val orientation = sign(pearson(train.map { it.first }.toDoubleArray(), train.map { it.second }.toDoubleArray()) ?: 0.0)
-            .let { if (it == 0.0) 1.0 else it }
-        val oriented = validation.map { (px, py) -> px * orientation to py }
+        val orientedFolds = foldsWithTrainEnd.map { (trainEnd, fold) ->
+            val trainSlice = pairs.subList(0, max(1, trainEnd))
+            val ori = sign(pearson(trainSlice.map { it.first }.toDoubleArray(), trainSlice.map { it.second }.toDoubleArray()) ?: 0.0)
+                .let { if (it == 0.0) 1.0 else it }
+            fold.map { (px, py) -> px * ori to py }
+        }
+        val oriented = orientedFolds.flatten()
         val pred = oriented.map { it.first }.toDoubleArray()
         val actual = oriented.map { it.second }.toDoubleArray()
         val ic = pearson(pred, actual)
@@ -566,10 +569,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
             .toDouble() / oriented.count { sign(it.second) != 0.0 }.coerceAtLeast(1)
         val positive = oriented.count { it.second > 0.0 }.toDouble() / oriented.size
         val negative = oriented.count { it.second < 0.0 }.toDouble() / oriented.size
-        val spreads = folds.mapNotNull { fold ->
-            val orientedFold = fold.map { (px, py) -> px * orientation to py }
-            topBottomSpread(orientedFold)
-        }
+        val spreads = orientedFolds.mapNotNull { topBottomSpread(it) }
         return OosStats(
             ic = ic,
             rankIc = rankIc,
