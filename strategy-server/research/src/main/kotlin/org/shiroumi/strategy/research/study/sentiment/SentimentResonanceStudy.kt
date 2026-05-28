@@ -826,7 +826,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
     companion object {
         private const val MIN_SERIES_SIZE = 60
         private const val MIN_OBSERVATION_SAMPLE = 30
-        private const val MIN_STATE_SAMPLE = 60
+        private const val MIN_STATE_SAMPLE = 80
 
         private val TARGETS = setOf("Y1", "Y2", "Y3")
         private val PAIR_TRANSFORMS = setOf("diff", "product", "ratio")
