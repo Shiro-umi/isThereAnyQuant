@@ -55,6 +55,9 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         val stateSlices = if ("conditional" in stateMode) buildStateSlices(records, ctx.param("state-window", "60").toInt()) else emptyList()
         val maxStateCandidates = ctx.param("max-state-candidates", "80").toInt()
         val discoveryFilter = ctx.param("discovery-filter", "true").toBoolean()
+        val stftFilter = ctx.param("stft-filter", "true").toBoolean()
+        val stftCoherenceFloor = ctx.param("stft-coherence-floor", "0.40").toDouble()
+        val stftCoverageFloor = ctx.param("stft-coverage-floor", "0.15").toDouble()
 
         val globalMetrics = ArrayList<ResonanceMetric>()
         for (factor in factorNames) {
@@ -80,7 +83,10 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
                 }
             }
         }
-        val globalCandidates = if (discoveryFilter) globalMetrics.filter(::passesDiscoveryFunnel) else globalMetrics
+        val globalCandidates = globalMetrics.filter {
+            (!discoveryFilter || passesDiscoveryFunnel(it)) &&
+                (!stftFilter || passesStftConfirmation(it, stftCoherenceFloor, stftCoverageFloor))
+        }
         val metrics = ArrayList<ResonanceMetric>()
         if ("all" in stateMode) metrics.addAll(globalCandidates)
         val stateCandidates = globalCandidates
@@ -104,7 +110,10 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
                     futureTarget = futureTarget,
                     stateId = slice.id,
                     stateIndexes = slice.indexes,
-                )?.takeIf { !discoveryFilter || passesDiscoveryFunnel(it) }
+                )?.takeIf {
+                    (!discoveryFilter || passesDiscoveryFunnel(it)) &&
+                        (!stftFilter || passesStftConfirmation(it, stftCoherenceFloor, stftCoverageFloor))
+                }
                     ?.let(metrics::add)
             }
         }
@@ -280,6 +289,12 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         val stability = metric.rolling_corr_stability ?: return false
         val recent = metricDiscoveryRecent[metric.identity] ?: return false
         return abs(mean) > 0.10 && stability > 0.55 && (recent == 0.0 || sign(recent) == sign(mean))
+    }
+
+    private fun passesStftConfirmation(metric: ResonanceMetric, coherenceFloor: Double, coverageFloor: Double): Boolean {
+        val meanCoherence = metric.mean_coherence ?: return false
+        val coverage = metric.coherence_coverage ?: return false
+        return meanCoherence >= coherenceFloor && coverage >= coverageFloor
     }
 
     private fun candidateScore(metric: ResonanceMetric): Double =
