@@ -58,6 +58,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         val stftFilter = ctx.param("stft-filter", "true").toBoolean()
         val stftCoherenceFloor = ctx.param("stft-coherence-floor", "0.40").toDouble()
         val stftCoverageFloor = ctx.param("stft-coverage-floor", "0.15").toDouble()
+        val fdrFamily = ctx.param("fdr-family", "target-horizon-band")
 
         val globalMetrics = ArrayList<ResonanceMetric>()
         for (factor in factorNames) {
@@ -117,7 +118,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
                     ?.let(metrics::add)
             }
         }
-        return withBenjaminiHochbergQ(metrics)
+        return withBenjaminiHochbergQ(metrics, fdrFamily)
     }
 
     private fun buildMetric(
@@ -467,20 +468,32 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         ).pValue
     }
 
-    private fun withBenjaminiHochbergQ(metrics: List<ResonanceMetric>): List<ResonanceMetric> {
-        val indexed = metrics.mapIndexedNotNull { index, metric -> metric.p_value?.let { Triple(index, it, metric) } }
-            .sortedBy { it.second }
-        if (indexed.isEmpty()) return metrics
+    private fun withBenjaminiHochbergQ(metrics: List<ResonanceMetric>, fdrFamily: String): List<ResonanceMetric> {
         val qByIndex = DoubleArray(metrics.size) { Double.NaN }
-        var minQ = 1.0
-        for (rankIndex in indexed.indices.reversed()) {
-            val (originalIndex, p, _) = indexed[rankIndex]
-            val rank = rankIndex + 1
-            minQ = min(minQ, p * indexed.size / rank)
-            qByIndex[originalIndex] = minQ.coerceIn(0.0, 1.0)
+        val groups = metrics.mapIndexedNotNull { index, metric ->
+            metric.p_value?.let { IndexedMetric(index, it, fdrKey(metric, fdrFamily)) }
+        }.groupBy { it.familyKey }
+        for (group in groups.values) {
+            val indexed = group.sortedBy { it.pValue }
+            var minQ = 1.0
+            for (rankIndex in indexed.indices.reversed()) {
+                val item = indexed[rankIndex]
+                val rank = rankIndex + 1
+                minQ = min(minQ, item.pValue * indexed.size / rank)
+                qByIndex[item.index] = minQ.coerceIn(0.0, 1.0)
+            }
         }
         return metrics.mapIndexed { index, metric ->
             if (qByIndex[index].isNaN()) metric else metric.copy(q_value = qByIndex[index])
+        }
+    }
+
+    private fun fdrKey(metric: ResonanceMetric, fdrFamily: String): String {
+        val id = metric.identity
+        return when (fdrFamily) {
+            "global" -> "global"
+            "target-horizon-band-state" -> "${id.target_y}|h${id.horizon}|${id.band}|${id.state_id}"
+            else -> "${id.target_y}|h${id.horizon}|${id.band}"
         }
     }
 
@@ -564,6 +577,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         val phaseStd: Double?,
         val leadDaysPhase: Double?,
     )
+    private data class IndexedMetric(val index: Int, val pValue: Double, val familyKey: String)
     private data class LeadLag(val leadDays: Double, val corr: Double?)
     private data class StateBucket(val level: Int, val label: String)
     private data class MarketState(
