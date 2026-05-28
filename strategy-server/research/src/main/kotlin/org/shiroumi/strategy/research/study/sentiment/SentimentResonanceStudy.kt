@@ -182,7 +182,8 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         val yLf = BandpassFilter.lfilter(coeff, yNorm)
 
         val rolling = rollingCorrelationStats(xFf, yFf, horizon, window = 30)
-        val coherence = coherenceStats(xFf, yFf, band, stftWindow = 40)
+        val stftWindowForBand = if (band == "F2a") 48 else 40
+        val coherence = coherenceStats(xFf, yFf, band, stftWindow = stftWindowForBand)
         val leadLag = leadByLagCorrelation(xFf, yFf, horizon = horizon, maxLag = 5)
         val leadPhase = alignPhaseLeadToLag(coherence.leadDaysPhase, leadLag, band)
         val leadStable = leadPhase == null || abs(leadLag.leadDays - leadPhase) <= 1.0
@@ -209,7 +210,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         metricDiscoveryRecent[identity] = rolling.recent
         return ResonanceMetric(
             identity = identity,
-            stft_window = 40,
+            stft_window = stftWindowForBand,
             norm_version = "Z_60_detrend",
             state_window = 60,
             rolling_corr_mean = rolling.mean,
