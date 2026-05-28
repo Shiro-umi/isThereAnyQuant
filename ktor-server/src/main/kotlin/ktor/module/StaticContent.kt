@@ -1,13 +1,14 @@
 package ktor.module
 
-import io.ktor.http.CacheControl
 import io.ktor.http.ContentType
-import io.ktor.http.content.CachingOptions
+import io.ktor.http.HttpHeaders
+import io.ktor.http.content.OutgoingContent
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.install
+import io.ktor.server.response.ApplicationSendPipeline
 import io.ktor.server.plugins.autohead.AutoHeadResponse
-import io.ktor.server.plugins.cachingheaders.CachingHeaders
+import io.ktor.server.plugins.conditionalheaders.ConditionalHeaders
 import io.ktor.server.plugins.defaultheaders.DefaultHeaders
 import io.ktor.server.plugins.partialcontent.PartialContent
 import io.ktor.server.request.path
@@ -19,37 +20,37 @@ fun Application.configureStaticContent() {
     install(DefaultHeaders)
     install(AutoHeadResponse)
     install(PartialContent)
-    install(CachingHeaders) {
-        options { call, content ->
-            val path = call.request.path()
-            if (!call.isWebStaticRequest(path)) return@options null
+    install(ConditionalHeaders)
 
-            when {
-                path == "/" ||
-                    path == "/index.html" ||
-                    path == "/sw.js" ||
-                    path == "/asset-manifest.json" ->
-                    CachingOptions(CacheControl.NoStore(CacheControl.Visibility.Public))
+    // 手动设置静态资源缓存头（替代 CachingHeaders 插件）。
+    // 直接拼接完整 Cache-Control 值，确保 long-lived 资源带上 immutable 指令。
+    sendPipeline.intercept(ApplicationSendPipeline.TransferEncoding) { message ->
+        if (message !is OutgoingContent) return@intercept
+        val call = context
+        val path = call.request.path()
+        if (!call.isWebStaticRequest(path)) return@intercept
 
-                path == "/manifest.json" ->
-                    CachingOptions(
-                        CacheControl.MaxAge(
-                            maxAgeSeconds = ShortLivedCacheSeconds,
-                            visibility = CacheControl.Visibility.Public
-                        )
-                    )
+        val cacheControl = when {
+            path == "/" ||
+                path == "/index.html" ||
+                path == "/sw.js" ||
+                path == "/asset-manifest.json" ->
+                "no-store, public"
 
-                path.hasLongLivedStaticExtension() || content.contentType.isLongLivedStaticContentType() ->
-                    CachingOptions(
-                        CacheControl.MaxAge(
-                            maxAgeSeconds = LongLivedCacheSeconds,
-                            proxyMaxAgeSeconds = LongLivedCacheSeconds,
-                            visibility = CacheControl.Visibility.Public
-                        )
-                    )
+            path == "/manifest.json" ->
+                "max-age=$ShortLivedCacheSeconds, public"
 
-                else -> null
-            }
+            path.hasLongLivedStaticExtension() || message.contentType.isLongLivedStaticContentType() ->
+                // immutable 明确告诉浏览器：在 max-age 有效期内该资源内容绝对不变，
+                // 即使在刷新或重启浏览器后也不要发送验证请求（If-None-Match / If-Modified-Since）。
+                // 对于 webpack 输出的 [hash].wasm / [hash].js 这类内容寻址资源尤其重要。
+                "max-age=$LongLivedCacheSeconds, s-maxage=$LongLivedCacheSeconds, public, immutable"
+
+            else -> null
+        }
+
+        if (cacheControl != null) {
+            call.response.headers.append(HttpHeaders.CacheControl, cacheControl)
         }
     }
 }
