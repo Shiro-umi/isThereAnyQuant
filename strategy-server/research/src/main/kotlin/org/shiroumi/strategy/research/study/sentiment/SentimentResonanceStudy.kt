@@ -59,6 +59,12 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         val stftCoherenceFloor = ctx.param("stft-coherence-floor", "0.40").toDouble()
         val stftCoverageFloor = ctx.param("stft-coverage-floor", "0.15").toDouble()
         val fdrFamily = ctx.param("fdr-family", "target-horizon-band")
+        val pairMode = ctx.param("pair-mode", "true").toBoolean()
+        val pairTransforms = ctx.param("pair-transforms", "diff,product,ratio")
+            .split(',')
+            .map { it.trim() }
+            .filter { it in PAIR_TRANSFORMS }
+        val maxPairsPerFamily = ctx.param("max-pairs-per-family", "12").toInt()
 
         val globalMetrics = ArrayList<ResonanceMetric>()
         for (factor in factorNames) {
@@ -90,6 +96,22 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         }
         val metrics = ArrayList<ResonanceMetric>()
         if ("all" in stateMode) metrics.addAll(globalCandidates)
+        if (pairMode && "all" in stateMode) {
+            metrics.addAll(
+                buildPairMetrics(
+                    ctx = ctx,
+                    records = records,
+                    labels = labels,
+                    singleCandidates = globalCandidates,
+                    pairTransforms = pairTransforms,
+                    maxPairsPerFamily = maxPairsPerFamily,
+                    discoveryFilter = discoveryFilter,
+                    stftFilter = stftFilter,
+                    stftCoherenceFloor = stftCoherenceFloor,
+                    stftCoverageFloor = stftCoverageFloor,
+                ),
+            )
+        }
         val stateCandidates = globalCandidates
             .filter { isStateCandidate(it) }
             .sortedByDescending { candidateScore(it) }
@@ -132,6 +154,9 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         futureTarget: List<Double?>,
         stateId: String,
         stateIndexes: Set<Int>?,
+        factorName: String = factor,
+        factorType: String = "single",
+        factorJ: String? = null,
     ): ResonanceMetric? {
         val aligned = rawFactor.indices.mapNotNull { index ->
             if (stateIndexes != null && index !in stateIndexes) return@mapNotNull null
@@ -164,7 +189,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         val xOos = xLf.copyOfRange(0, xLf.size - horizon)
         val yOos = yLf.copyOfRange(horizon, yLf.size)
         val oos = oosStats(xOos, yOos)
-        val p = permutationPValue(xOos, yOos, band, ctx.randomSeed + factor.hashCode() + target.hashCode() + horizon)
+        val p = permutationPValue(xOos, yOos, band, ctx.randomSeed + factorName.hashCode() + target.hashCode() + horizon)
         val ffCorr = shiftedCorrelation(xFf, yFf, horizon)
         val lfCorr = shiftedCorrelation(xLf, yLf, horizon)
         val causalConsistent = ffCorr == null || lfCorr == null ||
@@ -172,9 +197,10 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
             (sign(ffCorr) == sign(lfCorr) && abs(lfCorr) >= abs(ffCorr) * 0.35)
 
         val identity = ResonanceIdentity(
-            factor_name = factor,
-            factor_type = "single",
+            factor_name = factorName,
+            factor_type = factorType,
             factor_i = factor,
+            factor_j = factorJ,
             target_y = target,
             horizon = horizon,
             band = band,
@@ -208,6 +234,85 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
             filtfilt_lfilter_consistent = causalConsistent,
             regime = "all",
         )
+    }
+
+    private fun buildPairMetrics(
+        ctx: ResearchContext,
+        records: List<SentimentFactorDailyRecord>,
+        labels: List<org.shiroumi.database.sentiment.SentimentTargetLabels>,
+        singleCandidates: List<ResonanceMetric>,
+        pairTransforms: List<String>,
+        maxPairsPerFamily: Int,
+        discoveryFilter: Boolean,
+        stftFilter: Boolean,
+        stftCoherenceFloor: Double,
+        stftCoverageFloor: Double,
+    ): List<ResonanceMetric> {
+        if (pairTransforms.isEmpty() || maxPairsPerFamily <= 0) return emptyList()
+        val metrics = ArrayList<ResonanceMetric>()
+        val candidatesByFamily = singleCandidates.groupBy {
+            FamilyKey(it.identity.target_y, it.identity.horizon, it.identity.band)
+        }
+        for ((family, candidates) in candidatesByFamily) {
+            val factorScores = candidates
+                .groupBy { it.identity.factor_i }
+                .mapValues { (_, values) -> values.maxOf(::candidateScore) }
+                .entries
+                .sortedByDescending { it.value }
+            val pairs = factorScores.indices.flatMap { leftIndex ->
+                ((leftIndex + 1)..factorScores.lastIndex).map { rightIndex ->
+                    PairCandidate(
+                        factorI = factorScores[leftIndex].key,
+                        factorJ = factorScores[rightIndex].key,
+                        score = factorScores[leftIndex].value + factorScores[rightIndex].value,
+                    )
+                }
+            }.sortedByDescending { it.score }
+                .take(maxPairsPerFamily)
+            if (pairs.isEmpty()) continue
+
+            val rawTarget = records.map { targetRaw(it, family.target) }
+            val futureTarget = labels.map { targetNext(it, family.target, family.horizon) }
+            for (pair in pairs) {
+                val rawI = records.map { it.factors[pair.factorI] }
+                val rawJ = records.map { it.factors[pair.factorJ] }
+                val baseI = candidates.firstOrNull { it.identity.factor_i == pair.factorI }
+                val baseJ = candidates.firstOrNull { it.identity.factor_i == pair.factorJ }
+                val baseIc = max(baseI?.oos_ic ?: Double.NEGATIVE_INFINITY, baseJ?.oos_ic ?: Double.NEGATIVE_INFINITY)
+                    .takeIf { it.isFinite() } ?: 0.0
+                val baseScore = max(baseI?.let(::candidateScore) ?: 0.0, baseJ?.let(::candidateScore) ?: 0.0)
+                val beta3 = beta3Stability(rawI, rawJ, futureTarget)
+                for (transform in pairTransforms) {
+                    val pairRaw = pairRaw(rawI, rawJ, transform)
+                    val factorName = "${pair.factorI}_${transform}_${pair.factorJ}"
+                    val metric = buildMetric(
+                        ctx = ctx,
+                        factor = pair.factorI,
+                        target = family.target,
+                        horizon = family.horizon,
+                        band = family.band,
+                        rawFactor = pairRaw,
+                        rawTarget = rawTarget,
+                        futureTarget = futureTarget,
+                        stateId = "trend=all,disp=all,vol=all",
+                        stateIndexes = null,
+                        factorName = factorName,
+                        factorType = "pair_$transform",
+                        factorJ = pair.factorJ,
+                    ) ?: continue
+                    if ((!discoveryFilter || passesDiscoveryFunnel(metric)) &&
+                        (!stftFilter || passesStftConfirmation(metric, stftCoherenceFloor, stftCoverageFloor))
+                    ) {
+                        metrics += metric.copy(
+                            delta_score_vs_base = candidateScore(metric) - baseScore,
+                            delta_ic_vs_base = (metric.oos_ic ?: 0.0) - baseIc,
+                            beta3_stability = beta3,
+                        )
+                    }
+                }
+            }
+        }
+        return metrics
     }
 
     private fun buildStateSlices(records: List<SentimentFactorDailyRecord>, stateWindow: Int): List<StateSlice> {
@@ -597,6 +702,79 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
             else -> null
         }
 
+    private fun pairRaw(left: List<Double?>, right: List<Double?>, transform: String): List<Double?> =
+        left.indices.map { index ->
+            val a = left[index]
+            val b = right[index]
+            if (a == null || b == null) return@map null
+            when (transform) {
+                "diff" -> a - b
+                "product" -> a * b
+                "ratio" -> a / (abs(b) + 1e-6)
+                else -> null
+            }
+        }
+
+    private fun beta3Stability(left: List<Double?>, right: List<Double?>, target: List<Double?>): Double? {
+        val aligned = left.indices.mapNotNull { index ->
+            val a = left[index]
+            val b = right[index]
+            val y = target[index]
+            if (a == null || b == null || y == null) null else Triple(a, b, y)
+        }
+        if (aligned.size < 80) return null
+        val signs = ArrayList<Double>()
+        var start = 0
+        while (start + 60 <= aligned.size) {
+            val window = aligned.subList(start, start + 60)
+            interactionBeta3(
+                window.map { it.first }.toDoubleArray(),
+                window.map { it.second }.toDoubleArray(),
+                window.map { it.third }.toDoubleArray(),
+            )?.takeIf { it != 0.0 }?.let { signs += sign(it) }
+            start += 20
+        }
+        if (signs.isEmpty()) return null
+        val positive = signs.count { it > 0.0 }
+        val negative = signs.count { it < 0.0 }
+        return max(positive, negative).toDouble() / signs.size
+    }
+
+    private fun interactionBeta3(left: DoubleArray, right: DoubleArray, target: DoubleArray): Double? {
+        val n = left.size
+        if (n < 5 || right.size != n || target.size != n) return null
+        val xtx = Array(4) { DoubleArray(4) }
+        val xty = DoubleArray(4)
+        for (i in 0 until n) {
+            val row = doubleArrayOf(1.0, left[i], right[i], left[i] * right[i])
+            for (r in row.indices) {
+                xty[r] += row[r] * target[i]
+                for (c in row.indices) xtx[r][c] += row[r] * row[c]
+            }
+        }
+        return solveLinear(xtx, xty)?.getOrNull(3)
+    }
+
+    private fun solveLinear(matrix: Array<DoubleArray>, vector: DoubleArray): DoubleArray? {
+        val n = vector.size
+        val a = Array(n) { row -> DoubleArray(n + 1) { col -> if (col < n) matrix[row][col] else vector[row] } }
+        for (col in 0 until n) {
+            val pivot = (col until n).maxBy { row -> abs(a[row][col]) }
+            if (abs(a[pivot][col]) < 1e-12) return null
+            val tmp = a[col]
+            a[col] = a[pivot]
+            a[pivot] = tmp
+            val div = a[col][col]
+            for (j in col..n) a[col][j] /= div
+            for (row in 0 until n) {
+                if (row == col) continue
+                val factor = a[row][col]
+                for (j in col..n) a[row][j] -= factor * a[col][j]
+            }
+        }
+        return DoubleArray(n) { a[it][n] }
+    }
+
     private data class BandSpec(val low: Double, val high: Double)
     private data class RollingStats(val mean: Double?, val stability: Double?, val recent: Double?)
     private data class CoherenceStats(
@@ -606,6 +784,8 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         val phaseStd: Double?,
         val leadDaysPhase: Double?,
     )
+    private data class FamilyKey(val target: String, val horizon: Int, val band: String)
+    private data class PairCandidate(val factorI: String, val factorJ: String, val score: Double)
     private data class IndexedMetric(val index: Int, val pValue: Double, val familyKey: String)
     private data class LeadLag(val leadDays: Double, val corr: Double?)
     private data class LagCandidate(val lag: Int, val corr: Double)
@@ -647,6 +827,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         private const val MIN_STATE_SAMPLE = 60
 
         private val TARGETS = setOf("Y1", "Y2", "Y3")
+        private val PAIR_TRANSFORMS = setOf("diff", "product", "ratio")
         private val LEVEL_LABELS = mapOf(0 to "low", 1 to "mid", 2 to "high")
         private val BANDS = linkedMapOf(
             "F1b" to BandSpec(0.200, 0.333),

@@ -10,6 +10,7 @@ import org.shiroumi.strategy.research.eval.ResonanceEvaluator
 import org.shiroumi.strategy.research.pipeline.ResearchContext
 import kotlin.io.path.Path
 import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.sin
 
 class SentimentResonanceStudyTest {
@@ -73,16 +74,50 @@ class SentimentResonanceStudyTest {
         assertTrue(metrics.all { it.sample_count!! >= 60 })
     }
 
+    @Test
+    fun `study emits pair metrics with pair-only fields`() {
+        val records = syntheticRecords()
+        val ctx = ResearchContext(
+            startDate = records.first().tradeDate,
+            endDate = records.last().tradeDate,
+            workspace = Path("build/test-resonance-study-pair"),
+            params = mapOf(
+                "factors" to "A1,B4",
+                "targets" to "Y1",
+                "horizons" to "3",
+                "bands" to "F2a",
+                "state-mode" to "all",
+                "pair-mode" to "true",
+                "pair-transforms" to "diff",
+                "max-pairs-per-family" to "1",
+                "discovery-filter" to "false",
+                "stft-filter" to "false",
+            ),
+        )
+
+        val metrics = SentimentResonanceStudy().runRecords(ctx, records)
+        val pair = metrics.firstOrNull { it.identity.factor_type == "pair_diff" }
+
+        assertNotNull(pair)
+        assertEquals("A1", pair!!.identity.factor_i)
+        assertEquals("B4", pair.identity.factor_j)
+        assertNotNull(pair.delta_ic_vs_base)
+        assertNotNull(pair.delta_score_vs_base)
+        assertNotNull(pair.beta3_stability)
+    }
+
     private fun syntheticRecords(): List<SentimentFactorDailyRecord> {
         val start = LocalDate.parse("2024-01-02")
         return (0 until 180).map { index ->
             val x = sin(2.0 * PI * index / 6.0)
+            val z = x * 0.5 + cos(2.0 * PI * index / 6.0) * 0.1
             val y = sin(2.0 * PI * (index - 3) / 6.0)
             SentimentFactorDailyRecord(
                 tradeDate = LocalDate.fromEpochDays(start.toEpochDays() + index),
                 factors = mapOf(
                     "A1" to x,
                     "A3" to 0.0,
+                    "B4" to z,
                     "B3p" to 0.0,
                     "D4" to 0.0,
                 ),
