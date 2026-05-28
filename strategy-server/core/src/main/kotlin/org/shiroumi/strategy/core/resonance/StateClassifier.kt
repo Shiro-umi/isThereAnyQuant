@@ -1,7 +1,7 @@
 package org.shiroumi.strategy.core.resonance
 
 import kotlinx.datetime.LocalDate
-import org.shiroumi.quant_kmp.strategy.daily.model.FactorSnapshot
+import org.shiroumi.quant_kmp.strategy.daily.model.SentimentFactorSnapshot
 import org.shiroumi.quant_kmp.strategy.daily.model.MarketRegime
 import org.shiroumi.quant_kmp.strategy.daily.model.RegimeCategory
 import org.shiroumi.quant_kmp.strategy.daily.model.TrendLevel
@@ -13,7 +13,7 @@ import org.shiroumi.quant_kmp.strategy.daily.model.TrendLevel
  * 输出：[MarketRegime]（三轴分档 + 业务语义分类）
  *
  * 此逻辑与 [SentimentResonanceStudy.stateAt] 完全一致，
- * 输入类型从 [SentimentFactorDailyRecord] 改为 [FactorSnapshot]（共享契约），
+ * 输入类型从 [SentimentFactorDailyRecord] 改为 [SentimentFactorSnapshot]（共享契约），
  * 输出增加了业务语义分类 [RegimeCategory] 方便 SelectionRuleEngine 按六大状态查询。
  *
  * 生产环境：盘中/盘后均可调用，纯计算、无 IO。
@@ -31,8 +31,8 @@ object StateClassifier {
      * @return MarketRegime，或 null（数据不足）
      */
     fun classify(
-        today: FactorSnapshot,
-        historyWindow: List<FactorSnapshot>,
+        today: SentimentFactorSnapshot,
+        historyWindow: List<SentimentFactorSnapshot>,
         windowSize: Int = DEFAULT_WINDOW,
     ): MarketRegime? {
         // 取最近 windowSize 个历史快照（含 today）

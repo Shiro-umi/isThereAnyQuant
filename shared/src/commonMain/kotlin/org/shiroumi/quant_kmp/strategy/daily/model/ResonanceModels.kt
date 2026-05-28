@@ -12,7 +12,7 @@ import kotlinx.serialization.Serializable
  * 结构完全一致，确保两个环境对同一交易日产生相同的因子视图。
  */
 @Serializable
-data class FactorSnapshot(
+data class SentimentFactorSnapshot(
     val tradeDate: LocalDate,
     /** 38 个因子名 → 取值，允许 null（缺失） */
     val factors: Map<String, Double?>,

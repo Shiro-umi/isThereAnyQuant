@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import org.shiroumi.quant_kmp.strategy.daily.model.FactorSnapshot
+import org.shiroumi.quant_kmp.strategy.daily.model.SentimentFactorSnapshot
 import org.shiroumi.quant_kmp.strategy.daily.model.RegimeCategory
 import org.shiroumi.quant_kmp.strategy.daily.model.SelectionRule
 import org.shiroumi.quant_kmp.strategy.daily.model.StockFilter
@@ -47,7 +47,7 @@ class StateClassifierTest {
             Triple(10.0, -10.0, -10.0),
             Triple(-10.0, -10.0, -10.0),
         )) {
-            val today = FactorSnapshot(
+            val today = SentimentFactorSnapshot(
                 tradeDate = LocalDate.parse("2025-12-31"),
                 factors = mapOf<String, Double?>("D4" to d4, "B3p" to b3p, "A3" to a3),
             )
@@ -59,7 +59,7 @@ class StateClassifierTest {
 
     @Test
     fun `classify with insufficient history returns null`() {
-        val today = FactorSnapshot(
+        val today = SentimentFactorSnapshot(
             tradeDate = LocalDate.parse("2025-01-01"),
             factors = mapOf("D4" to 0.5, "B3p" to 0.0, "A3" to 0.0),
         )
@@ -79,7 +79,7 @@ class StateClassifierTest {
 
         // 查询一个模糊匹配的状态
         val history = syntheticHistory(200)
-        val today = FactorSnapshot(
+        val today = SentimentFactorSnapshot(
             tradeDate = LocalDate.parse("2025-12-31"),
             factors = mapOf("D4" to -1.0, "B3p" to 0.3, "A3" to 1.5),
         )
@@ -111,7 +111,7 @@ class StateClassifierTest {
 
         SelectionRuleEngine.allStates().forEach { stateId ->
             val regime = StateClassifier.classify(
-                FactorSnapshot(LocalDate.parse("2025-01-01"), mapOf("D4" to 0.5, "B3p" to 0.0, "A3" to 0.0)),
+                SentimentFactorSnapshot(LocalDate.parse("2025-01-01"), mapOf("D4" to 0.5, "B3p" to 0.0, "A3" to 0.0)),
                 syntheticHistory(200),
             )
             if (regime != null) {
@@ -130,10 +130,10 @@ class StateClassifierTest {
 
     // ── helpers ──
 
-    private fun syntheticHistory(days: Int): List<FactorSnapshot> {
+    private fun syntheticHistory(days: Int): List<SentimentFactorSnapshot> {
         val start = LocalDate.parse("2024-01-02")
         return (0 until days).map { i ->
-            FactorSnapshot(
+            SentimentFactorSnapshot(
                 tradeDate = LocalDate.fromEpochDays(start.toEpochDays() + i),
                 factors = mapOf(
                     "D4" to kotlin.math.sin(i * 0.06) * 1.5,
