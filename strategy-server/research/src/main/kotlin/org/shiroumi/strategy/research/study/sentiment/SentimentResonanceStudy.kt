@@ -145,7 +145,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         val validIndexes = aligned.map { it.first }
         val xRaw = aligned.map { it.second }.toDoubleArray()
         val yRaw = aligned.map { it.third }.toDoubleArray()
-        val future = validIndexes.map { futureTarget[it] ?: return null }.toDoubleArray()
+        validIndexes.forEach { futureTarget[it] ?: return null }
 
         val xNorm = preprocess(xRaw)
         val yNorm = preprocess(yRaw)
@@ -161,8 +161,10 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         val leadLag = leadByLagCorrelation(xFf, yFf, maxLag = 5)
         val leadPhase = coherence.leadDaysPhase
         val leadStable = leadPhase == null || abs(leadLag.leadDays - leadPhase) <= 1.0
-        val oos = oosStats(xLf, future)
-        val p = permutationPValue(xLf, future, band, ctx.randomSeed + factor.hashCode() + target.hashCode() + horizon)
+        val xOos = xLf.copyOfRange(0, xLf.size - horizon)
+        val yOos = yLf.copyOfRange(horizon, yLf.size)
+        val oos = oosStats(xOos, yOos)
+        val p = permutationPValue(xOos, yOos, band, ctx.randomSeed + factor.hashCode() + target.hashCode() + horizon)
         val ffCorr = shiftedCorrelation(xFf, yFf, horizon)
         val lfCorr = shiftedCorrelation(xLf, yLf, horizon)
         val causalConsistent = ffCorr == null || lfCorr == null ||
