@@ -159,7 +159,7 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
         val rolling = rollingCorrelationStats(xFf, yFf, horizon, window = 30)
         val coherence = coherenceStats(xFf, yFf, band, stftWindow = 40)
         val leadLag = leadByLagCorrelation(xFf, yFf, horizon = horizon, maxLag = 5)
-        val leadPhase = coherence.leadDaysPhase
+        val leadPhase = alignPhaseLeadToLag(coherence.leadDaysPhase, leadLag.leadDays, band)
         val leadStable = leadPhase == null || abs(leadLag.leadDays - leadPhase) <= 1.0
         val xOos = xLf.copyOfRange(0, xLf.size - horizon)
         val yOos = yLf.copyOfRange(horizon, yLf.size)
@@ -405,6 +405,17 @@ class SentimentResonanceStudy : ResearchStudy<Unit, List<ResonanceMetric>> {
             5 -> 1.0..5.0
             else -> 1.0..horizon.toDouble()
         }
+
+    private fun alignPhaseLeadToLag(phaseLead: Double?, lagLead: Double, band: String): Double? {
+        if (phaseLead == null) return null
+        val spec = BANDS.getValue(band)
+        val centerFrequency = (spec.low + spec.high) / 2.0
+        if (centerFrequency <= 0.0) return phaseLead
+        val periodDays = 1.0 / centerFrequency
+        return (-2..2)
+            .map { branch -> phaseLead + branch * periodDays }
+            .minBy { abs(it - lagLead) }
+    }
 
     private fun shiftedCorrelation(x: DoubleArray, y: DoubleArray, lag: Int): Double? {
         val startX = if (lag >= 0) 0 else -lag
