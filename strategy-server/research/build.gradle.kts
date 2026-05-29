@@ -59,7 +59,7 @@ tasks.test {
 
 tasks.register<JavaExec>("runResearch") {
     group = "research"
-    description = "Run the sentiment-factor resonance research pipeline."
+    description = "Run a research topic pipeline (factor / trend / reversal) via the Main CLI entrypoint."
     mainClass.set("org.shiroumi.strategy.research.MainKt")
     classpath = sourceSets["main"].runtimeClasspath
     workingDir = rootProject.projectDir

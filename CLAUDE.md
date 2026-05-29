@@ -82,6 +82,16 @@
 - **Web Frontend**: `./gradlew :compose-app:wasmJsBrowserDevelopmentRun`
 - **CLI Tool**: `./cli [command]` (e.g., `./cli get-candles --code 000001.SZ`)
 
+## Research 文档私有化 — 研究方式不开源（强制）
+research 的**研究设计文档**（因子构造、loss 设计、调优公式、逐因子有效性结论、研究方法学等承载"我们怎么研究"的内容）属于核心研究资产，**禁止进入公开仓 `origin`**，必须统一放在 private submodule 的 `private/research-docs/` 下管理。
+
+- **唯一归置目录**：`private/research-docs/`。三份研究 topic 的 HTML 设计文档（`volume-price-factor-formula.html` 因子挖掘 / `sentiment-next-day-formula.html` trend / `pivot-reversal-formula.html` reversal）以及逐因子有效性文档都在此。
+- **公开仓零研究文档**：`temp/`（已 gitignore）只能放临时草稿；研究文档一旦成型立刻迁入 `private/research-docs/`，不得留在 `temp/`、`docs/` 或任何被 `origin` 跟踪的路径。
+- **新研究文档默认写到 private**：需要新建研究设计文档时，直接创建在 `private/research-docs/`，不要先落公开仓再迁移。
+- **研究→文档闭环**：以新文档作为研究指导（SSOT）；研究迭代完成后，必须回头更新对应的研究文档内容（结论、最优参数、有效性层面），保持文档与实现一致。
+- **代码 vs 文档边界**：`:strategy-server:research` 模块的 Kotlin 代码（pipeline/study/eval/tuner 等工程骨架）仍在公开仓；私有化的只是"研究设计文档"。但**新研究方向的因子构造公式、命中率/调优结论**等敏感内容只写进 `private/research-docs/` 的文档，不写进公开仓代码注释或公开 docs。
+- 边界细则与 private submodule 布局见 `docs/open-source-private-config.md`。
+
 ## Repository Hygiene — Paths That Must Not Be Tracked
 以下路径属于本地构建/工具产物或个人配置，**禁止**进入 git 跟踪。新增构建/IDE/工具产物时，必须先把对应目录写入 `.gitignore`，再使用 `git add`：
 

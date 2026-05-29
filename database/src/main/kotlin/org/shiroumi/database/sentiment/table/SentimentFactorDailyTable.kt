@@ -49,6 +49,11 @@ object SentimentFactorDailyTable : Table(name = "sentiment_factor_daily") {
     val e1 = double("E1").nullable()
     val e2 = double("E2").nullable()
 
+    // ── 量价因子族（VV/VP）的市场级基础量序列（先聚合后推导：每日全市场等权聚合，非市值加权）──
+    // 仅存基础序列，18 个 VV/VP 因子由 research 的 VolumePriceFactorStudy 在这两条序列上推导。
+    val vpmRet = double("VPM_ret").nullable()    // 市场等权对数收益：全市场 ln(close/prevClose) 的算术均值
+    val vpmTurn = double("VPM_turn").nullable()  // 市场等权换手率：全市场 turnoverReal/mvCirc 的算术均值
+
     val y1Raw = double("Y1_raw").nullable()
     val y2Raw = double("Y2_raw").nullable()
     val y3Raw = double("Y3_raw").nullable()

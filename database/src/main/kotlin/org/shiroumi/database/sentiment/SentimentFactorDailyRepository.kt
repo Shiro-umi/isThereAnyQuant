@@ -85,6 +85,32 @@ object SentimentFactorDailyRepository {
         return records.size
     }
 
+    /**
+     * 重建量价因子族的市场级基础量序列（VPM_ret / VPM_turn）。
+     * 复用与 A 组相同的逐标的事实读取，只是聚合口径为**全市场等权**（非市值加权）。
+     */
+    fun rebuildVpmGroup(startDate: LocalDate, endDate: LocalDate): Int {
+        val stockFacts = findStockFactsForAGroup(startDate, endDate)
+        val records = VolumePriceMarketCalculator.calculate(
+            facts = stockFacts,
+            startDate = startDate,
+            endDate = endDate,
+        )
+        upsertVpmGroup(records)
+        return records.size
+    }
+
+    fun upsertVpmGroup(records: List<SentimentFactorDailyRecord>) {
+        if (records.isEmpty()) return
+        stockDb.transaction(SentimentFactorDailyTable, log = false) {
+            SentimentFactorDailyTable.batchUpsert(records) { record ->
+                this[SentimentFactorDailyTable.tradeDate] = record.tradeDate
+                this[SentimentFactorDailyTable.vpmRet] = record.vpmRet
+                this[SentimentFactorDailyTable.vpmTurn] = record.vpmTurn
+            }
+        }
+    }
+
     fun upsertAGroup(records: List<SentimentFactorDailyRecord>) {
         if (records.isEmpty()) return
         stockDb.transaction(SentimentFactorDailyTable, log = false) {
@@ -199,6 +225,8 @@ object SentimentFactorDailyRepository {
             y3Raw = row[SentimentFactorDailyTable.y3Raw],
             yComposite = row[SentimentFactorDailyTable.yComposite],
             notes = row[SentimentFactorDailyTable.notes],
+            vpmRet = row[SentimentFactorDailyTable.vpmRet],
+            vpmTurn = row[SentimentFactorDailyTable.vpmTurn],
         )
 
     private fun findStockFactsForAGroup(startDate: LocalDate, endDate: LocalDate): List<SentimentStockDailyFact> {

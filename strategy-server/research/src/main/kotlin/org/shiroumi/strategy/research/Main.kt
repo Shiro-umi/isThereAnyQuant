@@ -3,7 +3,9 @@ package org.shiroumi.strategy.research
 import kotlinx.datetime.LocalDate
 import org.shiroumi.database.sentiment.SentimentFactorDailyRepository
 import org.shiroumi.strategy.research.pipeline.ResearchContext
-import org.shiroumi.strategy.research.study.sentiment.SentimentResearchPipeline
+import org.shiroumi.strategy.research.topic.trend.study.SentimentResearchPipeline
+import org.shiroumi.strategy.research.topic.factor.skeleton.SkeletonPipeline
+import org.shiroumi.strategy.research.topic.factor.study.FactorResearchPipeline
 import java.time.ZoneId
 import kotlin.io.path.Path
 
@@ -39,11 +41,15 @@ fun main(args: Array<String>) {
         val rows = SentimentFactorDailyRepository.rebuildLabels(ctx.startDate, ctx.endDate)
         println("sentiment_factor_daily_label_rows=$rows")
     }
+    if (options["rebuild-vpm-group"] == "true") {
+        val rows = SentimentFactorDailyRepository.rebuildVpmGroup(ctx.startDate, ctx.endDate)
+        println("sentiment_factor_daily_vpm_group_rows=$rows")
+    }
 
-    val written = if (options["skeleton"] == "true") {
-        SkeletonPipeline.run(ctx)
-    } else {
-        SentimentResearchPipeline.run(ctx)
+    val written = when {
+        options["skeleton"] == "true" -> SkeletonPipeline.run(ctx)
+        options["topic"] == "factor" -> FactorResearchPipeline.run(ctx)
+        else -> SentimentResearchPipeline.run(ctx)
     }
     println("run_id=${ctx.runId}")
     println("workspace=${ctx.workspace}")

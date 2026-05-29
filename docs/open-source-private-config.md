@@ -35,8 +35,18 @@ private/
     release.keystore
     keystore.properties
   plans/
+  research-docs/             # research 研究设计文档（因子构造 / loss / 调优公式 / 有效性结论），不开源
   temp/
 ```
+
+### Research Docs — Never Open Source
+
+research 的研究设计文档承载"我们怎么研究"的核心方法（因子构造公式、loss 设计、调优结论、逐因子有效性、研究方法学），统一放在 `private/research-docs/`，**绝不进入公开仓**：
+
+- 三份研究 topic 的 HTML 设计文档：`volume-price-factor-formula.html`（factor 因子挖掘）、`sentiment-next-day-formula.html`（trend 趋势跟踪）、`pivot-reversal-formula.html`（reversal 趋势反转），以及逐因子有效性说明文档。
+- 以这些文档作为研究指导（SSOT）；研究迭代完成后回头更新文档内容，保持与实现一致。
+- 公开仓的 `:strategy-server:research` Kotlin 工程骨架可以开源；私有化的只是研究设计文档与敏感的因子构造/调优结论。
+- 强制规则同步见根 `CLAUDE.md` 的「Research 文档私有化」小节。
 
 `compose-app/keystore.properties` supports the standard Android signing keys:
 
