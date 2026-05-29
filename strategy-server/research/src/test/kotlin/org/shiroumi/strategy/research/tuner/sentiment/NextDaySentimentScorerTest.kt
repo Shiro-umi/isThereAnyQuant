@@ -49,6 +49,29 @@ class NextDaySentimentScorerTest {
         // v2 结果已存档 —— train=92.26% val=85.15% test=87.16%
     }
 
+    /**
+     * 以「次日 a1 市值加权涨跌幅双向方向」为标的，评估生产 θ 的真实预测力。
+     * 主轴：多头侧命中 vs 天然上行率、空头侧命中 vs 天然下行率，各自净增益与单尾 p。
+     */
+    @Test
+    fun `production theta vs next-day market direction both sides`() {
+        val harness = SentimentTuningHarness()
+        val theta = ThetaConfig.PRODUCTION
+        fun report(tag: String, r: MarketEvalResult) {
+            fun pct(x: Double) = if (x.isNaN()) "  n/a" else "%5.1f%%".format(x * 100)
+            fun p(x: Double) = if (x.isNaN()) "n/a" else "%.4f".format(x)
+            println("===== $tag (n=${r.coverage}) =====")
+            println("  天然基准: 上行 ${pct(r.baseUp)} / 下行 ${pct(r.baseDown)}")
+            println("  多头侧 [score>0.5]: 共 ${r.longDays} 天, 次日真涨 ${pct(r.longHit)} (基准 ${pct(r.baseUp)}, 净增益 ${pct(r.longHit - r.baseUp)}, 单尾p=${p(r.longP)})")
+            println("  空头侧 [score<0.5]: 共 ${r.shortDays} 天, 次日真跌 ${pct(r.shortHit)} (基准 ${pct(r.baseDown)}, 净增益 ${pct(r.shortHit - r.baseDown)}, 单尾p=${p(r.shortP)})")
+            println("  IC: Pearson=${p(r.pearson)} Spearman=${p(r.spearman)}")
+            println("  五档次日a1均值(低→高score): " + r.quintileReturns.joinToString(" ") { "%+.4f".format(it) })
+        }
+        report("TRAIN 2020-2023", harness.evaluateVsMarket(theta, harness.trainRecordsForMarket()))
+        report("VAL   2024",      harness.evaluateVsMarket(theta, harness.valRecordsForMarket()))
+        report("TEST  2025+",     harness.evaluateVsMarket(theta, harness.testRecordsForMarket()))
+    }
+
     /** 第三次调优：v3 继续放宽 θτ 到 (-6, 6) · NelderMead maxIter=600 */
     @Test
     fun `third tuning run NelderMead v3`() {

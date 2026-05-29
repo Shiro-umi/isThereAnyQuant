@@ -1305,6 +1305,7 @@
   <div class="tick">§ 04</div>
   <div class="tick active">§ 05</div>
   <div class="tick">§ 06</div>
+  <div class="tick">§ 09</div>
   <div class="axis"></div>
   <div class="stamp">iter-35 · 611·A · DJL</div>
 </aside>
@@ -3114,6 +3115,125 @@ E_sys(T) = T_temp(T) · ( E_A.total + E_B.total + E_C.total + E_D.total )
   </section>
 
   <!-- ════════════════════════════════════════════════════════
+       § IX · 双向预测力验证 · 对齐次日真实涨跌幅
+       ════════════════════════════════════════════════════════ -->
+  <section id="s9">
+    <div class="section-number">IX</div>
+    <div class="section-head">
+      <span class="num">§ 09</span>
+      <h2>对齐<span class="ital">次日真实涨跌幅</span>·双向验证</h2>
+    </div>
+
+    <p>
+      前面所有命中率都以 <code>yComposite</code>（情绪合成指标）的<em>变化方向</em>为标的。但真正要回答的业务问题是另一个：这个 score 能不能预测<strong>次日市值加权涨跌幅本身的涨跌</strong>？为此把评估标的换成 <code>a1</code>（= <code>y1Raw</code>，全市场流通市值加权的当日收益，截断 ±10%）——它就是一只"自构市场指数"的日收益率，最接近"平均股价走势"。判定口径也收紧为<strong>双向</strong>：score 看涨时次日是否真涨、score 看跌时次日是否真跌，两侧必须各自跑赢天然基准，才算具备方向预测力，而不是搭单边行情的便车。
+    </p>
+
+    <div class="note">
+      <span class="label">为什么要换标的并拆双向</span>
+      A 股次日上行天数天然偏多——测试集（2025+）里 60.1% 的交易日次日是涨的。这意味着"无脑每天猜涨"白送 60.1% 命中率。任何单边命中率都必须减去这个基准才有意义；而真正的方向预测器，必须在<strong>看跌的日子里也能跑赢 39.9% 的天然下行率</strong>，否则它只是个行情跟随器。
+    </div>
+
+    <h3 class="sub" data-num="9.1">三集双向命中 · 对比表</h3>
+
+    <table>
+      <thead>
+        <tr><th>数据集</th><th>样本</th><th>天然上行率</th><th>多头侧<br>次日真涨</th><th>多头净增益</th><th>空头侧<br>次日真跌</th><th>空头净增益</th><th>Spearman IC</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>train 2020–2023</td><td>930</td><td>53.9%</td><td>78.7%</td><td>+24.8pp</td><td>69.1%</td><td>+23.0pp</td><td>0.60</td></tr>
+        <tr><td>val 2024</td><td>202</td><td>50.5%</td><td>76.7%</td><td>+26.2pp</td><td>80.0%</td><td>+30.5pp</td><td>0.58</td></tr>
+        <tr><td><strong>test 2025+</strong></td><td><strong>296</strong></td><td><strong>60.1%</strong></td><td><strong>82.4%</strong></td><td><strong>+22.3pp</strong></td><td><strong>62.5%</strong></td><td><strong>+22.6pp</strong></td><td><strong>0.59</strong></td></tr>
+      </tbody>
+    </table>
+    <p class="muted">
+      两侧单尾二项检验 p &lt; 0.0001（正态近似）。净增益在三个时间段稳定在 +22~30pp，Spearman IC 稳定在 0.58–0.60——跨期一致是"非过拟合"的硬证据：若是拟合噪声，val/test 会塌方。
+    </p>
+
+    <h3 class="sub" data-num="9.2">双向命中 vs 天然基准 · 测试集</h3>
+
+    <div class="chart-wrap">
+      <svg class="chart" viewBox="0 0 820 360" xmlns="http://www.w3.org/2000/svg">
+        <rect x="80" y="20" width="720" height="280" fill="url(#dotGrid)" opacity="0.5"/>
+        <!-- 纵轴 -->
+        <text x="72" y="300" font-family="'JetBrains Mono',monospace" font-size="10" fill="#9e958a" text-anchor="end">0%</text>
+        <text x="72" y="244" font-family="'JetBrains Mono',monospace" font-size="10" fill="#9e958a" text-anchor="end">20%</text>
+        <text x="72" y="188" font-family="'JetBrains Mono',monospace" font-size="10" fill="#9e958a" text-anchor="end">40%</text>
+        <text x="72" y="132" font-family="'JetBrains Mono',monospace" font-size="10" fill="#9e958a" text-anchor="end">60%</text>
+        <text x="72" y="76" font-family="'JetBrains Mono',monospace" font-size="10" fill="#9e958a" text-anchor="end">80%</text>
+        <text x="72" y="34" font-family="'JetBrains Mono',monospace" font-size="10" fill="#9e958a" text-anchor="end">100%</text>
+        <!-- 多头组：基准 60.1% (灰) vs 命中 82.4% (琥珀) -->
+        <!-- y = 300 - pct*2.8 -->
+        <rect x="180" y="132" width="70" height="168" fill="#5a4f3f" opacity="0.6" rx="1"/>
+        <text x="215" y="124" font-family="'JetBrains Mono',monospace" font-size="10" fill="#9e958a" text-anchor="middle">60.1%</text>
+        <rect x="270" y="69" width="70" height="231" fill="#e9b658" rx="1"/>
+        <text x="305" y="61" font-family="'JetBrains Mono',monospace" font-size="11" fill="#f5cc78" text-anchor="middle">82.4%</text>
+        <text x="285" y="320" font-family="'JetBrains Mono',monospace" font-size="11" fill="#e9b658" text-anchor="middle">多头侧 · 次日真涨</text>
+        <!-- 空头组：基准 39.9% (灰) vs 命中 62.5% (藓绿) -->
+        <rect x="490" y="188" width="70" height="112" fill="#5a4f3f" opacity="0.6" rx="1"/>
+        <text x="525" y="180" font-family="'JetBrains Mono',monospace" font-size="10" fill="#9e958a" text-anchor="middle">39.9%</text>
+        <rect x="580" y="125" width="70" height="175" fill="#93a26f" rx="1"/>
+        <text x="615" y="117" font-family="'JetBrains Mono',monospace" font-size="11" fill="#a8b785" text-anchor="middle">62.5%</text>
+        <text x="595" y="320" font-family="'JetBrains Mono',monospace" font-size="11" fill="#93a26f" text-anchor="middle">空头侧 · 次日真跌</text>
+        <!-- 图例 -->
+        <rect x="100" y="15" width="10" height="10" fill="#5a4f3f" opacity="0.6" rx="1"/>
+        <text x="116" y="25" font-family="'JetBrains Mono',monospace" font-size="10" fill="#f4ecd8">天然基准</text>
+        <rect x="200" y="15" width="10" height="10" fill="#e9b658" rx="1"/>
+        <text x="216" y="25" font-family="'JetBrains Mono',monospace" font-size="10" fill="#f4ecd8">实测命中</text>
+      </svg>
+    </div>
+    <p class="muted">
+      <strong>解读</strong> · 两根实测柱都明显高过各自的灰色基准柱，且高出的幅度几乎相等（+22.3pp / +22.6pp）。这就是"双向"的直观证据：它不是把所有日子都猜涨蹭上行率，而是在看跌的日子里也实打实地把下跌猜对了六成以上。注意空头侧绝对值（62.5%）低于多头侧（82.4%）——这是 A 股的真实不对称：上涨天数多、下跌往往更急更短，预测下跌天然更难。
+    </p>
+
+    <h3 class="sub" data-num="9.3">Score 五档 · 次日真实收益单调性</h3>
+
+    <div class="chart-wrap">
+      <svg class="chart" viewBox="0 0 820 360" xmlns="http://www.w3.org/2000/svg">
+        <rect x="80" y="20" width="720" height="280" fill="url(#dotGrid)" opacity="0.5"/>
+        <!-- 零轴 y=160 -->
+        <line x1="80" y1="160" x2="800" y2="160" stroke="#9e958a" stroke-width="1.2" opacity="0.7"/>
+        <text x="72" y="164" font-family="'JetBrains Mono',monospace" font-size="10" fill="#9e958a" text-anchor="end">0</text>
+        <text x="72" y="60" font-family="'JetBrains Mono',monospace" font-size="9" fill="#9e958a" text-anchor="end">+0.8%</text>
+        <text x="72" y="270" font-family="'JetBrains Mono',monospace" font-size="9" fill="#9e958a" text-anchor="end">−0.6%</text>
+        <!-- 五档 test: -0.46 -0.14 +0.10 +0.36 +0.73 (%)  scale: 1% = 110px -->
+        <!-- Q1 -0.46 → 高 50.6, 向下 -->
+        <rect x="150" y="160" width="80" height="51" fill="#b9603f" opacity="0.85" rx="1"/>
+        <text x="190" y="228" font-family="'JetBrains Mono',monospace" font-size="10" fill="#cf7a58" text-anchor="middle">−0.46%</text>
+        <text x="190" y="320" font-family="'JetBrains Mono',monospace" font-size="10" fill="#9e958a" text-anchor="middle">Q1 低分</text>
+        <!-- Q2 -0.14 → 15 -->
+        <rect x="270" y="160" width="80" height="15" fill="#b9603f" opacity="0.7" rx="1"/>
+        <text x="310" y="192" font-family="'JetBrains Mono',monospace" font-size="10" fill="#cf7a58" text-anchor="middle">−0.14%</text>
+        <text x="310" y="320" font-family="'JetBrains Mono',monospace" font-size="10" fill="#9e958a" text-anchor="middle">Q2</text>
+        <!-- Q3 +0.10 → 11 上 -->
+        <rect x="390" y="149" width="80" height="11" fill="#93a26f" opacity="0.7" rx="1"/>
+        <text x="430" y="142" font-family="'JetBrains Mono',monospace" font-size="10" fill="#a8b785" text-anchor="middle">+0.10%</text>
+        <text x="430" y="320" font-family="'JetBrains Mono',monospace" font-size="10" fill="#9e958a" text-anchor="middle">Q3</text>
+        <!-- Q4 +0.36 → 40 -->
+        <rect x="510" y="120" width="80" height="40" fill="#93a26f" opacity="0.85" rx="1"/>
+        <text x="550" y="112" font-family="'JetBrains Mono',monospace" font-size="10" fill="#a8b785" text-anchor="middle">+0.36%</text>
+        <text x="550" y="320" font-family="'JetBrains Mono',monospace" font-size="10" fill="#9e958a" text-anchor="middle">Q4</text>
+        <!-- Q5 +0.73 → 80 -->
+        <rect x="630" y="80" width="80" height="80" fill="#93a26f" rx="1"/>
+        <text x="670" y="72" font-family="'JetBrains Mono',monospace" font-size="11" fill="#a8b785" text-anchor="middle">+0.73%</text>
+        <text x="670" y="320" font-family="'JetBrains Mono',monospace" font-size="10" fill="#9e958a" text-anchor="middle">Q5 高分</text>
+      </svg>
+    </div>
+    <p class="muted">
+      <strong>解读</strong> · 把测试集 296 个 score 按数值从低到高均分五档，每档对应的<em>次日 a1 真实平均收益</em>完美单调递增：最低档次日平均跌 0.46%，最高档涨 0.73%，<strong>首尾日均价差约 1.2%</strong>。这说明 score 不只是方向对——它的数值大小本身就排序了次日收益的强弱，可以直接用作仓位强弱的连续信号，而不是只能当二元开关。这是比单一命中率更贴近实盘的证据。
+    </p>
+
+    <div class="note good">
+      <span class="label">可以诚实地这样说</span>
+      在 2020–2026 数据上，该 score 对<strong>次日市值加权涨跌幅的双向方向</strong>具备显著且跨期稳定的预测力：测试集看涨日次日真涨 <strong>82.4%</strong>（基准 60.1%）、看跌日次日真跌 <strong>62.5%</strong>（基准 39.9%），两侧净增益均约 <strong>+22pp</strong>，p&lt;0.0001；score 五档对应次日收益单调递增，首尾日均价差约 1.2%。
+    </div>
+
+    <div class="note">
+      <span class="label">仍需标注的三条边界</span>
+      ① 空头侧绝对值（62.5%）低于多头侧（82.4%），源于 A 股上涨天数多、下跌更急的真实不对称，预测下跌天然更难。② 测试样本 296 天（约一年半），且 2025 是相对单边的年份，置信区间虽因 p&lt;0.0001 而稳，但窗口有限。③ 这是<strong>方向 + 排序</strong>的预测力，距离"扣除交易成本（滑点、冲击、换手）后的实盘净收益"还差一次完整回测——那是下一步的工作。
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════
        页脚
        ════════════════════════════════════════════════════════ -->
   <footer>
@@ -3138,6 +3258,7 @@ E_sys(T) = T_temp(T) · ( E_A.total + E_B.total + E_C.total + E_D.total )
       document.getElementById('s3'),
       document.getElementById('s4'),
       document.getElementById('s5'),
+      document.getElementById('s9'),
     ];
 
     function update() {

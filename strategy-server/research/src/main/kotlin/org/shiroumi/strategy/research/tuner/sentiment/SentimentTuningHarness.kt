@@ -106,6 +106,23 @@ class SentimentTuningHarness(
         return evaluate(scores, records)
     }
 
+    /**
+     * 以「次日市值加权涨跌幅 a1（=y1Raw）的双向方向」为标的评估预测力。
+     *
+     * 与 [evaluate] 不同：这里判定的是 **次日 a1 本身的涨跌符号**（次日市场是涨是跌），
+     * 而非 yComposite 的变化方向。回答的问题是：
+     * score 看涨时次日市场真涨吗？score 看跌时次日市场真跌吗？两侧必须各自跑赢天然基准。
+     */
+    fun evaluateVsMarket(theta: ThetaConfig, records: List<SentimentFactorRecord>): MarketEvalResult {
+        val scorer = NextDaySentimentScorer(theta, fixedWindow = trainedWindow)
+        val scores = scorer.scoreSeries(records)
+        return evaluateMarket(scores, records)
+    }
+
+    fun valRecordsForMarket() = valRecords
+    fun testRecordsForMarket() = testRecords
+    fun trainRecordsForMarket() = trainRecords
+
     companion object {
         private fun toSentimentFactorRecords(records: List<SentimentFactorDailyRecord>): List<SentimentFactorRecord> =
             records.map { r ->
@@ -147,6 +164,120 @@ class SentimentTuningHarness(
             val coverage = total
             return EvalResult(hitRate = hitRate, meanScore = meanScore, coverage = coverage)
         }
+
+        /**
+         * 以「次日 a1（市值加权涨跌幅）的涨跌符号」为标的的双向评估。
+         *
+         * 配对样本：对每个有限 score 的 t，取次日真实收益 r = records[t+1].y1Raw。
+         * - 多头侧：score>0.5 的样本中，r>0 的比例（应跑赢天然上行率）
+         * - 空头侧：score<0.5 的样本中，r<0 的比例（应跑赢天然下行率）
+         * - IC：score 与 r 的 Pearson + Spearman
+         * - 五档分层：按 score 排序均分 5 组，各组 r 均值（看是否单调）
+         */
+        fun evaluateMarket(scores: DoubleArray, records: List<SentimentFactorRecord>): MarketEvalResult {
+            data class Pair2(val score: Double, val ret: Double)
+            val pairs = ArrayList<Pair2>()
+            for (t in 0 until min(scores.size, records.size - 1)) {
+                val s = scores[t]
+                if (!s.isFinite()) continue
+                val r = records[t + 1].y1Raw ?: continue
+                if (r == 0.0) continue
+                pairs += Pair2(s, r)
+            }
+            val n = pairs.size
+            if (n == 0) return MarketEvalResult.EMPTY
+
+            // 天然基准：样本里次日上行 / 下行的占比
+            val baseUp = pairs.count { it.ret > 0.0 }.toDouble() / n
+            val baseDown = 1.0 - baseUp
+
+            // 双向条件命中
+            val longDays = pairs.filter { it.score > 0.50 }
+            val shortDays = pairs.filter { it.score < 0.50 }
+            val longHit = if (longDays.isNotEmpty()) longDays.count { it.ret > 0.0 }.toDouble() / longDays.size else Double.NaN
+            val shortHit = if (shortDays.isNotEmpty()) shortDays.count { it.ret < 0.0 }.toDouble() / shortDays.size else Double.NaN
+
+            // 二项检验（正态近似）：H0 = 命中率 == 基准；返回单尾 z 与 p
+            fun binomP(hit: Double, k: Int, base: Double): Double {
+                if (k == 0 || hit.isNaN()) return Double.NaN
+                val mean = base
+                val sd = kotlin.math.sqrt(base * (1 - base) / k)
+                if (sd == 0.0) return Double.NaN
+                val z = (hit - mean) / sd
+                // 单尾上侧 p = 1 - Φ(z)，用 erf 近似
+                return 0.5 * erfc(z / kotlin.math.sqrt(2.0))
+            }
+            val longP = binomP(longHit, longDays.size, baseUp)
+            val shortP = binomP(shortHit, shortDays.size, baseDown)
+
+            // IC
+            val sArr = DoubleArray(n) { pairs[it].score }
+            val rArr = DoubleArray(n) { pairs[it].ret }
+            val pearson = pearson(sArr, rArr)
+            val spearman = pearson(rank(sArr), rank(rArr))
+
+            // 五档分层（按 score 升序均分）
+            val sorted = pairs.sortedBy { it.score }
+            val quintiles = DoubleArray(5)
+            for (q in 0 until 5) {
+                val from = q * n / 5
+                val to = (q + 1) * n / 5
+                val slice = sorted.subList(from, to)
+                quintiles[q] = if (slice.isNotEmpty()) slice.sumOf { it.ret } / slice.size else Double.NaN
+            }
+
+            return MarketEvalResult(
+                coverage = n,
+                baseUp = baseUp, baseDown = baseDown,
+                longDays = longDays.size, longHit = longHit, longP = longP,
+                shortDays = shortDays.size, shortHit = shortHit, shortP = shortP,
+                pearson = pearson, spearman = spearman,
+                quintileReturns = quintiles,
+            )
+        }
+
+        // ---- 统计工具 ----
+
+        private fun pearson(x: DoubleArray, y: DoubleArray): Double {
+            val n = x.size
+            if (n < 2) return Double.NaN
+            val mx = x.average(); val my = y.average()
+            var sxy = 0.0; var sxx = 0.0; var syy = 0.0
+            for (i in 0 until n) {
+                val dx = x[i] - mx; val dy = y[i] - my
+                sxy += dx * dy; sxx += dx * dx; syy += dy * dy
+            }
+            val denom = kotlin.math.sqrt(sxx * syy)
+            return if (denom == 0.0) Double.NaN else sxy / denom
+        }
+
+        /** 秩（平均秩处理并列），用于 Spearman */
+        private fun rank(v: DoubleArray): DoubleArray {
+            val idx = v.indices.sortedBy { v[it] }
+            val r = DoubleArray(v.size)
+            var i = 0
+            while (i < idx.size) {
+                var j = i
+                while (j + 1 < idx.size && v[idx[j + 1]] == v[idx[i]]) j++
+                val avgRank = (i + j) / 2.0 + 1.0
+                for (k in i..j) r[idx[k]] = avgRank
+                i = j + 1
+            }
+            return r
+        }
+
+        /** 互补误差函数 erfc，Abramowitz-Stegun 7.1.26 近似 */
+        private fun erfc(x: Double): Double {
+            val z = kotlin.math.abs(x)
+            val t = 1.0 / (1.0 + 0.5 * z)
+            val ans = t * kotlin.math.exp(
+                -z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196 +
+                    t * (0.09678418 + t * (-0.18628806 + t * (0.27886807 +
+                    t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 +
+                    t * 0.17087277))))))))
+            )
+            return if (x >= 0.0) ans else 2.0 - ans
+        }
     }
 }
 
@@ -155,3 +286,26 @@ data class EvalResult(
     val meanScore: Double,
     val coverage: Int,
 )
+
+/**
+ * 「次日 a1 双向方向」评估结果。主轴：longHit vs baseUp、shortHit vs baseDown 各自的净增益与显著性。
+ */
+data class MarketEvalResult(
+    val coverage: Int,
+    val baseUp: Double,
+    val baseDown: Double,
+    val longDays: Int,
+    val longHit: Double,
+    val longP: Double,
+    val shortDays: Int,
+    val shortHit: Double,
+    val shortP: Double,
+    val pearson: Double,
+    val spearman: Double,
+    val quintileReturns: DoubleArray,
+) {
+    companion object {
+        val EMPTY = MarketEvalResult(0, Double.NaN, Double.NaN, 0, Double.NaN, Double.NaN,
+            0, Double.NaN, Double.NaN, Double.NaN, Double.NaN, DoubleArray(5) { Double.NaN })
+    }
+}
