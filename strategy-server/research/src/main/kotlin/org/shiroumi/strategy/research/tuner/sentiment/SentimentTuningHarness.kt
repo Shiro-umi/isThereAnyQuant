@@ -88,6 +88,56 @@ class SentimentTuningHarness(
         }
     }
 
+    /**
+     * 双向目标函数：以「次日 a1 方向」为标的，最大化 **多头/空头两侧命中率的最小值**（max-min）。
+     *
+     * 这样优化器无法靠天然占多数的上行样本蹭分——必须同时把看涨日真涨率与看跌日真跌率拉高，
+     * 才能抬升 min。轻度奖励两侧之和以打破 min 相等时的平台。
+     * 任一侧样本不足（< 40 天）则判 unqualified，避免「全看涨/全看跌」的退化解。
+     */
+    fun objectiveVsMarket(): ObjectiveFunction {
+        val train = trainRecords
+        val w = trainedWindow
+        return ObjectiveFunction { _, params ->
+            val theta = ThetaConfig.fromParams(params)
+            val scorer = NextDaySentimentScorer(theta, fixedWindow = w)
+            val scores = scorer.scoreSeries(train)
+            val r = evaluateMarket(scores, train)
+            val long = if (r.longHit.isNaN()) 0.0 else r.longHit
+            val short = if (r.shortHit.isNaN()) 0.0 else r.shortHit
+            val balanced = r.longDays >= 40 && r.shortDays >= 40
+            // max-min 主目标 + 1e-3·(两侧和) 平台破除
+            val score = min(long, short) + 1e-3 * (long + short)
+            val detail = "long=%.4f(%d) short=%.4f(%d) min=%.4f".format(long, r.longDays, short, r.shortDays, min(long, short))
+            Observation(score = score, qualified = balanced, detail = detail)
+        }
+    }
+
+    /**
+     * 双向目标 m2：train + val 联合 max-min，抗过拟合。
+     *
+     * 对 train 与 val 分别算双向命中，取「四个数（train多/train空/val多/val空）的最小值」为主目标。
+     * 强制优化器找到一组在两个时间段都双向稳健的 θ，压制 m1 中 test 空头侧的泛化回落。
+     */
+    fun objectiveVsMarketJoint(): ObjectiveFunction {
+        val train = trainRecords
+        val valRec = valRecords
+        val w = trainedWindow
+        return ObjectiveFunction { _, params ->
+            val theta = ThetaConfig.fromParams(params)
+            val scorer = NextDaySentimentScorer(theta, fixedWindow = w)
+            val rt = evaluateMarket(scorer.scoreSeries(train), train)
+            val rv = evaluateMarket(scorer.scoreSeries(valRec), valRec)
+            fun safe(x: Double) = if (x.isNaN()) 0.0 else x
+            val four = listOf(safe(rt.longHit), safe(rt.shortHit), safe(rv.longHit), safe(rv.shortHit))
+            val balanced = rt.longDays >= 40 && rt.shortDays >= 40 && rv.longDays >= 20 && rv.shortDays >= 20
+            val score = four.min() + 1e-3 * four.sum()
+            val detail = "tL=%.3f tS=%.3f vL=%.3f vS=%.3f min=%.3f".format(
+                safe(rt.longHit), safe(rt.shortHit), safe(rv.longHit), safe(rv.shortHit), four.min())
+            Observation(score = score, qualified = balanced, detail = detail)
+        }
+    }
+
     /** 在验证集上评估 */
     fun evaluateOnVal(theta: ThetaConfig): EvalResult =
         evaluateWithWindow(theta, valRecords)
@@ -122,6 +172,39 @@ class SentimentTuningHarness(
     fun valRecordsForMarket() = valRecords
     fun testRecordsForMarket() = testRecords
     fun trainRecordsForMarket() = trainRecords
+
+    /**
+     * 双阈值评估：score > [tauLong] 看涨、score < [tauShort] 看跌、中间弃权。
+     * 用更严格的看跌门槛（tauShort < 0.5）换空头侧精度，代价是覆盖率下降。
+     */
+    fun evaluateVsMarketDual(
+        theta: ThetaConfig,
+        records: List<SentimentFactorRecord>,
+        tauLong: Double,
+        tauShort: Double,
+    ): DualEvalResult {
+        val scorer = NextDaySentimentScorer(theta, fixedWindow = trainedWindow)
+        val scores = scorer.scoreSeries(records)
+        var lHit = 0; var lTot = 0; var sHit = 0; var sTot = 0; var abstain = 0; var n = 0
+        for (t in 0 until min(scores.size, records.size - 1)) {
+            val s = scores[t]
+            if (!s.isFinite()) continue
+            val r = records[t + 1].y1Raw ?: continue
+            if (r == 0.0) continue
+            n++
+            when {
+                s > tauLong -> { lTot++; if (r > 0.0) lHit++ }
+                s < tauShort -> { sTot++; if (r < 0.0) sHit++ }
+                else -> abstain++
+            }
+        }
+        return DualEvalResult(
+            coverage = n, abstain = abstain,
+            longDays = lTot, longHit = if (lTot > 0) lHit.toDouble() / lTot else Double.NaN,
+            shortDays = sTot, shortHit = if (sTot > 0) sHit.toDouble() / sTot else Double.NaN,
+            tauLong = tauLong, tauShort = tauShort,
+        )
+    }
 
     companion object {
         private fun toSentimentFactorRecords(records: List<SentimentFactorDailyRecord>): List<SentimentFactorRecord> =
@@ -309,3 +392,15 @@ data class MarketEvalResult(
             0, Double.NaN, Double.NaN, Double.NaN, Double.NaN, DoubleArray(5) { Double.NaN })
     }
 }
+
+/** 双阈值（看涨/看跌/弃权）评估结果。 */
+data class DualEvalResult(
+    val coverage: Int,
+    val abstain: Int,
+    val longDays: Int,
+    val longHit: Double,
+    val shortDays: Int,
+    val shortHit: Double,
+    val tauLong: Double,
+    val tauShort: Double,
+)

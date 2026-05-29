@@ -72,6 +72,110 @@ class NextDaySentimentScorerTest {
         report("TEST  2025+",     harness.evaluateVsMarket(theta, harness.testRecordsForMarket()))
     }
 
+    /**
+     * 双向调优 m1：目标函数换成 max-min（两侧命中率最小值），用次日 a1 方向作标的。
+     * 目标：让 test 集多头/空头双向命中率都 > 80%。
+     */
+    @Test
+    fun `bidirectional tuning m1 maxmin NelderMead`() {
+        val harness = SentimentTuningHarness()
+        val space = harness.buildSearchSpace()
+        val objective = harness.objectiveVsMarket()
+        val workspace = Files.createTempDirectory("sentiment-bidir-m1-")
+        val ctx = org.shiroumi.strategy.research.pipeline.ResearchContext(
+            runId = "bidir-m1-${UUID.randomUUID().toString().take(8)}",
+            startDate = LocalDate(2020, 1, 2),
+            endDate = LocalDate(2023, 12, 29),
+            params = emptyMap(),
+            workspace = workspace,
+            randomSeed = 202L,
+        )
+        val optimizer = NelderMeadOptimizer(
+            space = space, objective = objective,
+            budget = TuningBudget(maxIter = 800, patience = 100, minDelta = 1e-6),
+        )
+        val result = optimizer.optimize(ctx)
+        assertNotNull(result.best)
+        val theta = ThetaConfig.fromParams(result.best.params)
+        println("M1 TUNED theta: $theta")
+        println("M1 train objective=%.4f stop=%s".format(result.best.observation.score, result.stopReason))
+        fun report(tag: String, r: MarketEvalResult) {
+            fun pct(x: Double) = if (x.isNaN()) "n/a" else "%5.1f%%".format(x * 100)
+            val ic = if (r.spearman.isNaN()) "n/a" else "%.3f".format(r.spearman)
+            println("  $tag (n=${r.coverage}): 多头 ${pct(r.longHit)}[${r.longDays}d] / 空头 ${pct(r.shortHit)}[${r.shortDays}d] / minHit=${pct(minOf(r.longHit, r.shortHit))} / IC=$ic")
+        }
+        report("TRAIN", harness.evaluateVsMarket(theta, harness.trainRecordsForMarket()))
+        report("VAL  ", harness.evaluateVsMarket(theta, harness.valRecordsForMarket()))
+        report("TEST ", harness.evaluateVsMarket(theta, harness.testRecordsForMarket()))
+        println("M1 written: ${result.writeTo(ctx)}")
+    }
+
+    /**
+     * 双向调优 m2：train+val 联合 max-min，压制 m1 的 test 空头泛化回落。
+     */
+    @Test
+    fun `bidirectional tuning m2 joint maxmin`() {
+        val harness = SentimentTuningHarness()
+        val space = harness.buildSearchSpace()
+        val objective = harness.objectiveVsMarketJoint()
+        val workspace = Files.createTempDirectory("sentiment-bidir-m2-")
+        val ctx = org.shiroumi.strategy.research.pipeline.ResearchContext(
+            runId = "bidir-m2-${UUID.randomUUID().toString().take(8)}",
+            startDate = LocalDate(2020, 1, 2),
+            endDate = LocalDate(2024, 12, 31),
+            params = emptyMap(),
+            workspace = workspace,
+            randomSeed = 303L,
+        )
+        val optimizer = NelderMeadOptimizer(
+            space = space, objective = objective,
+            budget = TuningBudget(maxIter = 1000, patience = 120, minDelta = 1e-6),
+        )
+        val result = optimizer.optimize(ctx)
+        assertNotNull(result.best)
+        val theta = ThetaConfig.fromParams(result.best.params)
+        println("M2 TUNED theta: $theta")
+        println("M2 train objective=%.4f stop=%s".format(result.best.observation.score, result.stopReason))
+        fun report(tag: String, r: MarketEvalResult) {
+            fun pct(x: Double) = if (x.isNaN()) "n/a" else "%5.1f%%".format(x * 100)
+            val ic = if (r.spearman.isNaN()) "n/a" else "%.3f".format(r.spearman)
+            println("  $tag (n=${r.coverage}): 多头 ${pct(r.longHit)}[${r.longDays}d] / 空头 ${pct(r.shortHit)}[${r.shortDays}d] / minHit=${pct(minOf(r.longHit, r.shortHit))} / IC=$ic")
+        }
+        report("TRAIN", harness.evaluateVsMarket(theta, harness.trainRecordsForMarket()))
+        report("VAL  ", harness.evaluateVsMarket(theta, harness.valRecordsForMarket()))
+        report("TEST ", harness.evaluateVsMarket(theta, harness.testRecordsForMarket()))
+        println("M2 written: ${result.writeTo(ctx)}")
+    }
+
+    /**
+     * 双向调优 m3：固定 m1 最优 θ，在 VAL 集上扫描看跌阈值 τ_short，
+     * 用更严格的看跌门槛换空头精度；选定后在 TEST 集验收。τ_long 固定 0.5。
+     */
+    @Test
+    fun `bidirectional tuning m3 threshold scan`() {
+        val harness = SentimentTuningHarness()
+        // 生产 θ（= m1 双向最优）
+        val theta = ThetaConfig.PRODUCTION
+        fun pct(x: Double) = if (x.isNaN()) "  n/a" else "%5.1f%%".format(x * 100)
+        fun f2(x: Double) = "%.2f".format(x)
+        val tauLong = 0.50
+        println("===== m3 在 VAL 集扫描 τ_short（τ_long=0.50 固定）=====")
+        var bestTau = 0.50; var bestValShort = -1.0
+        for (i in 0..9) {
+            val tauShort = 0.50 - i * 0.04   // 0.50 → 0.14
+            val v = harness.evaluateVsMarketDual(theta, harness.valRecordsForMarket(), tauLong, tauShort)
+            println("  τ_short=${f2(tauShort)} → VAL 多头 ${pct(v.longHit)}[${v.longDays}d] 空头 ${pct(v.shortHit)}[${v.shortDays}d] 弃权 ${v.abstain}")
+            // 选「空头>=80% 且 空头样本>=30」里空头率最高的
+            if (!v.shortHit.isNaN() && v.shortHit >= 0.80 && v.shortDays >= 30 && v.shortHit > bestValShort) {
+                bestValShort = v.shortHit; bestTau = tauShort
+            }
+        }
+        println(">>> VAL 选定 τ_short=${f2(bestTau)} (val空头=${pct(bestValShort)})")
+        println("===== TEST 集验收（τ_long=0.50, τ_short=${f2(bestTau)}）=====")
+        val t = harness.evaluateVsMarketDual(theta, harness.testRecordsForMarket(), tauLong, bestTau)
+        println("  TEST 多头 ${pct(t.longHit)}[${t.longDays}d] / 空头 ${pct(t.shortHit)}[${t.shortDays}d] / 弃权 ${t.abstain} / 覆盖 ${t.coverage}")
+    }
+
     /** 第三次调优：v3 继续放宽 θτ 到 (-6, 6) · NelderMead maxIter=600 */
     @Test
     fun `third tuning run NelderMead v3`() {

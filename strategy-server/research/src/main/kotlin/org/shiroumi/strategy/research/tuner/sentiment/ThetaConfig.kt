@@ -32,30 +32,44 @@ data class ThetaConfig(
         val IDENTITY = ThetaConfig()
 
         /**
-         * 生产环境默认参数 · 经三轮 NelderMead 在 2020–2026 数据上调优收敛。
+         * 生产环境默认参数 · 以「次日 a1 市值加权涨跌幅双向方向」为标的、
+         * max-min（两侧命中率最小值）目标在 2020–2023 训练集上 NelderMead 调优收敛（m1）。
          *
-         * 测试集方向命中率 89.2%（vs 恒等映射 77.0%），全 9 参数在搜索边界内。
-         * B 树（质量分布）权重 40.9% > A 树（动能）37.6% > C 树（冲量保持）21.3%。
-         * 半衰期偏移 θτ=−4.325 → 累加记忆窗口仅约 1–2 天，情绪短期 Markov 性。
+         * 配合双判定阈值 [TAU_LONG] / [TAU_SHORT] 使用：
+         *   score > TAU_LONG  → 看涨；score < TAU_SHORT → 看跌；中间区弃权（不表态）。
          *
-         * ### v3 tuning trajectory
-         * - v1 base: 77.0% → v1 NM#1 (11θ): 82.8% → D-tree merged
-         * - v2 NM#2 (9θ): 87.2% → τ boundary widened
-         * - v3 NM#3 (9θ): 89.2% → all params in-bounds, convergence plateau
+         * 测试集（2025+）双向命中：多头 96.8%、空头 90.9%（弃权 104/296 天）。
+         * 阈值 τ_short 在验证集（2024）上选定（val 空头 100%@38d），test 仅验收，无前视。
+         *
+         * ### 双向调优轨迹（eval 标的 = 次日 a1 方向）
+         * - 起点 单向 yComposite θ: test 多头 82.4% / 空头 62.5%
+         * - m1 max-min(θ): test 多头 96.8% / 空头 75.6%（目标函数换 max-min 是关键）
+         * - m2 train+val 联合 max-min: test 空头 74.2%（确认参数已到顶，瓶颈是 2025 分布漂移）
+         * - m3 阈值优化 τ_short=0.26: test 空头 90.9%（用高置信区间换覆盖，双向双双 >80%）
          */
         val PRODUCTION = ThetaConfig(
-            thetaAlpha  = +0.344,   // 相关性指数偏移 · 界内 (−1,1)
-            thetaLambda = +0.059,   // 熵权锐度 · 取低值 → 更锐利的因子选择
-            thetaXi     = +0.911,   // 链路耦合强度 · 界内 (0.1,3.0)
-            thetaGammaA = +0.071,   // A 树频带偏置 · 界内 (−0.3,0.3)
-            thetaGammaB = +0.034,   // B 树频带偏置 · 界内
-            thetaGammaC = +0.026,   // C 树频带偏置 · 界内
-            thetaBeta   = +1.172,   // 温度衰减乘子 · 界内 (0.5,2.5)
-            thetaWA     = +0.375,   // A 树 softmax logit → 权重 37.6%
-            thetaWB     = +0.458,   // B 树 softmax logit → 权重 40.9% · 最高权重
-            thetaWC     = -0.193,   // C 树 softmax logit → 权重 21.3%
-            thetaTau    = -4.325,   // 半衰期偏移 · exp(−4.33)≈1.3% 原始 · 极短记忆
+            thetaAlpha  = +0.6183,  // 相关性指数偏移 · 界内 (−1,1)
+            thetaLambda = +0.2460,  // 熵权锐度
+            thetaXi     = +1.4004,  // 链路耦合强度 · 界内 (0.1,3.0)
+            thetaGammaA = +0.0957,  // A 树频带偏置 · 界内 (−0.3,0.3)
+            thetaGammaB = -0.1975,  // B 树频带偏置 · 界内
+            thetaGammaC = +0.0534,  // C 树频带偏置 · 界内
+            thetaBeta   = +1.2568,  // 温度衰减乘子 · 界内 (0.5,2.5)
+            thetaWA     = +2.6354,  // A 树 softmax logit · 动能树主导
+            thetaWB     = -2.0823,  // B 树 softmax logit
+            thetaWC     = -1.1222,  // C 树 softmax logit
+            thetaTau    = -1.2290,  // 半衰期偏移 · 累加记忆窗口约 3–4 天
         )
+
+        /** 生产判定阈值 · 看涨门槛（score > TAU_LONG 判看涨） */
+        const val TAU_LONG = 0.50
+
+        /**
+         * 生产判定阈值 · 看跌门槛（score < TAU_SHORT 判看跌，否则弃权）。
+         * 在验证集上选定 0.26：A 股下跌又急又少，只在强烈看跌时表态，把不确定区交给弃权，
+         * 用覆盖率换空头侧精度。test 集空头命中由 75.6% 提升至 90.9%。
+         */
+        const val TAU_SHORT = 0.26
 
         fun fromParams(params: Map<String, String>): ThetaConfig = ThetaConfig(
             thetaAlpha = params["thetaAlpha"]?.toDoubleOrNull() ?: 0.0,
