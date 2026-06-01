@@ -4,8 +4,8 @@
 #
 # Counts qualified resonance cards under out/resonance_cards/.
 # One card represents one (factor, target Y, horizon, band, state) conclusion.
-# qualified=true must satisfy the 12 hard gates in
-# research/02-research-execution-handbook.md section 12.4.
+# qualified=true must satisfy the 12 hard gates defined in the execution handbook
+# (private/research-docs/sentiment/02-research-execution-handbook.md).
 #
 # Output: a single integer on stdout. Empty or missing card directories output 0.
 

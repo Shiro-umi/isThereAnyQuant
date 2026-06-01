@@ -22,6 +22,19 @@ out/
 !**/src/main/**/out/
 !**/src/test/**/out/
 
+# 研究工作区运行产物（tuner trace / result、调优落盘、共振卡片、装配缓存、baseline 快照），非业务代码
+research/*/tuner/
+research/*/out/
+research/*/dataset_cache/
+research/*/baseline/
+
+# 研究方法学 / 逐轮调优报告 / 逐因子有效性结论 —— 属"我们怎么研究"的核心研究资产，
+# 强制归 private/research-docs/（见根 CLAUDE.md「Research 文档私有化」），禁止进公开仓
+research/[0-9][0-9]-*.md
+research/*/reports/*.md
+research/*/reports/*.html
+!research/*/reports/.gitkeep
+
 ### Kotlin ###
 .kotlin
 
