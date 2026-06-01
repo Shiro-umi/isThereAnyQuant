@@ -7,7 +7,10 @@ import org.shiroumi.database.common.updater.updateStockBasic
 import org.shiroumi.database.stock.refreshStockDailyFq
 import org.shiroumi.database.common.repository.TradingCalendarRepository
 import org.shiroumi.server.runtime.strategy.StrategyRuntimeBridge
+import utils.logger
 import java.time.ZoneId
+
+private val logger by logger("HistoricalDataUpdateOrchestrator")
 
 /**
  * 盘后历史更新编排器。
@@ -40,6 +43,7 @@ class HistoricalDataUpdateOrchestrator(
             remoteLimitListDFetcher = org.shiroumi.server.dataprovider.adapter.TushareLimitListDFetcher(),
             compensationTaskService = defaultCompensationTaskService()
         ),
+    private val open5mSyncService: Open5mSyncService = Open5mSyncService(),
     private val updateCalendarStep: suspend () -> Unit = { updateCalendar() },
     private val updateStockBasicStep: suspend () -> Unit = { updateStockBasic() },
     private val pendingStockDailyFqDateLoader: () -> List<LocalDate> = {
@@ -94,6 +98,12 @@ class HistoricalDataUpdateOrchestrator(
         require(!compensationTaskService.hasOutstanding(CompensationTaskType.LIMIT_LIST_D_BY_TRADE_DATE)) {
             "涨跌停炸板补偿任务未清空，阻断后续盘后更新"
         }
+
+        onStepChanged("更新开盘5min数据", 56)
+        // 每日首根 5min（研究层日内预警维度）。幂等增量：只补 open5m 缺口交易日；失败不阻断主链路
+        // （研究支撑数据，非关键价格路径），缺口由次日盘后重跑自愈。
+        runCatching { open5mSyncService.syncPendingDates() }
+            .onFailure { logger.warning("[open5m] 盘后追平异常（不阻断主链路）: ${it.message}") }
 
         onStepChanged("更新复权价格", 62)
         runPendingFqStage()

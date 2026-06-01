@@ -6,6 +6,7 @@ import org.shiroumi.strategy.research.pipeline.ResearchContext
 import org.shiroumi.strategy.research.topic.trend.study.SentimentResearchPipeline
 import org.shiroumi.strategy.research.topic.factor.skeleton.SkeletonPipeline
 import org.shiroumi.strategy.research.topic.factor.study.FactorResearchPipeline
+import org.shiroumi.strategy.research.topic.reversal.PivotReversalPipeline
 import java.time.ZoneId
 import kotlin.io.path.Path
 
@@ -49,6 +50,7 @@ fun main(args: Array<String>) {
     val written = when {
         options["skeleton"] == "true" -> SkeletonPipeline.run(ctx)
         options["topic"] == "factor" -> FactorResearchPipeline.run(ctx)
+        options["topic"] == "reversal" -> PivotReversalPipeline.run(ctx)
         else -> SentimentResearchPipeline.run(ctx)
     }
     println("run_id=${ctx.runId}")

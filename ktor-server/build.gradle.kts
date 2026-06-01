@@ -661,6 +661,39 @@ tasks.register<JavaExec>("runHistoricalBackfill") {
     }
 }
 
+tasks.register<JavaExec>("probeStkMins") {
+    group = "application"
+    description = "Step 0 探针：探测 Tushare stk_mins 5min 真实可回溯起点 (ProbeStkMins.kt)"
+    dependsOn("compileKotlin", "compileJava", "processResources")
+
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("org.shiroumi.server.ProbeStkMinsKt")
+    workingDir = rootProject.projectDir
+
+    systemProperties(
+        System.getProperties()
+            .filterKeys { key -> key is String && key.startsWith("quant.probe.") }
+            .mapKeys { it.key as String }
+    )
+}
+
+tasks.register<JavaExec>("collectOpen5m") {
+    group = "application"
+    description = "采集每日首根5min K线到 stock_open_5m (CollectOpen5m.kt)，支持小样本快验证"
+    dependsOn("compileKotlin", "compileJava", "processResources")
+
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("org.shiroumi.server.CollectOpen5mKt")
+    workingDir = rootProject.projectDir
+
+    systemProperties(
+        System.getProperties()
+            .filterKeys { key -> key is String && key.startsWith("quant.open5m.") }
+            .mapKeys { it.key as String }
+    )
+    jvmArgs = listOf("-Xms2g", "-Xmx8g", "-XX:+UseG1GC")
+}
+
 tasks.named<JavaExec>("run") {
     workingDir = rootProject.projectDir
     environment("QUANT_MODE", "debug")
