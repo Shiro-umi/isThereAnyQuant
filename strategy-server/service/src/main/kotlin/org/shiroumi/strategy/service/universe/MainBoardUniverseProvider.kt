@@ -13,7 +13,11 @@ object MainBoardUniverseProvider {
         .toList()
 
     internal fun isTenCentimeterMainBoard(tsCode: String, name: String): Boolean {
+        // 过滤风险警示股和退市整理股
         if (name.contains("ST", ignoreCase = true)) return false
+        if (name.contains("PT", ignoreCase = true)) return false
+        if (name.contains("退", ignoreCase = true)) return false
+        if (name.contains("N", ignoreCase = false) && name.length <= 4) return false  // 上市首日新股(如"N华电")
         val code = tsCode.substringBefore('.')
         val market = tsCode.substringAfter('.', "")
         return when (market) {
