@@ -8,7 +8,7 @@ import kotlinx.serialization.json.Json
 import org.shiroumi.backtest.domain.StrategyDecision
 
 /**
- * 把 `daily_target_portfolio` / `daily_strategy_audit` 等策略中间产物
+ * 把 `daily_profit_prediction_selection` / `daily_strategy_audit` 等策略中间产物
  * 导出为 `decisions/{executionDate}.json`。
  *
  * 对齐 docs/architecture/backtest-engine-design.md §11.4.2：
@@ -23,6 +23,17 @@ class DecisionFileExporter(
     private val feed: StrategyDecisionFeed = DbBackedDecisionFeed(),
     private val json: Json = DecisionFileJson,
 ) {
+    companion object {
+        fun createWithLimitUpFilter(decisionsDir: Path): DecisionFileExporter {
+            return DecisionFileExporter(
+                decisionsDir = decisionsDir,
+                feed = DbBackedDecisionFeed(
+                    filterSignalLimitUp = true,
+                    limitUpChecker = ::isLimitUpOnTradeDate,
+                ),
+            )
+        }
+    }
     init {
         Files.createDirectories(decisionsDir)
     }

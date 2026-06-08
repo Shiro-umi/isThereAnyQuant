@@ -33,15 +33,15 @@ data class ThresholdLine(
 fun buildParameterSpecs(): List<ParameterSpec> = listOf(
     ParameterSpec(
         id = "sentiment_exposure",
-        title = "综合仓位建议",
+        title = "市场情绪水位",
         unit = "%",
         yMin = 0.0,
         yMax = 1.0,
         color = { MaterialTheme.colorScheme.primary },
         extractor = { it.sentimentExposure },
         formatter = { "${formatDouble(it * 100, 1)}%" },
-        semantics = "五维情绪因子融合后经三层保护机制调整的最终输出。直接控制次日总仓位比例：0%=空仓，100%=满仓。",
-        tradingGuide = "• >70%：多头强势，可满仓参与\n• 40~70%：中性偏多，控制在半仓\n• <40%：谨慎观望，空仓或轻仓\n• =0%：绝对水位保护触发，必须空仓",
+        semantics = "五维情绪因子融合后经三层保护机制调整的最终输出。用于解释市场环境，不再过滤 7% 盈利预测模型选股列表。",
+        tradingGuide = "• >70%：多头强势\n• 40~70%：中性偏多\n• <40%：风险偏谨慎\n• =0%：绝对水位保护触发，但模型 Top5 仍会展示",
         thresholds = listOf(
             ThresholdLine(0.7, "70%") { MaterialTheme.colorScheme.primary },
             ThresholdLine(0.4, "40%") { MaterialTheme.colorScheme.secondary },
@@ -64,7 +64,7 @@ fun buildParameterSpecs(): List<ParameterSpec> = listOf(
                 it >= 0.536 -> "市场整体多头情绪高涨，多数个股短期趋势向好。"
                 it >= 0.46 -> "多空力量相对均衡，市场处于方向选择的关键期。"
                 it >= 0.256 -> "空头情绪占优，赚钱效应减弱，需保持谨慎。"
-                else -> "多头情绪极度低迷，已触发绝对水位保护，建议空仓观望。"
+                else -> "多头情绪极度低迷，已触发绝对水位保护。"
             }
         },
         thresholds = listOf(
@@ -239,20 +239,20 @@ fun buildParameterSpecs(): List<ParameterSpec> = listOf(
     ),
     ParameterSpec(
         id = "absolute_floor",
-        title = "仓位安全线",
+        title = "情绪安全线",
         unit = "",
         yMin = 0.0,
         yMax = 1.0,
         color = { MaterialTheme.quantColors.success },
         extractor = { it.absoluteFloor },
         formatter = { "${formatDouble(it * 100, 1)}%" },
-        semantics = "看涨比例是否满足建立仓位的安全红线。是所有情绪信号的「硬开关」——不足时，仓位强制归零。",
-        tradingGuide = "• =1 (通过)：允许建仓\n• =0 (清仓)：任何操作都是赌博\n⚠️ 最高优先级的安全阀",
+        semantics = "看涨比例是否满足情绪安全红线。该指标只解释市场环境，不再隐藏 7% 盈利预测模型选股。",
+        tradingGuide = "• =1：情绪安全线通过\n• =0：情绪保护触发\n模型 Top5 仍会在策略选股列表展示",
         narrative = {
             when {
-                it >= 0.90 -> "安全水位极高，市场情绪完全满足建仓红线。"
-                it >= 0.50 -> "安全水位通过，允许正常建仓操作。"
-                else -> "安全水位未通过，当前不满足建仓条件，仓位强制归零。"
+                it >= 0.90 -> "安全水位极高，市场情绪处于较稳定区间。"
+                it >= 0.50 -> "安全水位通过，市场情绪未触发底线保护。"
+                else -> "安全水位未通过，情绪保护触发，但模型选股列表继续展示。"
             }
         },
         thresholds = listOf(

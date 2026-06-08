@@ -23,8 +23,8 @@ object PivotReversalPipeline {
     fun run(ctx: ResearchContext): List<Path> {
         val tune = ctx.param("tune", "false") == "true"
         val walkForward = ctx.param("walk-forward", "false") == "true"
-        if (ctx.param("djl-probe", "false") == "true") {
-            runCrashDjlProbe(ctx)
+        if (ctx.param("ml-probe", "false") == "true") {
+            runCrashMlProbe(ctx)
             val d = ctx.resolve("out/pivot_reversal/.keep").parent
             return Files.list(d).use { s -> s.filter { Files.isRegularFile(it) }.toList() }
         }
@@ -118,7 +118,7 @@ object PivotReversalPipeline {
     private fun fmt(x: Double) = if (x.isNaN()) "NaN" else "${kotlin.math.round(x * 10000) / 10000.0}"
 
     /**
-     * DJL 可微梯度探针 + **域条件内生化消融**（2026-05-30）。
+     * 纯 Kotlin 梯度探针 + **域条件内生化消融**（2026-05-30）。
      *
      * 旧路径（`--crash-regime-max τ`）把「情绪极度转弱域」作**模型外硬门控**（filter 后才训练，丢域外样本）。
      * 本轮把该条件内生为公式可学项，做四档消融对比（全 walk-forward OOS、全样本不丢），数学上分离「择时」与「择日」贡献：
@@ -130,16 +130,15 @@ object PivotReversalPipeline {
      *
      * `--ablation true` 跑全四档对比；否则跑单档（沿用 `--crash-regime-max` 旧语义，便于回溯历史结果）。
      */
-    private fun runCrashDjlProbe(ctx: ResearchContext) {
+    private fun runCrashMlProbe(ctx: ResearchContext) {
         val loaded = PivotReversalDataset.load(ctx, PivotReversalFeatures.Direction.CRASH)
         if (ctx.param("ablation", "false") == "true") { runCrashAblation(ctx, loaded.samples); return }
 
         val regimeMax = ctx.param("crash-regime-max", "1.0").toDouble()
         val samples = if (regimeMax < 1.0) loaded.samples.filter { it.trendScore < regimeMax } else loaded.samples
         val n = samples.size
-        if (n < 600) { println("pivot_reversal[crash_djl]_skip=样本不足($n)"); return }
-        if (ctx.param("djl-seq", "false") == "true") { runCrashSequence(ctx, samples); return }
-        val keys = CrashDifferentiableModel.allFeatureKeys(samples.first())   // 吃全部因子
+        if (n < 600) { println("pivot_reversal[crash_ml]_skip=样本不足($n)"); return }
+        val keys = CrashLogisticModel.allFeatureKeys(samples.first())   // 吃全部因子
         // open5m 单因子探针：逐个 open5m 因子算对大阴线标签的翻号 AUC（按 |AUC−0.5| 降序）。
         // 回答「开盘5min是否反向/有无信息」：AUC>0.5=正向(越大越易大阴线)、<0.5=反向、≈0.5=噪声。
         // logistic 自动定权重符号，故方向无所谓；此探针看的是「单因子判别力幅度」是否非零。
@@ -151,19 +150,19 @@ object PivotReversalPipeline {
         if (probePrefix != null) {
             val lbl = IntArray(n) { samples[it].label }
             val ranked = keys.filter { it.startsWith(probePrefix) }.map { key ->
-                val s = DoubleArray(n) { CrashDifferentiableModel.featureVector(samples[it], listOf(key))[0] }
+                val s = DoubleArray(n) { CrashLogisticModel.featureVector(samples[it], listOf(key))[0] }
                 key to PivotMetrics.rocAuc(s, lbl)
             }.sortedByDescending { kotlin.math.abs(it.second - 0.5) }
-            println("pivot_reversal[crash_djl]_${probePrefix}Probe (单因子AUC, |AUC-0.5|降序; >0.5正向/<0.5反向/≈0.5噪声):")
+            println("pivot_reversal[crash_ml]_${probePrefix}Probe (单因子AUC, |AUC-0.5|降序; >0.5正向/<0.5反向/≈0.5噪声):")
             ranked.forEach { (k, a) -> println("  $k = ${fmt(a)} ${if (a > 0.5) "正向" else if (a < 0.5) "反向" else "中性"}") }
         }
-        val l2 = ctx.param("djl-l2", "0.02").toDouble()
-        val lr = ctx.param("djl-lr", "0.05").toFloat()
-        val iter = ctx.param("djl-iter", "400").toInt()
-        val useGate = ctx.param("djl-gate", "false") == "true"
-        val r = runDjlWalkForward(ctx, samples, keys, l2, lr, iter, useGate, lossKindOf(ctx), ctx.param("fbeta", "0.5").toDouble())
-        println("pivot_reversal[crash_djl]_oos_n=${r.labels.size} oos_pos=${r.labels.count { it == 1 }} folds=${r.folds} k=${keys.size} l2=$l2 gate=$useGate loss=${ctx.param("djl-loss", "focal")} (regimeMax=${fmt(regimeMax)})")
-        reportDjl("crash_djl", r)
+        val l2 = ctx.param("ml-l2", "0.02").toDouble()
+        val lr = ctx.param("ml-lr", "0.05").toDouble()
+        val iter = ctx.param("ml-iter", "400").toInt()
+        val useGate = ctx.param("ml-gate", "false") == "true"
+        val r = runMlWalkForward(ctx, samples, keys, l2, lr, iter, useGate, lossKindOf(ctx), ctx.param("fbeta", "0.5").toDouble())
+        println("pivot_reversal[crash_ml]_oos_n=${r.labels.size} oos_pos=${r.labels.count { it == 1 }} folds=${r.folds} k=${keys.size} l2=$l2 gate=$useGate loss=${ctx.param("ml-loss", "focal")} (regimeMax=${fmt(regimeMax)})")
+        reportMl("crash_ml", r)
 
         // 导出可上线 baseline 模型（--export-baseline true）：用全样本训最终模型，阈值取自上面 OOS 工作点。
         if (ctx.param("export-baseline", "false") == "true") {
@@ -172,19 +171,18 @@ object PivotReversalPipeline {
     }
 
     /**
-     * 导出极端行情预测 baseline：全样本训最终 [CrashDifferentiableModel]（不启门控），把权重/偏置/因子键
+     * 导出极端行情预测 baseline：全样本训最终 [CrashLogisticModel]（不启门控），把权重/偏置/因子键
      * + 多档工作点阈值（来自 walk-forward OOS [r]，泛化口径）落盘成 [CrashBaselineModel] JSON，供实盘加载。
      */
     private fun exportBaseline(
         ctx: ResearchContext,
         samples: List<PivotReversalFeatures.Sample>,
         keys: List<String>,
-        l2: Double, lr: Float, iter: Int,
-        oos: DjlOos,
+        l2: Double, lr: Double, iter: Int,
+        oos: MlOos,
     ) {
-        val model = CrashDifferentiableModel(samples, keys, l2 = l2, useGate = false, lossKind = lossKindOf(ctx))
-        val budget = org.shiroumi.strategy.research.tuner.core.TuningBudget(maxIter = iter, patience = 60, minDelta = 1e-6)
-        org.shiroumi.strategy.research.tuner.differentiable.GradientDescentOptimizer(model, budget, learningRate = lr).optimize(ctx)
+        val model = CrashLogisticModel(samples, keys, l2 = l2, useGate = false, lossKind = lossKindOf(ctx))
+        model.train(maxIter = iter, learningRate = lr, patience = 60)
 
         // 工作点阈值取自 OOS（泛化口径，避免用全样本拟合阈值乐观偏差）。
         val thresholds = buildList<CrashBaselineModel.Threshold> {
@@ -217,11 +215,11 @@ object PivotReversalPipeline {
         )
         val out = ctx.resolve("baseline/crash_baseline.json")
         java.nio.file.Files.writeString(out, baseline.toJson())
-        println("pivot_reversal[crash_djl]_baseline_exported=$out k=${keys.size} thresholds=${thresholds.size}")
+        println("pivot_reversal[crash_ml]_baseline_exported=$out k=${keys.size} thresholds=${thresholds.size}")
     }
 
-    /** 单档 DJL walk-forward：anchored 扩展训练，逐窗 OOS 拼接。gateTau/gateGamma 为各窗学得门参数均值（useGate 时）。 */
-    private data class DjlOos(
+    /** 单档纯 Kotlin 梯度 walk-forward：anchored 扩展训练，逐窗 OOS 拼接。gateTau/gateGamma 为各窗学得门参数均值（useGate 时）。 */
+    private data class MlOos(
         val scores: DoubleArray, val labels: IntArray, val trend: DoubleArray, val folds: Int,
         val gateTau: Double = Double.NaN, val gateGamma: Double = Double.NaN,
         // 软门控对域外样本的平均门开度：若 ≈1 则门退化为冗余（实证「条件已被 logit 线性吸收」）。
@@ -229,53 +227,18 @@ object PivotReversalPipeline {
         val gateMeanOpenLo: Double = Double.NaN,   // P^up<0.077（深域）样本上的平均门开度
     )
 
-    /**
-     * 序列状态空间模型的 walk-forward OOS（CLI `--djl-seq true`）。与静态 DJL 同切分口径，
-     * 但训练 [CrashSequenceModel]（隐状态由前 L 天递推）；打分时给每个预测样本切出**前 L 天子序列**
-     * （含 cut 之前的历史，合法——历史特征全是 t−1 及更早，无泄漏），左 padding 处理窗口不足。
-     */
-    private fun runCrashSequence(ctx: ResearchContext, samples: List<PivotReversalFeatures.Sample>) {
-        val n = samples.size
-        val keys = CrashDifferentiableModel.allFeatureKeys(samples.first())
-        val l2 = ctx.param("djl-l2", "0.02").toDouble()
-        val lr = ctx.param("djl-lr", "0.02").toFloat()
-        val iter = ctx.param("djl-iter", "500").toInt()
-        val lookback = ctx.param("djl-lookback", "20").toInt()
-        val hidden = ctx.param("djl-hidden", "8").toInt()
-        val step = ctx.param("wf-step", "60").toInt()
-        val initTrain = (n * 0.4).toInt()
-        val oosScores = ArrayList<Double>(); val oosLabels = ArrayList<Int>(); val oosTrend = ArrayList<Double>()
-        var cut = initTrain; var folds = 0
-        while (cut < n) {
-            val trainWin = samples.subList(0, cut)
-            val end = minOf(cut + step, n)
-            val model = CrashSequenceModel(trainWin, keys, lookback = lookback, hidden = hidden, l2 = l2)
-            val budget = org.shiroumi.strategy.research.tuner.core.TuningBudget(maxIter = iter, patience = 60, minDelta = 1e-6)
-            org.shiroumi.strategy.research.tuner.differentiable.GradientDescentOptimizer(model, budget, learningRate = lr).optimize(ctx)
-            for (i in cut until end) {
-                // 样本 i 的前 L 天子序列（含 cut 前历史），左 padding 至长度 L。
-                val window = (0 until lookback).map { l -> samples[(i - (lookback - 1) + l).coerceAtLeast(0)] }
-                oosScores += model.scoreOf(window); oosLabels += samples[i].label; oosTrend += samples[i].trendScore
-            }
-            folds++; cut = end
-        }
-        val r = DjlOos(oosScores.toDoubleArray(), oosLabels.toIntArray(), oosTrend.toDoubleArray(), folds)
-        println("pivot_reversal[crash_seq]_oos_n=${r.labels.size} oos_pos=${r.labels.count { it == 1 }} folds=$folds k=${keys.size} L=$lookback d=$hidden l2=$l2")
-        reportDjl("crash_seq", r)
-    }
+    private fun lossKindOf(ctx: ResearchContext): CrashLogisticModel.LossKind =
+        if (ctx.param("ml-loss", "focal").lowercase() == "fbeta")
+            CrashLogisticModel.LossKind.SOFT_FBETA else CrashLogisticModel.LossKind.FOCAL
 
-    private fun lossKindOf(ctx: ResearchContext): CrashDifferentiableModel.LossKind =
-        if (ctx.param("djl-loss", "focal").lowercase() == "fbeta")
-            CrashDifferentiableModel.LossKind.SOFT_FBETA else CrashDifferentiableModel.LossKind.FOCAL
-
-    private fun runDjlWalkForward(
+    private fun runMlWalkForward(
         ctx: ResearchContext,
         samples: List<PivotReversalFeatures.Sample>,
         keys: List<String>,
-        l2: Double, lr: Float, iter: Int, useGate: Boolean,
-        lossKind: CrashDifferentiableModel.LossKind = CrashDifferentiableModel.LossKind.FOCAL,
+        l2: Double, lr: Double, iter: Int, useGate: Boolean,
+        lossKind: CrashLogisticModel.LossKind = CrashLogisticModel.LossKind.FOCAL,
         fBeta: Double = 0.5,
-    ): DjlOos {
+    ): MlOos {
         val n = samples.size
         val step = ctx.param("wf-step", "60").toInt()
         val initTrain = (n * 0.4).toInt()
@@ -286,9 +249,8 @@ object PivotReversalPipeline {
             val trainWin = samples.subList(0, cut)
             val end = minOf(cut + step, n)
             val predictWin = samples.subList(cut, end)
-            val model = CrashDifferentiableModel(trainWin, keys, l2 = l2, useGate = useGate, lossKind = lossKind, fBeta = fBeta)
-            val budget = org.shiroumi.strategy.research.tuner.core.TuningBudget(maxIter = iter, patience = 60, minDelta = 1e-6)
-            org.shiroumi.strategy.research.tuner.differentiable.GradientDescentOptimizer(model, budget, learningRate = lr).optimize(ctx)
+            val model = CrashLogisticModel(trainWin, keys, l2 = l2, useGate = useGate, lossKind = lossKind, fBeta = fBeta)
+            model.train(maxIter = iter, learningRate = lr, patience = 60)
             for (sm in predictWin) { oosScores += model.scoreOf(sm); oosLabels += sm.label; oosTrend += sm.trendScore }
             if (useGate) {
                 tauSum += model.bestGateTau; gammaSum += model.bestGateGamma
@@ -301,7 +263,7 @@ object PivotReversalPipeline {
             }
             folds++; cut = end
         }
-        return DjlOos(
+        return MlOos(
             oosScores.toDoubleArray(), oosLabels.toIntArray(), oosTrend.toDoubleArray(), folds,
             gateTau = if (useGate) tauSum / folds else Double.NaN,
             gateGamma = if (useGate) gammaSum / folds else Double.NaN,
@@ -310,8 +272,8 @@ object PivotReversalPipeline {
         )
     }
 
-    /** 输出一档 DJL OOS 的 AUC / 精度门 / 深域分层。 */
-    private fun reportDjl(tag: String, r: DjlOos) {
+    /** 输出一档梯度 OOS 的 AUC / 精度门 / 深域分层。 */
+    private fun reportMl(tag: String, r: MlOos) {
         val auc = PivotMetrics.rocAuc(r.scores, r.labels)
         println("pivot_reversal[$tag]_wf_auc=${fmt(auc)}")
         if (!r.gateTau.isNaN()) {
@@ -339,10 +301,10 @@ object PivotReversalPipeline {
     private fun runCrashAblation(ctx: ResearchContext, all: List<PivotReversalFeatures.Sample>) {
         val n = all.size
         if (n < 600) { println("pivot_reversal[crash_abl]_skip=样本不足($n)"); return }
-        val l2 = ctx.param("djl-l2", "0.02").toDouble()
-        val lr = ctx.param("djl-lr", "0.05").toFloat()
-        val iter = ctx.param("djl-iter", "400").toInt()
-        val full = CrashDifferentiableModel.allFeatureKeys(all.first())
+        val l2 = ctx.param("ml-l2", "0.02").toDouble()
+        val lr = ctx.param("ml-lr", "0.05").toDouble()
+        val iter = ctx.param("ml-iter", "400").toInt()
+        val full = CrashLogisticModel.allFeatureKeys(all.first())
         val noState = full.filterNot { it.startsWith("regimeState") }   // 剔除递推状态特征（含 _d1/_d2 与交互）
         println("pivot_reversal[crash_abl]_n=$n pos=${all.count { it.label == 1 }} kFull=${full.size} kNoState=${noState.size} l2=$l2")
         val archs = listOf(
@@ -352,9 +314,9 @@ object PivotReversalPipeline {
             Quad("④+both", full, true),
         )
         for (a in archs) {
-            val r = runDjlWalkForward(ctx, all, a.keys, l2, lr, iter, a.gate)
+            val r = runMlWalkForward(ctx, all, a.keys, l2, lr, iter, a.gate)
             println("---- ablation[${a.name}] k=${a.keys.size} gate=${a.gate} oos_n=${r.labels.size} pos=${r.labels.count { it == 1 }} ----")
-            reportDjl("crash_abl${a.name}", r)
+            reportMl("crash_abl${a.name}", r)
         }
     }
 

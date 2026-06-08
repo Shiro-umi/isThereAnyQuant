@@ -64,4 +64,25 @@ class PriceLimitRuleTest {
         )
         assertTrue(res is RuleOutcome.Block); assertEquals(BlockReason.LIMIT_UP_BUY, res.reason)
     }
+
+    @Test fun `当信号日已涨停且开启过滤时 BUY 被阻断`() {
+        val ts = "600000.SH"
+        val filterRule = PriceLimitRule(abandonIfSignalLimitUp = true)
+        val res = filterRule.apply(
+            order(tsCode = ts, side = Side.BUY),
+            ctx(signalLimitUp = setOf(ts)),
+        )
+        assertTrue(res is RuleOutcome.Block)
+        assertEquals(BlockReason.LIMIT_UP_BUY, res.reason)
+    }
+
+    @Test fun `当信号日已涨停但未开启过滤时 BUY 放行`() {
+        val ts = "600000.SH"
+        val noFilterRule = PriceLimitRule(abandonIfSignalLimitUp = false)
+        val res = noFilterRule.apply(
+            order(tsCode = ts, side = Side.BUY, limitPrice = 10.0),
+            ctx(signalLimitUp = setOf(ts), preClose = mapOf(ts to 10.0), quotes = mapOf(ts to candle(ts, open = 10.0))),
+        )
+        assertTrue(res is RuleOutcome.Pass)
+    }
 }

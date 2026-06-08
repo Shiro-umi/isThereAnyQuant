@@ -2,8 +2,6 @@
 
 本文档定义 strategy 模块从当前 Ktor 内嵌运行时演进为独立 strategy service 的目标架构、模块落点、通信协议边界和分阶段迁移路径。
 
-如果是后续 agent 接手继续实现，先读取 `docs/architecture/strategy-service-agent-handoff.md`，再回到本文档确认完整架构背景。
-
 当前落地状态:
 
 - 已创建 `strategy-server/` 聚合目录，并纳入 Gradle: `:strategy-server:contract`、`:strategy-server:core`、`:strategy-server:client`、`:strategy-server:service`、`:strategy-server:testing`。
@@ -162,8 +160,7 @@ interface StrategyCommandClient {
 
 - `StockFactorCalculator`
 - `MarketSentimentCalculator`
-- `PortfolioSelectionEngine`
-- `TargetPortfolioGenerator`
+- `ProfitPredictionModelSelector`（service 侧模型选股适配；负责日线/复权补全闸门、研究候选池口径、Python 模型推理）
 - `IntradayFactorCalculator`
 - `IntradaySentimentCalculator`
 - `IntradayPortfolioGenerator`
@@ -226,11 +223,11 @@ strategy-server/service/src/main/kotlin/org/shiroumi/strategy/service/...
 ```
 
 > Snapshot hub 位于 `:strategy-server:client`（`LocalStrategySnapshotHub`），由 service 进程内部使用 + socket 广播给 ktor，并未在 service 模块内独立目录。
-> 确认结果写入直接通过 `:database` 的 `Daily*Repository` 完成（`DailyStockFactorRepository` / `DailyMarketSentimentRepository` / `DailyTargetPortfolioRepository` / `DailyStrategyAuditRepository` / `SentimentRuntimeSeedRepository`），未提取独立 writer。
+> 确认结果写入直接通过 `:database` 的 `Daily*Repository` 完成（`DailyStockFactorRepository` / `DailyMarketSentimentRepository` / `DailyProfitPredictionSelectionRepository` / `DailyStrategyAuditRepository` / `SentimentRuntimeSeedRepository`），未提取独立 writer。
 
 最终 owner 规则:
 
-- `strategy-service` 是 `daily_stock_factor`、`daily_market_sentiment`、`sentiment_runtime_seed`、`daily_target_portfolio`、`daily_strategy_audit` 的业务 owner。
+- `strategy-service` 是 `daily_stock_factor`、`daily_market_sentiment`、`sentiment_runtime_seed`、`daily_profit_prediction_selection`、`daily_strategy_audit` 的业务 owner。
 - `ktor-server` 可以读这些确认结果，但不生成、不修正、不旁路写入这些确认结果。
 
 ### 3.4 `:strategy-server:client`
@@ -436,7 +433,7 @@ Agent 工作边界:
 | `daily_market_sentiment` | strategy-service | strategy-service, ktor-server REST |
 | `daily_market_sentiment_state` | strategy-service | strategy-service |
 | `sentiment_runtime_seed` | strategy-service | strategy-service |
-| `daily_target_portfolio` | strategy-service | strategy-service, ktor-server REST |
+| `daily_profit_prediction_selection` | strategy-service | strategy-service, ktor-server REST |
 | `daily_strategy_audit` | strategy-service | strategy-service, ktor-server REST |
 
 Ktor 盘后策略阶段已切换为 service-only: `HistoricalDataUpdateOrchestrator` 只通过 `StrategyCommand.RebuildDate(date)` / `StrategyCommand.RebuildRange(start, end)` 驱动 service；service 不可达时入补偿队列指数退避重试，仍只通过 service 重做。Ktor 不再持有任何盘后本地 fallback 路径，`StrategyPreparationFacade` / `DailyStrategyDataPreparationJob` 已物理删除。
@@ -490,7 +487,7 @@ HistoricalDataUpdateOrchestrator
 
 迁移检查:
 
-- 同一交易日不能由 Ktor 和 strategy-service 两边同时写 `daily_target_portfolio`。
+- 同一交易日不能由 Ktor 和 strategy-service 两边同时写 `daily_profit_prediction_selection`。
 - `strategyUpdated` 标志必须和确认结果落库事务保持一致。
 - 失败重试必须幂等，重复 rebuild 同一日期不能产生重复组合记录。
 
@@ -530,7 +527,7 @@ strategy-service
 
 - 前端订阅 `INTRADAY_SNAPSHOT` 时，Ktor 必须能在 strategy-service 暂不可用时返回明确 ERROR；不再有 last-known / Provider 兜底。
 - strategy-service 重启期间，Ktor 前端 WebSocket 连接不能断；service 恢复后自动 SYNC 接管。
-- 盘中 projection 仍然不能写 `daily_target_portfolio` 作为确认结果。
+- 盘中 projection 仍然不能写 `daily_profit_prediction_selection` 作为确认结果。
 
 ### 9.3 前端 REST / WebSocket 业务流程
 
@@ -551,7 +548,7 @@ strategy-service
 - `INTRADAY_SNAPSHOT` 的数据来源已切到 `StrategyRuntimeClient.observeIntraday()`，本地 Provider snapshot 路径已物理删除。
 - `STRATEGY_POSITIONS` 的数据来源已切到 `StrategyRuntimeClient.observePositions()`；Holder 仅作为 service positions 的 last-known cache，由 `updateFromService` 写入。
 - `STRATEGY_POSITION_TRACKING` 由 strategy-service 在 `POSITIONS` 产生后同步发布；Ktor 仅消费 service `POSITION_TRACKING`，不再有本地 tracking fallback。若 service socket 可用但尚无 current tracking snapshot，Ktor 必须先给前端返回明确 `ERROR` 首帧，并继续监听后续 service snapshot，避免前端订阅无响应。
-- REST `/strategy/sentiment`、`/strategy/positions` 仍可读确认表，写入 owner 已统一迁出到 strategy-service。
+- REST `/strategy/sentiment`、`/strategy/positions` 仍可读确认表；`/strategy/positions` 从 `daily_profit_prediction_selection` 返回按 `model_score` 降序排列的 `nextSessionSelections` 和 `nextSessionSelectionDetails`。写入 owner 已统一迁出到 strategy-service。
 
 迁移检查:
 

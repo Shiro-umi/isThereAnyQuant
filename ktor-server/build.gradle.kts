@@ -592,6 +592,52 @@ tasks.register<JavaExec>("runVerifyWeeklyMonthly") {
     standardInput = System.`in`
 }
 
+// 龙虎榜每日汇总回填：top_list 逐交易日全市场 → tushare_top_list (SyncTopList.kt)
+// 运行：./gradlew :ktor-server:syncTopList -Dquant.toplist.start=2009-01-01 -Dquant.toplist.end=2026-06-30
+tasks.register<JavaExec>("syncTopList") {
+    group = "application"
+    description = "龙虎榜日汇总落库：top_list 逐交易日全市场 → tushare_top_list"
+    dependsOn("compileKotlin", "compileJava", "processResources")
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("org.shiroumi.server.SyncTopListKt")
+    workingDir = rootProject.projectDir
+    maxHeapSize = "1g"
+    // 转发 -Dquant.toplist.* 系统属性到子进程
+    System.getProperties().stringPropertyNames()
+        .filter { it.startsWith("quant.toplist.") }
+        .forEach { systemProperty(it, System.getProperty(it)) }
+}
+
+// 龙虎榜营业部明细回填：top_inst 逐交易日全市场 → tushare_top_inst (SyncTopInst.kt)
+// 运行：./gradlew :ktor-server:syncTopInst -Dquant.topinst.start=2011-01-01 -Dquant.topinst.end=2026-06-30
+tasks.register<JavaExec>("syncTopInst") {
+    group = "application"
+    description = "龙虎榜营业部明细落库：top_inst 逐交易日全市场 → tushare_top_inst"
+    dependsOn("compileKotlin", "compileJava", "processResources")
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("org.shiroumi.server.SyncTopInstKt")
+    workingDir = rootProject.projectDir
+    maxHeapSize = "1g"
+    System.getProperties().stringPropertyNames()
+        .filter { it.startsWith("quant.topinst.") }
+        .forEach { systemProperty(it, System.getProperty(it)) }
+}
+
+// 7% 盈利预测研究输入导出：日线 OHLCV + 龙虎榜候选池，供 PyTorch 训练缓存消费
+// 运行：./gradlew :ktor-server:exportProfitPredictionInputs -DprofitPrediction.start=2009-01-01 -DprofitPrediction.end=2024-05-31
+tasks.register<JavaExec>("exportProfitPredictionInputs") {
+    group = "application"
+    description = "导出 7% 盈利预测研究输入缓存（日线 OHLCV + top_list 候选池）"
+    dependsOn("compileKotlin", "compileJava", "processResources")
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("org.shiroumi.server.ExportProfitPredictionInputsKt")
+    workingDir = rootProject.projectDir
+    maxHeapSize = "2g"
+    System.getProperties().stringPropertyNames()
+        .filter { it.startsWith("profitPrediction.") }
+        .forEach { systemProperty(it, System.getProperty(it)) }
+}
+
 // 独立运行数据更新（手动追平历史）
 tasks.register<JavaExec>("runDataUpdate") {
     group = "application"
@@ -677,6 +723,285 @@ tasks.register<JavaExec>("probeStkMins") {
     )
 }
 
+tasks.register<JavaExec>("probeMacroFundamental") {
+    group = "application"
+    description = "自测：逐个真实拉取宏观/资金/财务 11 接口，验证封装正确 (ProbeMacroFundamental.kt)"
+    dependsOn("compileKotlin", "compileJava", "processResources")
+
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("org.shiroumi.server.ProbeMacroFundamentalKt")
+    workingDir = rootProject.projectDir
+}
+
+tasks.register<JavaExec>("syncMacroMonthly") {
+    group = "application"
+    description = "宏观月频落库：社融+PMI+利率 → macro_monthly (SyncMacroMonthly.kt)"
+    dependsOn("compileKotlin", "compileJava", "processResources")
+
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("org.shiroumi.server.SyncMacroMonthlyKt")
+    workingDir = rootProject.projectDir
+
+    systemProperties(
+        System.getProperties()
+            .filterKeys { key -> key is String && key.startsWith("quant.macro.") }
+            .mapKeys { it.key as String }
+    )
+}
+
+tasks.register<JavaExec>("verifyMacroGate") {
+    group = "verification"
+    description = "H2 宏观闸门有效性验证：宏观顺逆度分层 × 市场收益胜率 (VerifyMacroGate.kt)"
+    dependsOn("compileKotlin", "compileJava", "processResources")
+
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("org.shiroumi.server.VerifyMacroGateKt")
+    workingDir = rootProject.projectDir
+
+    systemProperties(
+        System.getProperties()
+            .filterKeys { key -> key is String && key.startsWith("quant.macro.") }
+            .mapKeys { it.key as String }
+    )
+}
+
+tasks.register<JavaExec>("verifyIndustryBeta") {
+    group = "verification"
+    description = "H1 行业β抛压验证：行业景气顺逆度横截面分层 × 未来相对强弱 (VerifyIndustryBeta.kt)"
+    dependsOn("compileKotlin", "compileJava", "processResources")
+
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("org.shiroumi.server.VerifyIndustryBetaKt")
+    workingDir = rootProject.projectDir
+    maxHeapSize = "4g"
+
+    systemProperties(
+        System.getProperties()
+            .filterKeys { key -> key is String && key.startsWith("quant.h1.") }
+            .mapKeys { it.key as String }
+    )
+}
+
+tasks.register<JavaExec>("syncFundamentalQuarterly") {
+    group = "application"
+    description = "个股季频财务落库：fina_indicator_vip 逐季 → stock_fundamental_quarterly (SyncFundamentalQuarterly.kt)"
+    dependsOn("compileKotlin", "compileJava", "processResources")
+
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("org.shiroumi.server.SyncFundamentalQuarterlyKt")
+    workingDir = rootProject.projectDir
+
+    systemProperties(
+        System.getProperties()
+            .filterKeys { key -> key is String && key.startsWith("quant.fund.") }
+            .mapKeys { it.key as String }
+    )
+}
+
+tasks.register<JavaExec>("syncStockMoneyFlow") {
+    group = "application"
+    description = "个股日频资金流落库：moneyflow 逐交易日全市场 → stock_moneyflow (SyncStockMoneyFlow.kt)"
+    dependsOn("compileKotlin", "compileJava", "processResources")
+
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("org.shiroumi.server.SyncStockMoneyFlowKt")
+    workingDir = rootProject.projectDir
+    maxHeapSize = "2g"
+
+    systemProperties(
+        System.getProperties()
+            .filterKeys { key -> key is String && key.startsWith("quant.mf.") }
+            .mapKeys { it.key as String }
+    )
+}
+
+tasks.register<JavaExec>("syncKplList") {
+    group = "application"
+    description = "开盘啦榜单落库：kpl_list 逐交易日涨停股+题材 → kpl_list (SyncKplList.kt)"
+    dependsOn("compileKotlin", "compileJava", "processResources")
+
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("org.shiroumi.server.SyncKplListKt")
+    workingDir = rootProject.projectDir
+    maxHeapSize = "1g"
+
+    systemProperties(
+        System.getProperties()
+            .filterKeys { key -> key is String && key.startsWith("quant.kpl.") }
+            .mapKeys { it.key as String }
+    )
+}
+
+tasks.register<JavaExec>("verifyFundamentalQuality") {
+    group = "verification"
+    description = "H3 个股基本面质地验证：基本面顺逆度 × 未来抛压 (VerifyFundamentalQuality.kt)"
+    dependsOn("compileKotlin", "compileJava", "processResources")
+
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("org.shiroumi.server.VerifyFundamentalQualityKt")
+    workingDir = rootProject.projectDir
+    maxHeapSize = "4g"
+
+    systemProperties(
+        System.getProperties()
+            .filterKeys { key -> key is String && key.startsWith("quant.h3.") }
+            .mapKeys { it.key as String }
+    )
+}
+
+tasks.register<JavaExec>("verifyQualityValuation") {
+    group = "verification"
+    description = "H3 二维精化：基本面质地 × 估值 2×2 分层 (VerifyQualityValuation.kt)"
+    dependsOn("compileKotlin", "compileJava", "processResources")
+
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("org.shiroumi.server.VerifyQualityValuationKt")
+    workingDir = rootProject.projectDir
+    maxHeapSize = "4g"
+
+    systemProperties(
+        System.getProperties()
+            .filterKeys { key -> key is String && key.startsWith("quant.qv.") }
+            .mapKeys { it.key as String }
+    )
+}
+
+tasks.register<JavaExec>("verifyCompositePressure") {
+    group = "verification"
+    description = "抛压三轴复合因子验证：质地×估值×行业过热 复合 vs 单轴增量 (VerifyCompositePressure.kt)"
+    dependsOn("compileKotlin", "compileJava", "processResources")
+
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("org.shiroumi.server.VerifyCompositePressureKt")
+    workingDir = rootProject.projectDir
+    maxHeapSize = "6g"
+
+    systemProperties(
+        System.getProperties()
+            .filterKeys { key -> key is String && key.startsWith("quant.cp.") }
+            .mapKeys { it.key as String }
+    )
+}
+
+tasks.register<JavaExec>("verifyValueQualityConditional") {
+    group = "verification"
+    description = "低估值子集内质地优选验证：PE 子集 × 质地 嵌套分层 (VerifyValueQualityConditional.kt)"
+    dependsOn("compileKotlin", "compileJava", "processResources")
+
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("org.shiroumi.server.VerifyValueQualityConditionalKt")
+    workingDir = rootProject.projectDir
+    maxHeapSize = "4g"
+
+    systemProperties(
+        System.getProperties()
+            .filterKeys { key -> key is String && key.startsWith("quant.vq.") }
+            .mapKeys { it.key as String }
+    )
+}
+
+tasks.register<JavaExec>("verifyCrowdingMediation") {
+    group = "verification"
+    description = "拥挤度中介验证：换手率作拥挤代理，验证质地反噬的中介机制 (VerifyCrowdingMediation.kt)"
+    dependsOn("compileKotlin", "compileJava", "processResources")
+
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("org.shiroumi.server.VerifyCrowdingMediationKt")
+    workingDir = rootProject.projectDir
+    maxHeapSize = "6g"
+
+    systemProperties(
+        System.getProperties()
+            .filterKeys { key -> key is String && key.startsWith("quant.cm.") }
+            .mapKeys { it.key as String }
+    )
+}
+
+tasks.register<JavaExec>("verifyTurnoverSizeDecouple") {
+    group = "verification"
+    description = "换手率拥挤 vs 小盘效应 去伪：控制市值后换手率是否仍抛压源 (VerifyTurnoverSizeDecouple.kt)"
+    dependsOn("compileKotlin", "compileJava", "processResources")
+
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("org.shiroumi.server.VerifyTurnoverSizeDecoupleKt")
+    workingDir = rootProject.projectDir
+    maxHeapSize = "6g"
+
+    systemProperties(
+        System.getProperties()
+            .filterKeys { key -> key is String && key.startsWith("quant.ts.") }
+            .mapKeys { it.key as String }
+    )
+}
+
+tasks.register<JavaExec>("verifyTurnoverVolDecouple") {
+    group = "verification"
+    description = "换手率拥挤 vs 高波动反转 去伪：控制波动率后换手率是否仍抛压源 (VerifyTurnoverVolDecouple.kt)"
+    dependsOn("compileKotlin", "compileJava", "processResources")
+
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("org.shiroumi.server.VerifyTurnoverVolDecoupleKt")
+    workingDir = rootProject.projectDir
+    maxHeapSize = "6g"
+
+    systemProperties(
+        System.getProperties()
+            .filterKeys { key -> key is String && key.startsWith("quant.tv.") }
+            .mapKeys { it.key as String }
+    )
+}
+
+tasks.register<JavaExec>("verifyHeatComposite") {
+    group = "verification"
+    description = "过热度复合因子 + 双因子打分 收口：换手×波动复合 vs 单轴，过热+估值双因子 (VerifyHeatComposite.kt)"
+    dependsOn("compileKotlin", "compileJava", "processResources")
+
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("org.shiroumi.server.VerifyHeatCompositeKt")
+    workingDir = rootProject.projectDir
+    maxHeapSize = "6g"
+
+    systemProperties(
+        System.getProperties()
+            .filterKeys { key -> key is String && key.startsWith("quant.hc.") }
+            .mapKeys { it.key as String }
+    )
+}
+
+tasks.register<JavaExec>("verifyWalkForwardHeat") {
+    group = "verification"
+    description = "过热度抛压因子 Walk-Forward 样本外验证 + 多因子自适应加权打分 (VerifyWalkForwardHeat.kt)"
+    dependsOn("compileKotlin", "compileJava", "processResources")
+
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("org.shiroumi.server.VerifyWalkForwardHeatKt")
+    workingDir = rootProject.projectDir
+    maxHeapSize = "6g"
+
+    systemProperties(
+        System.getProperties()
+            .filterKeys { key -> key is String && key.startsWith("quant.wf.") }
+            .mapKeys { it.key as String }
+    )
+}
+
+tasks.register<JavaExec>("verifyChangeFactors") {
+    group = "verification"
+    description = "抛压因子变化量(Δ)重构 + Walk-Forward 样本外，全因子=相对前窗变化 (VerifyChangeFactors.kt)"
+    dependsOn("compileKotlin", "compileJava", "processResources")
+
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("org.shiroumi.server.VerifyChangeFactorsKt")
+    workingDir = rootProject.projectDir
+    maxHeapSize = "6g"
+
+    systemProperties(
+        System.getProperties()
+            .filterKeys { key -> key is String && key.startsWith("quant.cf.") }
+            .mapKeys { it.key as String }
+    )
+}
+
 tasks.register<JavaExec>("collectOpen5m") {
     group = "application"
     description = "采集每日首根5min K线到 stock_open_5m (CollectOpen5m.kt)，支持小样本快验证"
@@ -689,6 +1014,23 @@ tasks.register<JavaExec>("collectOpen5m") {
     systemProperties(
         System.getProperties()
             .filterKeys { key -> key is String && key.startsWith("quant.open5m.") }
+            .mapKeys { it.key as String }
+    )
+    jvmArgs = listOf("-Xms2g", "-Xmx8g", "-XX:+UseG1GC")
+}
+
+tasks.register<JavaExec>("collectStock15m") {
+    group = "application"
+    description = "采集股票15min历史K线到 stock_minute_15m (CollectStock15m.kt)，支持全量/小样本回填"
+    dependsOn("compileKotlin", "compileJava", "processResources")
+
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("org.shiroumi.server.CollectStock15mKt")
+    workingDir = rootProject.projectDir
+
+    systemProperties(
+        System.getProperties()
+            .filterKeys { key -> key is String && key.startsWith("quant.stock15m.") }
             .mapKeys { it.key as String }
     )
     jvmArgs = listOf("-Xms2g", "-Xmx8g", "-XX:+UseG1GC")

@@ -13,9 +13,9 @@ import model.candle.StrategyTrackingStockNode
 import model.ws.PositionSource
 import model.ws.StrategyPositionSnapshot
 import org.shiroumi.database.stock.StockReader
+import org.shiroumi.database.strategy.daily.repository.DailyProfitPredictionSelectionRepository
 import org.shiroumi.database.strategy.daily.repository.DailyStrategyAuditRepository
-import org.shiroumi.database.strategy.daily.repository.DailyTargetPortfolioRepository
-import org.shiroumi.database.strategy.daily.repository.DailyTargetSelection
+import org.shiroumi.database.strategy.daily.repository.ProfitPredictionSelection
 import org.shiroumi.strategy.client.LocalStrategySnapshotHub
 import org.shiroumi.strategy.contract.StrategySnapshotEnvelope
 import org.shiroumi.strategy.contract.StrategyTopic
@@ -93,7 +93,8 @@ class StrategyPositionTrackingRuntime(
                         code = selection.tsCode,
                         stockNames = stockNames,
                         section = StrategyTrackingSection.SELECTION,
-                        slotIndex = idx
+                        slotIndex = idx,
+                        modelScore = selection.modelScore
                     )
                 }
             val holdings = currentPositions.mapIndexed { idx, code ->
@@ -154,16 +155,27 @@ class StrategyPositionTrackingRuntime(
         val currentPositions = positionSnapshot.currentPositions.take(MAX_TRACKING_SLOT_COUNT)
         val currentPositionCodes = currentPositions.toSet()
         val previousHoldings = currentDays.lastOrNull()?.holdings?.map { it.stockCode }?.toSet().orEmpty()
-        val codes = (currentPositions + previousHoldings + positionSnapshot.nextSessionSelections).distinct()
+        val realtimeSelections = positionSnapshot.nextSessionSelectionDetails
+            .takeIf { it.isNotEmpty() }
+            ?: positionSnapshot.nextSessionSelections.map {
+                model.ws.StrategySelectionSnapshot(tsCode = it, modelScore = 0.0)
+            }
+        val codes = (currentPositions + previousHoldings + realtimeSelections.map { it.tsCode }).distinct()
         val stockNames = dataSource.loadStockNames(codes)
 
         val realtimeDay = StrategyPositionTrackingDay(
             tradeDate = tradeDate,
-            selection = positionSnapshot.nextSessionSelections
-                .filterNot { it in currentPositionCodes }
+            selection = realtimeSelections
+                .filterNot { it.tsCode in currentPositionCodes }
                 .take(MAX_TRACKING_SLOT_COUNT)
-                .mapIndexed { idx, code ->
-                    trackingNode(code, stockNames, StrategyTrackingSection.SELECTION, idx)
+                .mapIndexed { idx, selection ->
+                    trackingNode(
+                        code = selection.tsCode,
+                        stockNames = stockNames,
+                        section = StrategyTrackingSection.SELECTION,
+                        slotIndex = idx,
+                        modelScore = selection.modelScore
+                    )
                 },
             holdings = currentPositions.mapIndexed { idx, code ->
                 trackingNode(code, stockNames, StrategyTrackingSection.HOLDINGS, idx)
@@ -182,12 +194,14 @@ class StrategyPositionTrackingRuntime(
         code: String,
         stockNames: Map<String, String>,
         section: StrategyTrackingSection,
-        slotIndex: Int
+        slotIndex: Int,
+        modelScore: Double? = null
     ) = StrategyTrackingStockNode(
         stockCode = code,
         stockName = stockNames[code] ?: code,
         section = section,
-        slotIndex = slotIndex
+        slotIndex = slotIndex,
+        modelScore = modelScore
     )
 
     private fun enrichPnl(days: List<StrategyPositionTrackingDay>): StrategyPositionTrackingResponse {
@@ -222,8 +236,8 @@ class StrategyPositionTrackingRuntime(
 
 interface StrategyPositionTrackingDataSource {
     fun loadAuditSummaries(limit: Int): List<StrategyAuditSummary>
-    fun loadSelectionsByTradeDate(tradeDates: List<LocalDate>): Map<LocalDate, List<DailyTargetSelection>>
-    fun loadHoldingsByTargetDate(targetDates: List<LocalDate>): Map<LocalDate, List<DailyTargetSelection>>
+    fun loadSelectionsByTradeDate(tradeDates: List<LocalDate>): Map<LocalDate, List<ProfitPredictionSelection>>
+    fun loadHoldingsByTargetDate(targetDates: List<LocalDate>): Map<LocalDate, List<ProfitPredictionSelection>>
     fun loadStockNames(tsCodes: Collection<String>): Map<String, String>
     fun loadCandles(tsCodes: List<String>, startDate: LocalDate, endDate: LocalDate): Map<String, Map<LocalDate, Candle>>
 }
@@ -232,11 +246,11 @@ object DefaultStrategyPositionTrackingDataSource : StrategyPositionTrackingDataS
     override fun loadAuditSummaries(limit: Int): List<StrategyAuditSummary> =
         DailyStrategyAuditRepository.getRecentRecords(limit)
 
-    override fun loadSelectionsByTradeDate(tradeDates: List<LocalDate>): Map<LocalDate, List<DailyTargetSelection>> =
-        DailyTargetPortfolioRepository.findSelectionsByTradeDates(tradeDates)
+    override fun loadSelectionsByTradeDate(tradeDates: List<LocalDate>): Map<LocalDate, List<ProfitPredictionSelection>> =
+        DailyProfitPredictionSelectionRepository.findSelectionsByTradeDates(tradeDates)
 
-    override fun loadHoldingsByTargetDate(targetDates: List<LocalDate>): Map<LocalDate, List<DailyTargetSelection>> =
-        DailyTargetPortfolioRepository.findSelectionsByTargetDates(targetDates)
+    override fun loadHoldingsByTargetDate(targetDates: List<LocalDate>): Map<LocalDate, List<ProfitPredictionSelection>> =
+        DailyProfitPredictionSelectionRepository.findSelectionsByTargetDates(targetDates)
 
     override fun loadStockNames(tsCodes: Collection<String>): Map<String, String> =
         StockReader.getStockNames(tsCodes)
@@ -252,7 +266,7 @@ object DefaultStrategyPositionTrackingDataSource : StrategyPositionTrackingDataS
 }
 
 private fun StrategyAuditSummary.positionSymbols(
-    fallbackTargetSelections: List<DailyTargetSelection>
+    fallbackTargetSelections: List<ProfitPredictionSelection>
 ): List<String> {
     val auditSymbols = currentPositions.take(MAX_TRACKING_SLOT_COUNT)
     if (auditSymbols.isNotEmpty()) return auditSymbols

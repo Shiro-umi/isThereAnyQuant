@@ -7,11 +7,11 @@ import kotlin.math.exp
 /**
  * 极端行情（大阴线杀跌）预测 **baseline 模型** —— 固化的可上线预测器。
  *
- * 这是 [CrashDifferentiableModel] 在全样本训练后导出的「权重 + 阈值 + 因子契约」快照，
+ * 这是 [CrashLogisticModel] 在全样本训练后导出的「权重 + 阈值 + 因子契约」快照，
  * 与训练框架解耦：实盘侧只需 [fromJson] 这份 JSON、按 [featureKeys] 顺序备好特征向量，调 [predict] 即得
- * 杀跌概率 P̂∈[0,1]，再用 [thresholds] 里选定的工作点阈值判预警。不依赖 DJL、不触账户层。
+ * 杀跌概率 P̂∈[0,1]，再用 [thresholds] 里选定的工作点阈值判预警。不依赖训练框架、不触账户层。
  *
- * 打分逻辑（与训练侧 [CrashDifferentiableModel.scoreOf] 严格一致，baseline 不启用软门控）：
+ * 打分逻辑（与训练侧 [CrashLogisticModel.scoreOf] 严格一致，baseline 不启用软门控）：
  *   logit = bias + Σ_j weights[j]·features[j]
  *   P̂    = σ(logit) = 1/(1+e^{-logit})
  *

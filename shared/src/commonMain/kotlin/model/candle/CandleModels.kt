@@ -165,6 +165,7 @@ data class StrategyTrackingStockNode(
     val stockName: String,
     val section: StrategyTrackingSection,
     val slotIndex: Int,
+    val modelScore: Double? = null,
     val buyDate: String? = null,
     val buyPrice: Float? = null,
     val actualPnl: Float? = null,

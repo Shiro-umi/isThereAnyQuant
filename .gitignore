@@ -120,3 +120,4 @@ tools/gh
 /temp/
 .antigravitycli/
 strategy-server/research/pytorch/temp/
+cli/temp/

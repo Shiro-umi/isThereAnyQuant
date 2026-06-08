@@ -332,7 +332,7 @@ private class StrategySocketService(
         val intervalMillis = System.getenv("STRATEGY_INTRADAY_REFRESH_INTERVAL_MS")
             ?.toLongOrNull()
             ?.coerceAtLeast(5_000L)
-            ?: 60_000L
+            ?: 30 * 60_000L
         val idleIntervalMillis = System.getenv("STRATEGY_INTRADAY_IDLE_CHECK_INTERVAL_MS")
             ?.toLongOrNull()
             ?.coerceAtLeast(5_000L)

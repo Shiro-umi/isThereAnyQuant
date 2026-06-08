@@ -37,7 +37,7 @@ class MainBoardUniverseProviderTest {
     )
     @DisplayName("沪市主板筛选测试")
     fun testShanghaiMainBoard(tsCode: String, expected: Boolean) {
-        val result = isMainBoardInternal(tsCode)
+        val result = MainBoardUniverseProvider.isTenCentimeterMainBoard(tsCode, "测试股票")
         assertEquals(expected, result, "股票 $tsCode 的主板识别结果应为 $expected")
     }
 
@@ -59,7 +59,7 @@ class MainBoardUniverseProviderTest {
     )
     @DisplayName("深市主板筛选测试")
     fun testShenzhenMainBoard(tsCode: String, expected: Boolean) {
-        val result = isMainBoardInternal(tsCode)
+        val result = MainBoardUniverseProvider.isTenCentimeterMainBoard(tsCode, "测试股票")
         assertEquals(expected, result, "股票 $tsCode 的主板识别结果应为 $expected")
     }
 
@@ -67,7 +67,7 @@ class MainBoardUniverseProviderTest {
     @ValueSource(strings = ["830000.BJ", "835000.BJ", "870000.BJ", "872000.BJ"])
     @DisplayName("北交所排除测试")
     fun testBeijingExchangeExcluded(tsCode: String) {
-        val result = isMainBoardInternal(tsCode)
+        val result = MainBoardUniverseProvider.isTenCentimeterMainBoard(tsCode, "测试股票")
         assertFalse(result, "北交所股票 $tsCode 应该被排除")
     }
 
@@ -75,35 +75,43 @@ class MainBoardUniverseProviderTest {
     @ValueSource(strings = ["AAPL.US", "TSLA.US", "0700.HK", "9988.HK"])
     @DisplayName("其他市场排除测试")
     fun testOtherMarketsExcluded(tsCode: String) {
-        val result = isMainBoardInternal(tsCode)
+        val result = MainBoardUniverseProvider.isTenCentimeterMainBoard(tsCode, "测试股票")
         assertFalse(result, "其他市场股票 $tsCode 应该被排除")
+    }
+
+    @Test
+    @DisplayName("ST 股票应该被排除在 10cm 股票池外")
+    fun testStExcluded() {
+        assertFalse(MainBoardUniverseProvider.isTenCentimeterMainBoard("600000.SH", "ST测试"))
+        assertFalse(MainBoardUniverseProvider.isTenCentimeterMainBoard("000001.SZ", "*ST测试"))
+        assertFalse(MainBoardUniverseProvider.isTenCentimeterMainBoard("002001.SZ", "测试ST"))
     }
 
     @Test
     @DisplayName("空字符串应该返回false")
     fun testEmptyString() {
-        val result = isMainBoardInternal("")
+        val result = MainBoardUniverseProvider.isTenCentimeterMainBoard("", "测试股票")
         assertFalse(result, "空字符串应该返回false")
     }
 
     @Test
     @DisplayName("无市场后缀的代码应该返回false")
     fun testNoMarketSuffix() {
-        val result = isMainBoardInternal("600000")
+        val result = MainBoardUniverseProvider.isTenCentimeterMainBoard("600000", "测试股票")
         assertFalse(result, "无市场后缀的代码应该返回false")
     }
 
     @Test
     @DisplayName("只有市场后缀应该返回false")
     fun testOnlyMarketSuffix() {
-        val result = isMainBoardInternal(".SH")
+        val result = MainBoardUniverseProvider.isTenCentimeterMainBoard(".SH", "测试股票")
         assertFalse(result, "只有市场后缀应该返回false")
     }
 
     @Test
     @DisplayName("包含多个点号的代码应该正确处理")
     fun testMultipleDots() {
-        val result = isMainBoardInternal("600.000.SH")
+        val result = MainBoardUniverseProvider.isTenCentimeterMainBoard("600.000.SH", "测试股票")
         assertFalse(result, "包含多个点号的代码应该返回false（代码部分不符合主板规则）")
     }
 
@@ -124,7 +132,7 @@ class MainBoardUniverseProviderTest {
             "830000.BJ"
         )
 
-        val filtered = testStocks.filter { isMainBoardInternal(it) }
+        val filtered = testStocks.filter { MainBoardUniverseProvider.isTenCentimeterMainBoard(it, "测试股票") }
 
         assertEquals(7, filtered.size, "应该保留7只主板股票")
         assertTrue(filtered.contains("600000.SH"), "应该包含600000.SH")
@@ -146,7 +154,7 @@ class MainBoardUniverseProviderTest {
             "601000.SH"
         )
 
-        val filtered = testStocks.filter { isMainBoardInternal(it) }.sorted()
+        val filtered = testStocks.filter { MainBoardUniverseProvider.isTenCentimeterMainBoard(it, "测试股票") }.sorted()
 
         assertEquals("000001.SZ", filtered[0], "第一个应该是深市主板")
         assertEquals("002000.SZ", filtered[1])
@@ -155,22 +163,4 @@ class MainBoardUniverseProviderTest {
         assertEquals("603000.SH", filtered[4])
     }
 
-    private fun isMainBoardInternal(tsCode: String): Boolean {
-        if (!tsCode.contains(".")) return false
-
-        val code = tsCode.substringBefore(".")
-        val market = tsCode.substringAfter(".", "")
-
-        return when (market) {
-            "SH" -> code.startsWith("600") ||
-                code.startsWith("601") ||
-                code.startsWith("603") ||
-                code.startsWith("605")
-            "SZ" -> code.startsWith("000") ||
-                code.startsWith("001") ||
-                code.startsWith("002") ||
-                code.startsWith("003")
-            else -> false
-        }
-    }
 }

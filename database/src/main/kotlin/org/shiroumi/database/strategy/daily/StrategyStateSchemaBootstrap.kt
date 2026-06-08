@@ -4,8 +4,8 @@ import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.shiroumi.database.stockDb
 import org.shiroumi.database.strategy.daily.table.DailyMarketSentimentStateTable
 import org.shiroumi.database.strategy.daily.table.DailyMarketSentimentTable
+import org.shiroumi.database.strategy.daily.table.DailyProfitPredictionSelectionTable
 import org.shiroumi.database.strategy.daily.table.DailyStrategyAuditTable
-import org.shiroumi.database.strategy.daily.table.DailyTargetPortfolioTable
 import org.shiroumi.database.strategy.daily.table.SentimentRuntimeSeedTable
 import org.shiroumi.database.transaction
 
@@ -32,7 +32,7 @@ object StrategyStateSchemaBootstrap {
                 DailyMarketSentimentStateTable,
                 SentimentRuntimeSeedTable,
                 DailyMarketSentimentTable,
-                DailyTargetPortfolioTable,
+                DailyProfitPredictionSelectionTable,
                 DailyStrategyAuditTable,
                 log = false
             ) {
@@ -40,7 +40,7 @@ object StrategyStateSchemaBootstrap {
                     DailyMarketSentimentStateTable,
                     SentimentRuntimeSeedTable,
                     DailyMarketSentimentTable,
-                    DailyTargetPortfolioTable,
+                    DailyProfitPredictionSelectionTable,
                     DailyStrategyAuditTable,
                 )
                 exec(
@@ -65,24 +65,14 @@ object StrategyStateSchemaBootstrap {
                         MODIFY COLUMN ${SentimentRuntimeSeedTable.combinedHistoryJson.name} MEDIUMTEXT NOT NULL
                     """.trimIndent()
                 )
-                relaxLegacyResultColumns()
-                backfillTargetSelectionScoreFromLegacyRankScore()
+                relaxLegacyAuditColumns()
                 backfillAuditPositionJsonFromLegacyCsv()
             }
             ensured = true
         }
     }
 
-    private fun org.jetbrains.exposed.v1.jdbc.JdbcTransaction.relaxLegacyResultColumns() {
-        if (columnExists(DailyTargetPortfolioTable.tableName, "rank_score")) {
-            exec(
-                """
-                ALTER TABLE ${DailyTargetPortfolioTable.tableName}
-                    MODIFY COLUMN rank_score DOUBLE NOT NULL DEFAULT 0.0
-                """.trimIndent()
-            )
-        }
-
+    private fun org.jetbrains.exposed.v1.jdbc.JdbcTransaction.relaxLegacyAuditColumns() {
         val auditTableName = DailyStrategyAuditTable.tableName
         val legacyAuditColumns = listOf("newly_selected", "dropped", "current_positions")
             .filter { columnExists(auditTableName, it) }
@@ -97,17 +87,6 @@ $modifications
                 """.trimIndent()
             )
         }
-    }
-
-    private fun org.jetbrains.exposed.v1.jdbc.JdbcTransaction.backfillTargetSelectionScoreFromLegacyRankScore() {
-        if (!columnExists(DailyTargetPortfolioTable.tableName, "rank_score")) return
-        exec(
-            """
-            UPDATE ${DailyTargetPortfolioTable.tableName}
-            SET ${DailyTargetPortfolioTable.selectionScore.name} = rank_score
-            WHERE ${DailyTargetPortfolioTable.selectionScore.name} = 0.0
-            """.trimIndent()
-        )
     }
 
     private fun org.jetbrains.exposed.v1.jdbc.JdbcTransaction.backfillAuditPositionJsonFromLegacyCsv() {

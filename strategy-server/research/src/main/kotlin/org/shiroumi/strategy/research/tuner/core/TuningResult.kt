@@ -43,7 +43,7 @@ enum class StopReason {
  * @property best        最优试探记录。
  * @property trace       全部试探轨迹（按迭代顺序）。
  * @property stopReason  终止原因，便于诊断"为什么停在这里"。
- * @property optimizerName 优化器实现名（如 "nelder-mead", "adam-djl"）。
+ * @property optimizerName 优化器实现名（如 "nelder-mead", "hill-climbing"）。
  */
 @Serializable
 data class TuningResult(

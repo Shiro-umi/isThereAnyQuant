@@ -13,6 +13,7 @@ import model.ws.CalcMetrics
 import model.ws.IntradaySnapshotPayload
 import model.ws.MarketSentimentSnapshot
 import model.ws.PositionSource
+import model.ws.StrategySelectionSnapshot
 import model.ws.StockFactorSnapshot
 import model.ws.StrategyPositionSnapshot
 import model.ws.TargetPosition
@@ -21,9 +22,9 @@ import org.shiroumi.database.stock.StockDailyCandleRepository
 import org.shiroumi.database.stock.StockReader
 import org.shiroumi.database.strategy.daily.repository.DailyFactorRollingStateRepository
 import org.shiroumi.database.strategy.daily.repository.DailyMarketSentimentRepository
+import org.shiroumi.database.strategy.daily.repository.DailyProfitPredictionSelectionRepository
 import org.shiroumi.database.strategy.daily.repository.DailyStockFactorRepository
 import org.shiroumi.database.strategy.daily.repository.DailyStrategyAuditRepository
-import org.shiroumi.database.strategy.daily.repository.DailyTargetPortfolioRepository
 import org.shiroumi.database.strategy.daily.repository.SentimentRuntimeSeedRepository
 import org.shiroumi.quant_kmp.strategy.daily.model.PreparedBar
 import org.shiroumi.strategy.client.LocalStrategySnapshotHub
@@ -35,9 +36,12 @@ import org.shiroumi.strategy.core.daily.StockFactorCalculator
 import org.shiroumi.strategy.core.daily.preprocessing.PreparedBarFactory
 import org.shiroumi.strategy.core.daily.seed.toRollingState
 import org.shiroumi.strategy.core.intraday.IntradayPortfolioGenerator
+import org.shiroumi.strategy.service.model.ProfitPredictionModelSelector
+import org.shiroumi.strategy.service.model.ProfitPredictionTargetSelector
 import org.shiroumi.strategy.service.universe.MainBoardUniverseProvider
 import utils.logger
 import kotlin.uuid.ExperimentalUuidApi
+import org.shiroumi.strategy.core.daily.TargetPosition as DomainTargetPosition
 import org.shiroumi.strategy.core.daily.MarketSentimentSnapshot as DomainSentimentSnapshot
 import org.shiroumi.strategy.core.daily.StockFactorSnapshot as DomainFactorSnapshot
 import org.shiroumi.strategy.core.intraday.TargetPosition as DomainIntradayPosition
@@ -47,7 +51,12 @@ class IntradayStrategyRuntime(
     private val json: Json,
     private val scope: String = MainBoardUniverseProvider.UNIVERSE_TYPE,
     private val dataSource: IntradayStrategyRuntimeDataSource,
-    private val trackingRuntime: StrategyPositionTrackingRuntime? = null
+    private val trackingRuntime: StrategyPositionTrackingRuntime? = null,
+    private val profitPredictionSelector: ProfitPredictionTargetSelector = ProfitPredictionModelSelector(),
+    private val intradayModelSelectionEnabled: Boolean = System.getProperty(
+        "quant.profitPrediction.intradayEnabled",
+        "true"
+    ).toBoolean(),
 ) : IntradayRuntime {
     private val logger by logger("IntradayStrategyRuntime")
 
@@ -75,6 +84,7 @@ class IntradayStrategyRuntime(
 
         val intradayPayload = buildIntradayPayload(
             tradeDate = tradeDate,
+            universe = universe,
             sentiment = sentiment,
             factors = factors,
             totalMs = System.currentTimeMillis() - startedAt
@@ -297,17 +307,25 @@ class IntradayStrategyRuntime(
         )
     }
 
-    private fun buildIntradayPayload(
+    private suspend fun buildIntradayPayload(
         tradeDate: LocalDate,
+        universe: List<String>,
         sentiment: DomainSentimentSnapshot,
         factors: List<DomainFactorSnapshot>,
         totalMs: Long
     ): IntradaySnapshotPayload {
+        val modelTargets = loadIntradayTargetPositions(
+            tradeDate = tradeDate,
+            universe = universe,
+            sentiment = sentiment,
+            factors = factors,
+        )
         val portfolio = IntradayPortfolioGenerator.generate(
             tradeDate = tradeDate,
             timestamp = System.currentTimeMillis(),
             factors = factors,
-            sentiment = sentiment
+            sentiment = sentiment,
+            postMarketPositions = modelTargets,
         )
         return IntradaySnapshotPayload(
             timestamp = System.currentTimeMillis(),
@@ -321,20 +339,53 @@ class IntradayStrategyRuntime(
         )
     }
 
+    private suspend fun loadIntradayTargetPositions(
+        tradeDate: LocalDate,
+        universe: List<String>,
+        sentiment: DomainSentimentSnapshot,
+        factors: List<DomainFactorSnapshot>,
+    ): List<DomainTargetPosition> {
+        val postMarketTargets = dataSource.loadPostMarketTargetPositions(tradeDate)
+        if (!intradayModelSelectionEnabled) return postMarketTargets
+
+        val realtimeCandles = dataSource.loadRealtimeDailyCandles(
+            tsCodes = factors.map { it.tsCode },
+            tradeDate = tradeDate
+        )
+        if (realtimeCandles.isEmpty()) return postMarketTargets
+
+        return runCatching {
+            profitPredictionSelector.generateIntradayTargets(
+                tradeDate = tradeDate,
+                universeSymbols = universe,
+                realtimeDailyCandles = realtimeCandles,
+                sentiment = sentiment,
+            )
+        }.getOrElse { error ->
+            logger.warning(
+                "intraday profit prediction selection failed tradeDate=$tradeDate reason=${error.message}; " +
+                    "falling back to post-market targets"
+            )
+            postMarketTargets
+        }
+    }
+
     private fun buildPositionSnapshot(
         tradeDate: LocalDate,
         payload: IntradaySnapshotPayload
     ): StrategyPositionSnapshot {
-        val selectedCodes = payload.portfolio
+        val selectedDetails = payload.portfolio
             .filter { it.selected }
-            .sortedByDescending { it.rankScore }
-            .map { it.tsCode }
+            .sortedWith(compareByDescending<TargetPosition> { it.rankScore }.thenBy { it.tsCode })
+            .map { StrategySelectionSnapshot(tsCode = it.tsCode, modelScore = it.rankScore) }
+        val selectedCodes = selectedDetails.map { it.tsCode }
         val currentPositions = dataSource.loadCurrentPositionCodes(tradeDate)
         return StrategyPositionSnapshot(
             tradeDate = payload.sentiment.tradeDate,
             currentPositions = currentPositions,
             source = PositionSource.INTRADAY_REALTIME,
             nextSessionSelections = selectedCodes,
+            nextSessionSelectionDetails = selectedDetails,
             newlySelected = selectedCodes.filterNot { it in currentPositions }
         )
     }
@@ -439,6 +490,7 @@ interface IntradayStrategyRuntimeDataSource {
     fun loadFactorStates(tradeDate: LocalDate, tsCodes: List<String>): List<FactorRollingState>
     fun loadSentimentByDate(tradeDate: LocalDate): DomainSentimentSnapshot?
     fun loadCurrentPositionCodes(tradeDate: LocalDate): List<String>
+    fun loadPostMarketTargetPositions(targetDate: LocalDate): List<DomainTargetPosition>
 }
 
 class DefaultIntradayStrategyRuntimeDataSource(
@@ -501,12 +553,28 @@ class DefaultIntradayStrategyRuntimeDataSource(
         DailyMarketSentimentRepository.findByDate(tradeDate)
 
     override fun loadCurrentPositionCodes(tradeDate: LocalDate): List<String> =
-        DailyTargetPortfolioRepository.findSelectionsByTargetDate(tradeDate)
+        DailyProfitPredictionSelectionRepository.findSelectionsByTargetDate(tradeDate)
             .map { it.tsCode }
             .ifEmpty {
                 DailyStrategyAuditRepository.getRecentRecords(1)
                     .firstOrNull()
                     ?.currentPositions
                     .orEmpty()
+            }
+
+    override fun loadPostMarketTargetPositions(targetDate: LocalDate): List<DomainTargetPosition> =
+        DailyProfitPredictionSelectionRepository.findTargetsByTargetDate(targetDate)
+            .filter { it.selected }
+            .map {
+                DomainTargetPosition(
+                    tradeDate = it.tradeDate,
+                    targetDate = it.targetDate,
+                    tsCode = it.tsCode,
+                    selectionScore = it.modelScore,
+                    selected = it.selected,
+                    targetWeight = it.targetWeight,
+                    sentimentExposure = it.sentimentExposure,
+                    selectionReason = it.selectionReason,
+                )
             }
 }

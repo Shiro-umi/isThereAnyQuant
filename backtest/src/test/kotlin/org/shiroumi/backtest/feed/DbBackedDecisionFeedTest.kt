@@ -13,7 +13,7 @@ import kotlin.test.fail
 
 class DbBackedDecisionFeedTest {
 
-    @Test fun `daily_target_portfolio 转成目标组合且只保留选中权重`() {
+    @Test fun `daily_profit_prediction_selection 转成目标组合且只保留选中权重`() {
         val feed = DbBackedDecisionFeed(
             dataSource = FakeDecisionDataSource(
                 targets = listOf(
@@ -38,6 +38,47 @@ class DbBackedDecisionFeedTest {
         )
 
         assertTrue(feed.decisionsFor(T1).single() is StrategyDecision.TargetPortfolioDecision)
+    }
+
+    @Test fun `递进涨停过滤从所有未涨停候选按模型分补足 Top5`() {
+        val feed = DbBackedDecisionFeed(
+            dataSource = FakeDecisionDataSource(
+                targets = listOf(
+                    target("000001.SZ", selected = true, weight = 0.2, modelScore = 0.90),
+                    target("000002.SZ", selected = true, weight = 0.2, modelScore = 0.89),
+                    target("000003.SZ", selected = true, weight = 0.2, modelScore = 0.88),
+                    target("000004.SZ", selected = true, weight = 0.2, modelScore = 0.87),
+                    target("000005.SZ", selected = true, weight = 0.2, modelScore = 0.86),
+                    target("000006.SZ", selected = false, weight = 0.0, modelScore = 0.85),
+                    target("000007.SZ", selected = false, weight = 0.0, modelScore = 0.84),
+                ),
+            ),
+            filterSignalLimitUp = true,
+            limitUpChecker = { tsCode, _ -> tsCode in setOf("000002.SZ", "000004.SZ") },
+        )
+
+        val decision = feed.decisionsFor(T1).single() as StrategyDecision.TargetPortfolioDecision
+
+        assertEquals(
+            listOf("000001.SZ", "000003.SZ", "000005.SZ", "000006.SZ", "000007.SZ"),
+            decision.targetWeights.keys.toList(),
+        )
+        assertEquals(setOf(0.2), decision.targetWeights.values.toSet())
+    }
+
+    @Test fun `严格口径只读取已选 Top5 不做补位`() {
+        val feed = DbBackedDecisionFeed(
+            dataSource = FakeDecisionDataSource(
+                targets = listOf(
+                    target("000001.SZ", selected = true, weight = 0.2, modelScore = 0.90),
+                    target("000006.SZ", selected = false, weight = 0.0, modelScore = 0.85),
+                ),
+            ),
+        )
+
+        val decision = feed.decisionsFor(T1).single() as StrategyDecision.TargetPortfolioDecision
+
+        assertEquals(mapOf("000001.SZ" to 0.2), decision.targetWeights)
     }
 
     @Test fun `目标组合缺失时可从 audit 新增和剔除列表生成显式意图`() {
@@ -99,11 +140,13 @@ class DbBackedDecisionFeedTest {
         tsCode: String,
         selected: Boolean,
         weight: Double,
+        modelScore: Double = if (selected) weight else 0.0,
         metadata: Map<String, String> = emptyMap(),
     ): TargetPortfolioRow = TargetPortfolioRow(
         tradeDate = T0,
         targetDate = T1,
         tsCode = tsCode,
+        modelScore = modelScore,
         selected = selected,
         targetWeight = weight,
         sentimentExposure = 0.5,

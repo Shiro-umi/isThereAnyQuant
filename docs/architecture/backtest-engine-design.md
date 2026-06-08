@@ -29,7 +29,7 @@
 
 策略每个交易日 `T` 只产出以下两类内容之一（或组合）：
 
-1. **目标组合** `TargetPortfolioDecision`：T+1 想要持有的组合，**只用权重表达**（`Map<tsCode, weight>`，每只权重 0~1，全部加起来 ≤ `sentimentExposure`）。
+1. **目标组合** `TargetPortfolioDecision`：T+1 想要持有的组合，**只用权重表达**（`Map<tsCode, weight>`，每只权重 0~1；`sentimentExposure` 仅作情绪审计字段，不约束权重）。
 2. **显式交易方向** `TradeIntentDecision`：T+1 对某只股票的方向性意图（`BUY` / `SELL` / `HOLD`），**只带权重或方向，不带股数**。
 
 权重 → 股数的折算**完全发生在回测引擎内部**：用回测自己持有的「账户总权益（mark-to-market）」乘以权重得到目标金额，再按当日 RAW 价折算成股数，按 100 股取整。
@@ -105,6 +105,8 @@ SimulationResult
 | 涨跌停价基于**前收价**计算，四舍五入到 0.01，遵循交易所口径 | `PriceLimitRule.calcLimits()` |
 | 创业板 / 科创板 / 北交所 ±20%（默认股票池不含，但规则可配置） | `PriceLimitRule` |
 | 新股前 5 个交易日不设涨跌幅（默认排除，可开关） | `PriceLimitRule` |
+| 信号日涨停过滤（严格实盘口径）：若信号产生日（选出日）收盘已涨停，则在执行日放弃买入 | `PriceLimitRule`（开关 `abandonIfSignalLimitUp`） |
+| 信号日涨停递进 Top5：导出决策时从全部模型候选中剔除选出日涨停股，再按 `modelScore DESC, tsCode ASC` 取未涨停 Top5 并重新等权 | `DbBackedDecisionFeed(filterSignalLimitUp=true)` |
 
 ### 2.4 可交易性
 
@@ -304,7 +306,7 @@ T 日开盘撮合（全部发生在账户私有域）
 T 日盘中（可选，分钟级或盘中信号）
   · 同上，但走 intraday 撮合策略
 T 日收盘
-  · MarketDataSource.dayQuote(T) → 用收盘价 mark-to-market
+  · MarketDataSource.dayQuote(T) → 用收盘价 mark-to-market；已持仓标的当日缺收盘价时，沿用最近一次可用收盘价估值，避免停牌/缺 K 线把持仓市值误归零
   · SessionSettler.postClose(T)：
       - 锁仓 lockedTodayQty 标记为 settled（次日变为 availableQty）
       - 写 equityCurve[T]
@@ -739,7 +741,7 @@ class BacktestScheduler(/* deps */) {
  * 把外部策略输出统一映射为回测可消费的 [StrategyDecision] 序列。
  *
  * 适配范围：
- *  - 历史 daily_target_portfolio （TargetPortfolioDecision）
+ *  - 历史 daily_profit_prediction_selection （TargetPortfolioDecision）
  *  - 历史 daily_strategy_audit + intraday 信号（TradeIntentDecision）
  *  - 外部回放 JSON / CSV
  *
@@ -1068,12 +1070,12 @@ backtest:
 
 ```
 strategy-server (策略层)
-  ├── daily/TargetPortfolioGenerator  → 产出 TargetPosition
+  ├── daily_profit_prediction_selection          → 模型目标组合确认事实
   ├── runtime/PostMarketStrategyRuntime → StrategyPositionSnapshot
   ↓ (适配)
 backtest:engine
   ├── StrategyDecisionFeed
-  │     ├── DbBackedDecisionFeed   读取 daily_target_portfolio / 审计表
+  │     ├── DbBackedDecisionFeed   读取 daily_profit_prediction_selection / 审计表
   │     ├── JsonReplayDecisionFeed JSON 决策回放
   │     └── InMemoryDecisionFeed   单测 / 空输入回放
   ├── BacktestMarketDataFeed
@@ -1094,7 +1096,7 @@ cli
         `./cli backtest --start 2024-01-02 --end 2024-12-31 --decisions audit --capital 1000000`
 
 database / stock_db
-  ├── daily_target_portfolio / daily_strategy_audit 作为策略决策输入
+  ├── daily_profit_prediction_selection / daily_strategy_audit 作为策略决策输入
   ├── stock_daily_data / stock_info / calendar 作为行情与状态输入
   └── 现阶段不创建、不写入任何 backtest_* 结果表
 ```
@@ -1145,11 +1147,11 @@ database / stock_db
 
 ## 11. 本地文件模式回测流程
 
-> 本章定义回测的**离线/本地运行模式**。与 §8 中通过 Ktor HTTP API 触发的在线回测不同，本地模式不依赖 `daily_target_portfolio` / `daily_strategy_audit` 数据库表结构，而是通过文件层隔离策略中间产物的结构变化。CLI 进程通过 `config.yaml` 直连 `stock_db`，不依赖 Ktor 进程。
+> 本章定义回测的**离线/本地运行模式**。与 §8 中通过 Ktor HTTP API 触发的在线回测不同，本地模式不依赖 `daily_profit_prediction_selection` / `daily_strategy_audit` 数据库表结构，而是通过文件层隔离策略中间产物的结构变化。CLI 进程通过 `config.yaml` 直连 `stock_db`，不依赖 Ktor 进程。
 
 ### 11.1 设计动机
 
-策略在不断迭代：`daily_target_portfolio` 的列可能增减，`StrategyDecision` 的字段可能调整，`daily_strategy_audit` 的 JSON 内部格式可能演进。如果把回测直接绑在这些表结构上，每次策略 schema 变更都会导致回测编译失败或读取到不兼容的历史数据。
+策略在不断迭代：`daily_profit_prediction_selection` 的列可能增减，`StrategyDecision` 的字段可能调整，`daily_strategy_audit` 的 JSON 内部格式可能演进。如果把回测直接绑在这些表结构上，每次策略 schema 变更都会导致回测编译失败或读取到不兼容的历史数据。
 
 **解决方案**：在策略计算（写 DB）和回测执行（读决策）之间插入一层**版本化的文件桥接**。
 
@@ -1158,7 +1160,7 @@ database / stock_db
 ─────────────────────                   ─────────────────────────
 PostMarketPreparationJob                ./cli backtest run
   ↓ 写入 DB（策略自有 schema）           ├─ ① 从 DB 导出为稳定格式文件
-daily_target_portfolio ──→ 导出 ──→ .backtest/{runId}/decisions/{date}.json
+daily_profit_prediction_selection ──→ 导出 ──→ .backtest/{runId}/decisions/{date}.json
 daily_strategy_audit  ──→ 导出 ──→ .backtest/{runId}/decisions/{date}.json
                                          ├─ ② FileBackedDecisionFeed 读文件回测
                                          ├─ ③ 结果写入 .backtest/{runId}/output/
@@ -1167,11 +1169,11 @@ daily_strategy_audit  ──→ 导出 ──→ .backtest/{runId}/decisions/{da
 
 **隔离边界**：
 - **行情数据**（`stock_daily_data`、`stock_info`）仍直读 DB——这些是原始行情事实，结构稳定（OHLCV 是交易所标准字段）。CLI 通过 `config.yaml` 获取数据库连接参数，不经过 Ktor HTTP 层。
-- **策略中间产物**（`daily_target_portfolio`、`daily_strategy_audit`）走文件桥接——这些随策略迭代频繁变化。`DecisionFileExporter` 是**唯一耦合点**：策略 schema 变更时只改它，`FileBackedDecisionFeed` 和回测引擎不受影响。
+- **策略中间产物**（`daily_profit_prediction_selection`、`daily_strategy_audit`）走文件桥接——这些随策略迭代频繁变化。`DecisionFileExporter` 是**唯一耦合点**：策略 schema 变更时只改它，`FileBackedDecisionFeed` 和回测引擎不受影响。
 
 ### 11.2 本地工作区结构
 
-决策文件按**执行日**（即 `daily_target_portfolio.target_date` = T+1）命名。回测区间 `--start 2024-01-02 --end 2024-06-30` 表示在此区间的每个交易日，调度器用 `decisionsFor(T)` 获取当日要执行的目标组合，对应文件 `decisions/{T}.json`。
+决策文件按**执行日**（即 `daily_profit_prediction_selection.target_date` = T+1）命名。回测区间 `--start 2024-01-02 --end 2024-06-30` 表示在此区间的每个交易日，调度器用 `decisionsFor(T)` 获取当日要执行的目标组合，对应文件 `decisions/{T}.json`。
 
 ```
 .backtest/
@@ -1203,7 +1205,7 @@ daily_strategy_audit  ──→ 导出 ──→ .backtest/{runId}/decisions/{da
 
 ### 11.3 决策文件格式（版本化、稳定）
 
-文件 `decisions/{executionDate}.json` 是回测引擎唯一读取的策略输入格式。它与 `daily_target_portfolio` 表结构解耦。文件内容由 `DecisionFile` 类型序列化得到，每条 `StrategyDecision` 子类通过 `@Serializable` + `@SerialName` 的多态方式嵌入。
+文件 `decisions/{executionDate}.json` 是回测引擎唯一读取的策略输入格式。它与 `daily_profit_prediction_selection` 表结构解耦。文件内容由 `DecisionFile` 类型序列化得到，每条 `StrategyDecision` 子类通过 `@Serializable` + `@SerialName` 的多态方式嵌入。
 
 ```json
 {
@@ -1219,7 +1221,7 @@ daily_strategy_audit  ──→ 导出 ──→ .backtest/{runId}/decisions/{da
         "300750.SZ": 0.2
       },
       "sentimentExposure": 0.8,
-      "reason": "daily_target_portfolio targetDate=2024-01-03 rows=3"
+      "reason": "daily_profit_prediction_selection targetDate=2024-01-03 rows=3"
     },
     {
       "type": "trade-intent",
@@ -1245,12 +1247,12 @@ data class DecisionFile(
 )
 ```
 
-> 关键约定：`executionDate` 是回测执行日（T+1 开盘），等同于 `daily_target_portfolio.target_date`。`DecisionFileExporter` 按此日期查询 DB 并写入文件；`FileBackedDecisionFeed.decisionsFor(date)` 按此日期索文件。
+> 关键约定：`executionDate` 是回测执行日（T+1 开盘），等同于 `daily_profit_prediction_selection.target_date`。`DecisionFileExporter` 按此日期查询 DB 并写入文件；`FileBackedDecisionFeed.decisionsFor(date)` 按此日期索文件。
 
 **格式版本策略**：
 
 - `formatVersion=1`：当前版本，`StrategyDecision` 全部字段完备（已有 `@Serializable` 注解）。
-- 策略迭代改变 `daily_target_portfolio` 列时，**只改导出逻辑**（`DecisionFileExporter`），文件格式保持兼容。
+- 策略迭代改变 `daily_profit_prediction_selection` 列时，**只改导出逻辑**（`DecisionFileExporter`），文件格式保持兼容。
 - 如果文件格式确实需要升级（新增字段、改字段语义），`formatVersion` 递增，`FileBackedDecisionFeed` 根据版本号做反序列化分派。
 
 **文件命名规则**：`{executionDate}.json`（ISO 日期格式），与 `TradingCalendar.tradingDays()` 对齐。非交易日不产生文件，`FileBackedDecisionFeed` 按执行日寻址。
@@ -1287,9 +1289,9 @@ class DecisionFileExporter(private val workspace: BacktestWorkspace) {
 
 **数据库依赖**：`DecisionFileExporter` 需要直连 `stock_db`。CLI 进程通过 `config.yaml`（`database.stockDb.*` 段）或环境变量 `QUANT_STOCK_DB_URL` 获取 JDBC 连接参数。这与 Ktor 进程的数据库配置复用同一份 `config.yaml`，但不经过 HTTP 层。
 
-单日导出逻辑：优先读 `daily_target_portfolio`（`findBacktestTargetsByTargetDate`），缺失时降级读 `daily_strategy_audit`（`findBacktestSignalsByDate`，按目标日上一交易日解析），与现有 `DbBackedDecisionFeed` 的降级逻辑一致。
+单日导出逻辑：优先读 `daily_profit_prediction_selection`（`findBacktestTargetsByTargetDate`），缺失时降级读 `daily_strategy_audit`（`findBacktestSignalsByDate`，按目标日上一交易日解析），与现有 `DbBackedDecisionFeed` 的降级逻辑一致。
 
-导出器是**唯一会随策略 schema 变更而修改的组件**。策略 `daily_target_portfolio` 列变化时，只需要更新此处的 DB 查询和映射逻辑。`DecisionFile` 格式本身保持兼容，除非 `formatVersion` 升级。
+导出器是**唯一会随策略 schema 变更而修改的组件**。策略 `daily_profit_prediction_selection` 列变化时，只需要更新此处的 DB 查询和映射逻辑。`DecisionFile` 格式本身保持兼容，除非 `formatVersion` 升级。
 
 #### 11.4.3 `FileBackedDecisionFeed`
 
@@ -1388,13 +1390,16 @@ fun runLocal(workspace: BacktestWorkspace, config: BacktestConfig): SimulationRe
   --end 2024-06-30 \
   --capital 1000000 \
   --matching OPEN_PRICE \
-  --slippage-bps 5
+  --slippage-bps 5 \
+  --abandon-signal-limit-up \
+  --target-only
 
 # 只导出决策，不跑回测
 ./cli backtest export \
   --start 2024-01-02 \
   --end 2024-06-30 \
-  --to .backtest/my-decisions/
+  --to .backtest/my-decisions/ \
+  --target-only
 
 # 复用已有导出，只跑回测
 ./cli backtest run \
@@ -1407,7 +1412,9 @@ fun runLocal(workspace: BacktestWorkspace, config: BacktestConfig): SimulationRe
   --equity-curve-csv ./out/my_equity.csv
 ```
 
-**`--start` / `--end` 日期语义**：均为**执行日**（与 `BacktestConfig.startDate/endDate` 一致，也与 `BacktestScheduler.runLoop(start, end)` 的参数语义一致）。`--start 2024-01-02` 表示回测从 2024-01-02 这个交易日开始执行。导出器按执行日查询 `daily_target_portfolio.target_date`。
+**`--start` / `--end` 日期语义**：均为**执行日**（与 `BacktestConfig.startDate/endDate` 一致，也与 `BacktestScheduler.runLoop(start, end)` 的参数语义一致）。`--start 2024-01-02` 表示回测从 2024-01-02 这个交易日开始执行。导出器按执行日查询 `daily_profit_prediction_selection.target_date`。
+
+**`--target-only` 日期/数据语义**：只使用 `daily_profit_prediction_selection` 目标组合确认事实；缺失目标组合的日期导出为空决策，不再降级读取 `daily_strategy_audit`。该口径用于模型 TopN 回测对比，避免把旧审计 BUY/SELL 意图混入模型组合表现。
 
 **`run` 子命令的实际执行流程**：
 
@@ -1463,5 +1470,5 @@ fun runLocal(workspace: BacktestWorkspace, config: BacktestConfig): SimulationRe
 | 缺口 | 影响 | 后续计划 |
 | --- | --- | --- |
 | 公司行动数据未注入 | 跨除权日的权益曲线会有虚假跳变（分红/送股/拆股未反映在账户中） | `DatabaseBacktestMarketDataFeed` 增加 `corporateActionsFor(date)` 方法，从 `stock_db` 分红拆股表读取并注入 `SessionSettler`。在线模式和本地模式共用同一套公司行动数据源 |
-| 回测结果未持久化到 DB | 当前阶段在线和本地模式都不写回测结果表；DB 只作为策略确认事实和行情事实来源 | 若后续确需历史结果查询，先补设计与 TodoList，再新增结果表和迁移 |
+| 回测结果未持久化到 DB | 当前阶段在线和本地模式都不写回测结果表；DB 只作为策略确认事实和行情事实来源 | 若后续确需历史结果查询，先补架构设计，再新增结果表和迁移 |
 | HTTP 长区间同步执行耗时 | 不落库意味着没有状态轮询，长区间回测会占用单个请求直到完成 | 后续如需异步体验，先设计内存任务队列或显式结果持久化方案 |

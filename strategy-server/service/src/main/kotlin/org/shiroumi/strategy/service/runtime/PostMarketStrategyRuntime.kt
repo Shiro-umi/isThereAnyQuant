@@ -5,10 +5,12 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import model.ws.PositionSource
+import model.ws.StrategySelectionSnapshot
 import model.ws.StrategyPositionSnapshot
 import org.shiroumi.database.common.repository.TradingCalendarRepository
+import org.shiroumi.database.strategy.daily.repository.DailyProfitPredictionSelectionRepository
+import org.shiroumi.database.strategy.daily.repository.ProfitPredictionSelection
 import org.shiroumi.database.strategy.daily.repository.DailyStrategyAuditRepository
-import org.shiroumi.database.strategy.daily.repository.DailyTargetPortfolioRepository
 import org.shiroumi.strategy.client.LocalStrategySnapshotHub
 import org.shiroumi.strategy.contract.StrategyTopic
 import org.shiroumi.strategy.core.audit.StrategyAuditSummary
@@ -122,16 +124,20 @@ class PostMarketStrategyRuntime(
         val currentPositions = summary?.currentPositions.orEmpty()
             .ifEmpty { dataSource.loadCurrentPositionCodes(tradeDate) }
         val nextSessionSelections = dataSource.loadNextSessionSelections(tradeDate)
-        val newlySelected = nextSessionSelections.filterNot { it in currentPositions }
+        val nextSessionSelectionCodes = nextSessionSelections.map { it.tsCode }
+        val newlySelected = nextSessionSelectionCodes.filterNot { it in currentPositions }
 
-        if (currentPositions.isEmpty() && nextSessionSelections.isEmpty()) {
+        if (currentPositions.isEmpty() && nextSessionSelectionCodes.isEmpty()) {
             return null
         }
         return StrategyPositionSnapshot(
             tradeDate = tradeDate.toString(),
             currentPositions = currentPositions,
             source = PositionSource.DAILY_AUDIT_COMPLETE,
-            nextSessionSelections = nextSessionSelections,
+            nextSessionSelections = nextSessionSelectionCodes,
+            nextSessionSelectionDetails = nextSessionSelections.map {
+                StrategySelectionSnapshot(tsCode = it.tsCode, modelScore = it.modelScore)
+            },
             newlySelected = newlySelected
         )
     }
@@ -157,7 +163,7 @@ interface PostMarketStrategyRuntimeDataSource {
     fun loadLatestAuditSummary(): StrategyAuditSummary?
     fun loadAuditSummary(tradeDate: LocalDate): StrategyAuditSummary?
     fun loadCurrentPositionCodes(tradeDate: LocalDate): List<String>
-    fun loadNextSessionSelections(tradeDate: LocalDate): List<String>
+    fun loadNextSessionSelections(tradeDate: LocalDate): List<ProfitPredictionSelection>
 }
 
 object DefaultPostMarketStrategyRuntimeDataSource : PostMarketStrategyRuntimeDataSource {
@@ -177,11 +183,10 @@ object DefaultPostMarketStrategyRuntimeDataSource : PostMarketStrategyRuntimeDat
         DailyStrategyAuditRepository.findByDate(tradeDate)
 
     override fun loadCurrentPositionCodes(tradeDate: LocalDate): List<String> =
-        DailyTargetPortfolioRepository.findSelectionsByTargetDate(tradeDate)
+        DailyProfitPredictionSelectionRepository.findSelectionsByTargetDate(tradeDate)
             .map { it.tsCode }
 
-    override fun loadNextSessionSelections(tradeDate: LocalDate): List<String> =
-        DailyTargetPortfolioRepository.findSelectionsByTradeDates(listOf(tradeDate))
+    override fun loadNextSessionSelections(tradeDate: LocalDate): List<ProfitPredictionSelection> =
+        DailyProfitPredictionSelectionRepository.findSelectionsByTradeDates(listOf(tradeDate))
             .getOrElse(tradeDate) { emptyList() }
-            .map { it.tsCode }
 }

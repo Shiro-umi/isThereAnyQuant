@@ -77,17 +77,17 @@
 | 出参 | 说明 |
 | --- | --- |
 | `MarketSentimentSnapshot` | 当日市场情绪快照 |
-| `sentimentExposure` | 总仓位系数，范围 `[0, 1]` |
+| `sentimentExposure` | 市场情绪水位，范围 `[0, 1]`，仅作情绪审计/展示 |
 | `riskMode` | 建议新增: `RISK_OFF / DEFENSIVE / NEUTRAL / AGGRESSIVE` |
-| `emptyReason` | 情绪为空仓或历史不足原因 |
+| `emptyReason` | 模型无结果、历史不足等无法生成确认选股的原因 |
 | `MarketSentimentRollingState` | 次日增量计算所需状态 |
 | `SentimentRuntimeSeed` | 盘中实时投影种子 |
 
 交易解释:
 
-- `sentimentExposure == 0`: 不开新仓，已有仓位进入减仓/清仓评估。
-- 低情绪但未归零: 允许交易，但降低总仓位和买入优先级。
-- 高波动触发 `volCap`: 即使扩散度强，也限制总仓位，避免高波动追涨。
+- `sentimentExposure == 0`: 只表示市场情绪保护触发；不再过滤 7% 盈利预测模型 Top5。
+- 低情绪但未归零: 仅作为情绪审计/展示，不改变模型选股列表。
+- 高波动触发 `volCap`: 仅作为情绪审计/展示，不改变模型选股列表。
 
 ### 3.2 基于市场情绪的选股层
 
@@ -245,8 +245,8 @@ universe
 
 仓位规则:
 
-- 组合总仓位不得超过 `sentimentExposure`。
-- 单票理论上限可先用 `sentimentExposure / selectedCount`。
+- 模型确认组合按 Top5 等权，`target_weight = 1.0 / selectedCount`。
+- `sentimentExposure` 不再约束确认组合权重，只保留为情绪审计字段。
 - 真实买入数量应同时满足:
 
 ```text
@@ -513,7 +513,7 @@ data class ExecutionFeasibilityOutput(
 策略侧输出到回测的主链路：
 
 ```text
-daily_target_portfolio
+daily_profit_prediction_selection
   -> DbBackedDecisionFeed.targetRowsFor(target_date)
   -> TargetPortfolioDecision(effectiveDate=target_date, targetWeights, sentimentExposure)
   -> OrderSizer 在回测账户私有域内折算股数
@@ -526,7 +526,7 @@ daily_target_portfolio
 | `target_date` | `effectiveDate` | 目标组合实际执行日 |
 | `ts_code` | `targetWeights` key | 股票代码，保留交易所后缀 |
 | `selected` + `target_weight` | `targetWeights[tsCode]` | 仅 `selected=true` 且权重大于 0 的行进入目标组合 |
-| `sentiment_exposure` | `sentimentExposure` | 策略给出的总暴露上限，仅作审计/约束参考 |
+| `sentiment_exposure` | `sentimentExposure` | 市场情绪水位，仅作审计/展示参考，不约束确认组合 |
 | `selection_reason` / `selection_score` | `reason` | 只作为可读审计原因，不参与账户计算 |
 
 降级链路：
@@ -536,13 +536,13 @@ daily_strategy_audit.newly_selected_json / dropped_json
   -> TradeIntentDecision(BUY / SELL)
 ```
 
-该降级只在 `daily_target_portfolio` 对应目标日没有记录时启用，并按 `target_date` 的上一交易日读取 `daily_strategy_audit.trade_date`，避免把 T 日盘后审计信号错配到 T+1 之后才执行；同时避免同一股票既被目标组合又被审计列表重复转成交易意图。
+该降级只在 `daily_profit_prediction_selection` 对应目标日没有记录时启用，并按 `target_date` 的上一交易日读取 `daily_strategy_audit.trade_date`，避免把 T 日盘后审计信号错配到 T+1 之后才执行；同时避免同一股票既被目标组合又被审计列表重复转成交易意图。
 
 边界要求：
 
 - 策略输出必须保持零账户感知，不携带现金、数量、持仓、可卖数量等字段。
 - 回测内部的权重到金额、金额到股数、现金不足缩放、T+1、涨跌停、整手、撮合和费用全部在 `backtest` 模块完成。
-- 回测结果现阶段不落库，只返回给 HTTP 调用方或写入 CLI 本地工作区文件；不写回 `daily_target_portfolio` / `daily_strategy_audit`。
+- 回测结果现阶段不落库，只返回给 HTTP 调用方或写入 CLI 本地工作区文件；不写回 `daily_profit_prediction_selection` / `daily_strategy_audit`。
 
 ## 11. 用户操作视角：以交易日为推进单位的完整交易闭环
 
@@ -568,7 +568,7 @@ daily_strategy_audit.newly_selected_json / dropped_json
 ④ 买卖点层 → 为候选 + 已有持仓逐一生成 BUY / SELL / HOLD / WAIT 信号
 ⑤ 仓位层 → 权重 × 权益 → 目标金额 → 按 100 股取整 → 目标股数
 ⑥ 交易可行性检查 → ExecutableOrderPlan + BlockedOrder + PendingAction
-⑦ 写入 daily_target_portfolio（盘后确认事实，T+1 执行的唯一依据）
+⑦ 写入 daily_profit_prediction_selection（盘后确认事实，T+1 执行的唯一依据）
 ```
 
 **你此时的操作：**
@@ -679,7 +679,7 @@ daily_strategy_audit.newly_selected_json / dropped_json
 
 | 维度 | 实盘 | 回测 |
 | --- | --- | --- |
-| 策略输入 | 策略产出权重 | 读取 `daily_target_portfolio`（历史确认事实） |
+| 策略输入 | 策略产出权重 | 读取 `daily_profit_prediction_selection`（历史确认事实） |
 | 执行价 | 实际成交价 | 次日开盘价 + 滑点模型 |
 | 费用 | 券商实收 | 佣金万 2.5 / 最低 5 元 / 印花税 0.05% |
 | 约束规则 | 交易所实时规则 | 回测内置规则链（11 种 BlockReason） |
@@ -724,7 +724,7 @@ sequenceDiagram
     SS->>SS: ④ 选股层横截面排名 → TOP_N 候选
     SS->>SS: ⑤ 买卖点层 → BUY/SELL/HOLD/WAIT 信号
     SS->>SS: ⑥ 仓位层：权重→金额→股数，按 100 股取整
-    SS->>DB: ⑦ 写入 daily_target_portfolio（T+1 目标组合）
+    SS->>DB: ⑦ 写入 daily_profit_prediction_selection（T+1 目标组合）
     SS->>DB: ⑧ 写入 daily_strategy_audit（新增/剔除/原因）
 
     K->>SS: ⑨ 发送 RebuildDate(T+1) command
@@ -826,7 +826,7 @@ sequenceDiagram
         Note over U,K: 👤 你发起回测
         U->>FE: ㊾ 配置回测参数（区间/初始资金/费率/规则）
         FE->>K: ㊿ POST /api/backtest/run
-        K->>DB: (51) 读取 daily_target_portfolio（目标组合事实）
+        K->>DB: (51) 读取 daily_profit_prediction_selection（目标组合事实）
         alt 目标组合缺失
             K->>DB: (52) 降级：读取上一交易日 daily_strategy_audit
         end

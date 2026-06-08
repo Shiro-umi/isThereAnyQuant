@@ -378,13 +378,13 @@ fun sentimentExposureNarrative(value: Double, percentile: Double?): String {
         else -> "处于历史较低水平（后${(percentile * 100).toInt()}%）"
     }
     return when {
-        value >= 0.85 -> "当前市场情绪处于强势扩张期，$rankPhrase，多头力量充沛，策略建议满仓参与并维持高配逻辑。"
-        value >= 0.70 -> "市场情绪积极，$rankPhrase，短期趋势向上，建议保持较高仓位运作。"
-        value >= 0.55 -> "市场多空相对均衡，情绪略微偏暖，$rankPhrase，可适度增加风险敞口。"
-        value >= 0.40 -> "多空力量胶着，策略信号中性，$rankPhrase，建议维持半仓灵活应对。"
-        value >= 0.20 -> "市场情绪偏弱，赚钱效应不足，$rankPhrase，建议控制仓位、谨慎观望。"
-        value > 0.0 -> "当前空头氛围浓厚，策略处于防御状态，$rankPhrase，建议轻仓或空仓等待信号修复。"
-        else -> "绝对水位保护已触发，市场不满足建仓安全红线，策略仓位强制归零，当前必须空仓。"
+        value >= 0.85 -> "当前市场情绪处于强势扩张期，$rankPhrase，多头力量充沛。"
+        value >= 0.70 -> "市场情绪积极，$rankPhrase，短期趋势向上。"
+        value >= 0.55 -> "市场多空相对均衡，情绪略微偏暖，$rankPhrase。"
+        value >= 0.40 -> "多空力量胶着，策略信号中性，$rankPhrase。"
+        value >= 0.20 -> "市场情绪偏弱，赚钱效应不足，$rankPhrase。"
+        value > 0.0 -> "当前空头氛围浓厚，策略处于防御状态，$rankPhrase。"
+        else -> "绝对水位保护已触发，市场不满足情绪安全红线，但模型 Top5 仍会展示。"
     }
 }
 

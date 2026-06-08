@@ -5,9 +5,9 @@ import org.shiroumi.database.common.repository.TradingCalendarRepository
 import org.shiroumi.database.strategy.daily.repository.DailyFactorRollingStateRepository
 import org.shiroumi.database.strategy.daily.repository.DailyMarketSentimentRepository
 import org.shiroumi.database.strategy.daily.repository.DailyMarketSentimentStateRepository
+import org.shiroumi.database.strategy.daily.repository.DailyProfitPredictionSelectionRepository
 import org.shiroumi.database.strategy.daily.repository.DailyStockFactorRepository
 import org.shiroumi.database.strategy.daily.repository.DailyStrategyAuditRepository
-import org.shiroumi.database.strategy.daily.repository.DailyTargetPortfolioRepository
 import org.shiroumi.database.strategy.daily.repository.SentimentRuntimeSeedRepository
 
 data class DailyStrategyRecoverySummary(
@@ -42,7 +42,7 @@ object DailyStrategyRecoveryService {
             marketSentimentStateCount = DailyMarketSentimentStateRepository.countByDate(tradeDate),
             stockFactorCount = DailyStockFactorRepository.countByDate(tradeDate),
             factorRollingStateCount = DailyFactorRollingStateRepository.countByDate(tradeDate),
-            targetPortfolioCount = DailyTargetPortfolioRepository.countByDate(tradeDate),
+            targetPortfolioCount = DailyProfitPredictionSelectionRepository.countByDate(tradeDate),
             strategyAuditCount = DailyStrategyAuditRepository.countByDate(tradeDate),
             runtimeSeedCount = SentimentRuntimeSeedRepository.countBySourceTradeDate(tradeDate),
             strategyUpdated = !TradingCalendarRepository.findPendingStrategyDates(tradeDate).contains(tradeDate),
@@ -56,7 +56,7 @@ object DailyStrategyRecoveryService {
             DailyMarketSentimentStateRepository.deleteByDate(tradeDate)
             DailyStockFactorRepository.deleteByDate(tradeDate)
             DailyFactorRollingStateRepository.deleteByDate(tradeDate)
-            DailyTargetPortfolioRepository.deleteByDate(tradeDate)
+            DailyProfitPredictionSelectionRepository.deleteByDate(tradeDate)
             DailyStrategyAuditRepository.deleteByDate(tradeDate)
             SentimentRuntimeSeedRepository.deleteBySourceTradeDate(tradeDate)
             TradingCalendarRepository.resetStrategyUpdated(tradeDate, tradeDate)

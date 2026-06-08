@@ -69,6 +69,7 @@ internal fun ctx(
     ipoFrozen: Set<String> = emptySet(),
     delisted: Set<String> = emptySet(),
     ledger: LedgerView = FakeLedger(),
+    signalLimitUp: Set<String> = emptySet(),
 ): MatchingContext = MatchingContext(
     tradeDate = tradeDate,
     executionBasis = PriceBasis.RAW,
@@ -78,6 +79,7 @@ internal fun ctx(
     suspended = suspended,
     ipoFrozen = ipoFrozen,
     delisted = delisted,
+    signalLimitUp = signalLimitUp,
 )
 
 internal fun order(

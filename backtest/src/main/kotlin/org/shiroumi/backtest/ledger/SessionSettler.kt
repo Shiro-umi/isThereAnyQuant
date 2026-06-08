@@ -17,6 +17,7 @@ class SessionSettler(
 
     private val positionSnapshots: MutableList<DailyPositionSnapshot> = mutableListOf()
     private val equityCurve: MutableList<EquityPoint> = mutableListOf()
+    private val lastClosePrices: MutableMap<String, Double> = mutableMapOf()
 
     fun positionSnapshotHistory(): List<DailyPositionSnapshot> = positionSnapshots.toList()
 
@@ -27,7 +28,8 @@ class SessionSettler(
     }
 
     fun postClose(date: LocalDate, quote: Map<String, Double>): DailySettlement {
-        val positionValue = ledger.positionValue(quote)
+        lastClosePrices.putAll(quote)
+        val positionValue = ledger.positionValue(lastClosePrices)
         val equity = ledger.cash + positionValue
         val positionSnapshot = DailyPositionSnapshot(
             tradeDate = date,

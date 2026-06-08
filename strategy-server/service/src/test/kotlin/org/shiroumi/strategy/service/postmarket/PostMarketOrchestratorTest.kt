@@ -1,5 +1,6 @@
 package org.shiroumi.strategy.service.postmarket
 
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -8,8 +9,8 @@ import kotlin.test.assertNull
 /**
  * PostMarketOrchestrator 的最小回归测试。
  *
- * 21 步算法链等价性由 [PostMarketPreparationJob] 自身的算法回归测试和
- * 复用的 [TargetPortfolioGeneratorTest] / [SentimentRuntimeSeedBuilderTest] 等保证。
+ * 盘后算法链由 [PostMarketPreparationJob] 自身的算法回归测试和
+ * [org.shiroumi.strategy.core.daily.seed.SentimentRuntimeSeedBuilder] 等保证。
  *
  * owner 切换路径由 [org.shiroumi.strategy.service.runtime.PostMarketStrategyRuntimeTest] 覆盖。
  *
@@ -43,5 +44,16 @@ class PostMarketOrchestratorTest {
         assertEquals(emptyList(), result.processedDates)
         assertNull(result.failedDate)
         assertNull(result.failure)
+    }
+
+    @Test
+    fun runActualBackfill() = runBlocking {
+        org.shiroumi.config.ConfigManager.load()
+        val start = kotlinx.datetime.LocalDate(2026, 5, 4)
+        val end = kotlinx.datetime.LocalDate(2026, 6, 5)
+        val dates = org.shiroumi.database.common.repository.TradingCalendarRepository.findOpenDates(start, end)
+        println("Rebuilding strategy for dates: $dates")
+        val result = PostMarketOrchestrator.executeTradeDates(dates)
+        println("Rebuild complete. Processed dates: ${result.processedDates}")
     }
 }

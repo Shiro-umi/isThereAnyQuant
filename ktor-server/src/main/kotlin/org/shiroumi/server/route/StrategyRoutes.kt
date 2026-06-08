@@ -5,8 +5,8 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.route
+import org.shiroumi.database.strategy.daily.repository.DailyProfitPredictionSelectionRepository
 import org.shiroumi.database.strategy.daily.repository.DailyStrategyAuditRepository
-import org.shiroumi.database.strategy.daily.repository.DailyTargetPortfolioRepository
 import org.shiroumi.server.dto.ApiResponse
 
 @kotlinx.serialization.Serializable
@@ -35,6 +35,13 @@ data class StrategyPositionResponse(
     val newlySelected: List<String>,
     val dropped: List<String>,
     val nextSessionSelections: List<String>,
+    val nextSessionSelectionDetails: List<StrategySelectionResponse> = emptyList(),
+)
+
+@kotlinx.serialization.Serializable
+data class StrategySelectionResponse(
+    val tsCode: String,
+    val modelScore: Double,
 )
 
 fun Route.strategyRoutes() {
@@ -82,15 +89,18 @@ fun Route.strategyRoutes() {
                 if (summary == null) {
                     call.respond(HttpStatusCode.NotFound, ApiResponse.error<StrategyPositionResponse>("NOT_FOUND", "暂无策略持仓数据"))
                 } else {
-                    val nextSessionSelections = DailyTargetPortfolioRepository.findSelectionsByTradeDates(listOf(summary.tradeDate))
+                    val nextSessionSelectionRecords = DailyProfitPredictionSelectionRepository.findSelectionsByTradeDates(listOf(summary.tradeDate))
                         .getOrElse(summary.tradeDate) { emptyList() }
-                        .map { it.tsCode }
+                    val nextSessionSelections = nextSessionSelectionRecords.map { it.tsCode }
                     val data = StrategyPositionResponse(
                         tradeDate = summary.tradeDate.toString(),
                         currentPositions = summary.currentPositions,
                         newlySelected = nextSessionSelections.filterNot { it in summary.currentPositions },
                         dropped = summary.dropped,
                         nextSessionSelections = nextSessionSelections,
+                        nextSessionSelectionDetails = nextSessionSelectionRecords.map {
+                            StrategySelectionResponse(tsCode = it.tsCode, modelScore = it.modelScore)
+                        },
                     )
                     call.respond(ApiResponse.success(data))
                 }

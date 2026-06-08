@@ -7,8 +7,9 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import model.Candle
 import model.candle.StrategyPositionTrackingResponse
 import model.ws.PositionSource
+import model.ws.StrategySelectionSnapshot
 import model.ws.StrategyPositionSnapshot
-import org.shiroumi.database.strategy.daily.repository.DailyTargetSelection
+import org.shiroumi.database.strategy.daily.repository.ProfitPredictionSelection
 import org.shiroumi.strategy.client.LocalStrategySnapshotHub
 import org.shiroumi.strategy.contract.StrategyTopic
 import org.shiroumi.strategy.core.audit.StrategyAuditSummary
@@ -35,12 +36,12 @@ class StrategyPositionTrackingRuntimeTest {
                     audit(day1, currentPositions = listOf("000001.SZ"))
                 ),
                 selectionsByTradeDate = mapOf(
-                    day1 to listOf(selection(day1, "000002.SZ")),
-                    day2 to listOf(selection(day2, "000003.SZ"))
+                    day1 to listOf(selection(day1, "000002.SZ", 0.7)),
+                    day2 to listOf(selection(day2, "000003.SZ", 0.93))
                 ),
                 holdingsByTargetDate = mapOf(
-                    day1 to listOf(selection(day1, "000001.SZ")),
-                    day2 to listOf(selection(day1, "000002.SZ"))
+                    day1 to listOf(selection(day1, "000001.SZ", 0.6)),
+                    day2 to listOf(selection(day1, "000002.SZ", 0.7))
                 ),
                 names = mapOf(
                     "000001.SZ" to "A",
@@ -61,6 +62,7 @@ class StrategyPositionTrackingRuntimeTest {
                 currentPositions = listOf("000002.SZ"),
                 source = PositionSource.DAILY_AUDIT_COMPLETE,
                 nextSessionSelections = listOf("000003.SZ"),
+                nextSessionSelectionDetails = listOf(StrategySelectionSnapshot("000003.SZ", 0.93)),
                 newlySelected = listOf("000003.SZ")
             )
         )
@@ -73,6 +75,7 @@ class StrategyPositionTrackingRuntimeTest {
         )
         assertEquals(listOf("2026-04-29", "2026-04-30"), payload.days.map { it.tradeDate })
         assertEquals(listOf("000003.SZ"), payload.days.last().selection.map { it.stockCode })
+        assertEquals(listOf(0.93), payload.days.last().selection.map { it.modelScore })
         assertEquals(listOf("000002.SZ"), payload.days.last().holdings.map { it.stockCode })
         assertEquals(StrategyTopic.POSITION_TRACKING, envelope.topic)
 
@@ -82,6 +85,7 @@ class StrategyPositionTrackingRuntimeTest {
                 currentPositions = listOf("000002.SZ"),
                 source = PositionSource.INTRADAY_REALTIME,
                 nextSessionSelections = listOf("000004.SZ"),
+                nextSessionSelectionDetails = listOf(StrategySelectionSnapshot("000004.SZ", 0.97)),
                 newlySelected = listOf("000004.SZ")
             )
         )
@@ -91,6 +95,7 @@ class StrategyPositionTrackingRuntimeTest {
             assertNotNull(hub.current(StrategyTopic.POSITION_TRACKING)).payload
         )
         assertEquals(listOf("000004.SZ"), updated.days.last().selection.map { it.stockCode })
+        assertEquals(listOf(0.97), updated.days.last().selection.map { it.modelScore })
     }
 
     private fun audit(
@@ -119,11 +124,18 @@ class StrategyPositionTrackingRuntimeTest {
         volCap = 1.0
     )
 
-    private fun selection(tradeDate: LocalDate, tsCode: String) =
-        DailyTargetSelection(
+    private fun selection(tradeDate: LocalDate, tsCode: String, modelScore: Double) =
+        ProfitPredictionSelection(
             tradeDate = tradeDate,
+            targetDate = tradeDate,
             tsCode = tsCode,
-            selectionScore = 1.0
+            modelScore = modelScore,
+            selected = true,
+            targetWeight = 0.2,
+            sentimentExposure = 1.0,
+            selectionReason = null,
+            modelId = "test-model",
+            candidateMode = "all-universe"
         )
 
     private fun candle(tsCode: String, date: LocalDate, open: Float, close: Float) =
@@ -149,17 +161,17 @@ class StrategyPositionTrackingRuntimeTest {
 
 private class FakeTrackingDataSource(
     private val audits: List<StrategyAuditSummary>,
-    private val selectionsByTradeDate: Map<LocalDate, List<DailyTargetSelection>>,
-    private val holdingsByTargetDate: Map<LocalDate, List<DailyTargetSelection>>,
+    private val selectionsByTradeDate: Map<LocalDate, List<ProfitPredictionSelection>>,
+    private val holdingsByTargetDate: Map<LocalDate, List<ProfitPredictionSelection>>,
     private val names: Map<String, String>,
     private val candles: Map<String, Map<LocalDate, Candle>>
 ) : StrategyPositionTrackingDataSource {
     override fun loadAuditSummaries(limit: Int): List<StrategyAuditSummary> = audits.take(limit)
 
-    override fun loadSelectionsByTradeDate(tradeDates: List<LocalDate>): Map<LocalDate, List<DailyTargetSelection>> =
+    override fun loadSelectionsByTradeDate(tradeDates: List<LocalDate>): Map<LocalDate, List<ProfitPredictionSelection>> =
         selectionsByTradeDate.filterKeys { it in tradeDates }
 
-    override fun loadHoldingsByTargetDate(targetDates: List<LocalDate>): Map<LocalDate, List<DailyTargetSelection>> =
+    override fun loadHoldingsByTargetDate(targetDates: List<LocalDate>): Map<LocalDate, List<ProfitPredictionSelection>> =
         holdingsByTargetDate.filterKeys { it in targetDates }
 
     override fun loadStockNames(tsCodes: Collection<String>): Map<String, String> =

@@ -27,6 +27,7 @@ data class MatchingContext(
     val suspended: Set<String>,
     val ipoFrozen: Set<String>,
     val delisted: Set<String>,
+    val signalLimitUp: Set<String> = emptySet(),
 ) {
     init {
         require(executionBasis == PriceBasis.RAW) {
@@ -39,4 +40,5 @@ data class MatchingContext(
     fun isSuspended(tsCode: String): Boolean = tsCode in suspended
     fun isIpoFrozen(tsCode: String): Boolean = tsCode in ipoFrozen
     fun isDelisted(tsCode: String): Boolean = tsCode in delisted
+    fun isSignalLimitUp(tsCode: String): Boolean = tsCode in signalLimitUp
 }

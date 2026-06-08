@@ -6,6 +6,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.decodeFromJsonElement
 import model.ws.PositionSource
 import model.ws.StrategyPositionSnapshot
+import org.shiroumi.database.strategy.daily.repository.ProfitPredictionSelection
 import org.shiroumi.strategy.client.LocalStrategySnapshotHub
 import org.shiroumi.strategy.contract.StrategyTopic
 import org.shiroumi.strategy.core.audit.StrategyAuditSummary
@@ -29,7 +30,7 @@ class PostMarketStrategyRuntimeTest {
                 currentPositions = listOf("000001.SZ"),
                 newlySelected = listOf("000002.SZ")
             ),
-            nextSelections = listOf("000001.SZ", "000002.SZ")
+            nextSelections = listOf(selection("000001.SZ", 0.72), selection("000002.SZ", 0.91))
         )
         val runtime = PostMarketStrategyRuntime(
             snapshotHub = hub,
@@ -45,7 +46,8 @@ class PostMarketStrategyRuntimeTest {
         assertEquals("2026-04-30", payload.tradeDate)
         assertEquals(PositionSource.DAILY_AUDIT_COMPLETE, payload.source)
         assertEquals(listOf("000001.SZ"), payload.currentPositions)
-        assertEquals(listOf("000001.SZ", "000002.SZ"), payload.nextSessionSelections)
+        assertEquals(listOf("000002.SZ", "000001.SZ"), payload.nextSessionSelections)
+        assertEquals(listOf(0.91, 0.72), payload.nextSessionSelectionDetails.map { it.modelScore })
         assertEquals(listOf("000002.SZ"), payload.newlySelected)
     }
 
@@ -59,7 +61,7 @@ class PostMarketStrategyRuntimeTest {
                 currentPositions = listOf("000001.SZ"),
                 newlySelected = listOf("000002.SZ")
             ),
-            nextSelections = listOf("000001.SZ", "000002.SZ")
+            nextSelections = listOf(selection("000001.SZ", 0.61), selection("000002.SZ", 0.88))
         )
         val runtime = PostMarketStrategyRuntime(
             snapshotHub = hub,
@@ -77,7 +79,8 @@ class PostMarketStrategyRuntimeTest {
         assertEquals("2026-04-30", payload.tradeDate)
         assertEquals(PositionSource.DAILY_AUDIT_COMPLETE, payload.source)
         assertEquals(listOf("000001.SZ"), payload.currentPositions)
-        assertEquals(listOf("000001.SZ", "000002.SZ"), payload.nextSessionSelections)
+        assertEquals(listOf("000002.SZ", "000001.SZ"), payload.nextSessionSelections)
+        assertEquals(listOf(0.88, 0.61), payload.nextSessionSelectionDetails.map { it.modelScore })
         assertEquals(listOf("000002.SZ"), payload.newlySelected)
     }
 
@@ -89,7 +92,7 @@ class PostMarketStrategyRuntimeTest {
             openDates = listOf(tradeDate, nextDate),
             executionResult = PostMarketOrchestrator.ExecutionResult(processedDates = listOf(tradeDate, nextDate)),
             auditSummary = auditSummary(tradeDate = nextDate, currentPositions = listOf("000003.SZ")),
-            nextSelections = listOf("000003.SZ")
+            nextSelections = listOf(selection("000003.SZ", 0.7))
         )
         val runtime = PostMarketStrategyRuntime(
             snapshotHub = hub,
@@ -118,7 +121,7 @@ class PostMarketStrategyRuntimeTest {
                 currentPositions = listOf("000001.SZ", "000002.SZ"),
                 newlySelected = listOf("000002.SZ")
             ),
-            nextSelections = listOf("000001.SZ", "000003.SZ")
+            nextSelections = listOf(selection("000001.SZ", 0.62), selection("000003.SZ", 0.93))
         )
         val runtime = PostMarketStrategyRuntime(
             snapshotHub = hub,
@@ -133,7 +136,8 @@ class PostMarketStrategyRuntimeTest {
             StrategyPositionSnapshot.serializer(),
             assertNotNull(hub.current(StrategyTopic.POSITIONS)).payload
         )
-        assertEquals(listOf("000001.SZ", "000003.SZ"), payload.nextSessionSelections)
+        assertEquals(listOf("000003.SZ", "000001.SZ"), payload.nextSessionSelections)
+        assertEquals(listOf(0.93, 0.62), payload.nextSessionSelectionDetails.map { it.modelScore })
         assertEquals(listOf("000003.SZ"), payload.newlySelected)
     }
 
@@ -174,7 +178,12 @@ class PostMarketStrategyRuntimeTest {
                 currentPositions = listOf("000001.SZ", "000002.SZ", "000003.SZ"),
                 newlySelected = listOf("000004.SZ")
             ),
-            nextSelections = listOf("000001.SZ", "000002.SZ", "000003.SZ", "000004.SZ")
+            nextSelections = listOf(
+                selection("000001.SZ", 0.99),
+                selection("000002.SZ", 0.88),
+                selection("000003.SZ", 0.77),
+                selection("000004.SZ", 0.66)
+            )
         )
         val runtime = PostMarketStrategyRuntime(
             snapshotHub = hub,
@@ -221,6 +230,19 @@ class PostMarketStrategyRuntimeTest {
         assertEquals(0, dataSource.executedDates.size)
     }
 
+    private fun selection(tsCode: String, modelScore: Double) = ProfitPredictionSelection(
+        tradeDate = tradeDate,
+        targetDate = tradeDate,
+        tsCode = tsCode,
+        modelScore = modelScore,
+        selected = true,
+        targetWeight = 0.2,
+        sentimentExposure = 1.0,
+        selectionReason = null,
+        modelId = "test-model",
+        candidateMode = "all-universe"
+    )
+
     private fun auditSummary(
         tradeDate: LocalDate,
         currentPositions: List<String>,
@@ -254,7 +276,7 @@ private class FakePostMarketDataSource(
     private val executionResult: PostMarketOrchestrator.ExecutionResult,
     private val auditSummary: StrategyAuditSummary? = null,
     private val currentPositions: List<String> = emptyList(),
-    private val nextSelections: List<String> = emptyList()
+    private val nextSelections: List<ProfitPredictionSelection> = emptyList()
 ) : PostMarketStrategyRuntimeDataSource {
     val executedDates = mutableListOf<List<LocalDate>>()
 
@@ -272,5 +294,6 @@ private class FakePostMarketDataSource(
 
     override fun loadCurrentPositionCodes(tradeDate: LocalDate): List<String> = currentPositions
 
-    override fun loadNextSessionSelections(tradeDate: LocalDate): List<String> = nextSelections
+    override fun loadNextSessionSelections(tradeDate: LocalDate): List<ProfitPredictionSelection> =
+        nextSelections.sortedWith(compareByDescending<ProfitPredictionSelection> { it.modelScore }.thenBy { it.tsCode })
 }

@@ -21,12 +21,7 @@ object StrategyAuditGenerator {
         val newlySelected = currentPositions - previousCurrentPositions
         val dropped = previousCurrentPositions - currentPositions
 
-        val emptyReason = when {
-            sentiment.sentimentExposure == 0.0 -> "情绪仓位为0: ${sentiment.reason ?: "触发下限/高波保护"}"
-            signalPositiveCount == 0 -> "所有股票均未触发EMA趋势信号"
-            selectedTargets.isEmpty() -> "选股后全军覆没(可能是代码异常或无足够评分)"
-            else -> null
-        }
+        val emptyReason = if (selectedTargets.isEmpty()) "模型选股为空或无足够评分" else null
 
         return StrategyAuditSummary(
             tradeDate = tradeDate,

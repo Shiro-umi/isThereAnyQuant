@@ -2,15 +2,11 @@ package org.shiroumi.strategy.core.intraday
 
 import kotlinx.datetime.LocalDate
 import org.shiroumi.strategy.core.daily.MarketSentimentSnapshot
-import org.shiroumi.strategy.core.daily.PortfolioSelectionEngine
 import org.shiroumi.strategy.core.daily.StockFactorSnapshot
-
-private const val TOP_N = 5
-private const val WEIGHT_CHANGE_THRESHOLD = 0.10  // 权重变化阈值 10%
 
 /**
  * 盘中目标持仓数据类
- * 包含选股结果、盘后对比和调仓建议
+ * 包含盘后模型确认组合，以及盘中价格/量能展示指标。
  */
 data class TargetPosition(
     val tsCode: String,
@@ -22,7 +18,7 @@ data class TargetPosition(
     val volumeRatio: Double,
     val postMarketSelected: Boolean?,
     val postMarketWeight: Double?,
-    val action: String?,  // BUY/SELL/HOLD
+    val action: String?,
     val actionReason: String?
 )
 
@@ -30,10 +26,8 @@ data class TargetPosition(
  * 盘中目标组合生成器
  *
  * 核心设计原则：
- * 1. 复用盘后横截面选股口径
- * 2. 取 TOP_N = 5
- * 4. 计算目标权重 = sentimentExposure / TOP_N
- * 5. 对比盘后持仓，生成调仓建议
+ * 盘中不再维护独立的因子 rank 选股口径。
+ * 盘后目标组合由研究模型生成，盘中仅基于实时因子补充价格/量能展示并沿用盘后模型目标。
  *
  * 性能目标：单次组合生成耗时 < 50ms
  */
@@ -47,7 +41,7 @@ object IntradayPortfolioGenerator {
      * @param factors 盘中因子快照列表
      * @param sentiment 市场情绪快照
      * @param topN 选股数量，默认5只
-     * @param postMarketPositions 盘后目标持仓（用于对比），可为null
+     * @param postMarketPositions 盘后模型确认的目标持仓
      * @return 目标持仓列表
      */
     fun generate(
@@ -55,182 +49,46 @@ object IntradayPortfolioGenerator {
         timestamp: Long,
         factors: List<StockFactorSnapshot>,
         sentiment: MarketSentimentSnapshot,
-        topN: Int = TOP_N,
+        topN: Int = 5,
         postMarketPositions: List<org.shiroumi.strategy.core.daily.TargetPosition>? = null
     ): List<TargetPosition> {
         val startTime = System.currentTimeMillis()
         val exposure = sentiment.sentimentExposure
-
-        val selectedFactors = PortfolioSelectionEngine.selectTopSelections(
-            factors = factors,
-            sentimentExposure = exposure,
-            topN = topN
-        )
-
-        if (selectedFactors.isEmpty()) {
+        val postMarketSelected = postMarketPositions
+            ?.filter { it.selected }
+            ?.sortedWith(compareByDescending<org.shiroumi.strategy.core.daily.TargetPosition> { it.selectionScore }.thenBy { it.tsCode })
+            ?.take(topN)
+            ?: emptyList()
+        if (postMarketSelected.isEmpty()) {
             return emptyList()
         }
-        val selectedCodes = selectedFactors.map { it.factor.tsCode }.toSet()
+        val factorByCode = factors.associateBy { it.tsCode }
 
-        // 4. 构建盘后持仓映射（用于对比）
-        val postMarketMap = postMarketPositions
-            ?.filter { it.selected }
-            ?.associateBy { it.tsCode }
-            ?: emptyMap()
-        val postMarketCodes = postMarketMap.keys
-
-        // 5. 计算目标权重
-        val weightPerStock = if (selectedFactors.isEmpty() || exposure == 0.0) 0.0 else exposure / selectedFactors.size
-
-        // 6. 生成目标持仓（包含调仓建议）
-        val positions = selectedFactors.map { selection ->
-            val factor = selection.factor
-            val tsCode = factor.tsCode
-            val postMarketPosition = postMarketMap[tsCode]
-            val postMarketSelected = postMarketPosition?.selected
-            val postMarketWeight = postMarketPosition?.targetWeight
-
-            // 计算调仓建议
-            val (action, actionReason) = determineAction(
-                tsCode = tsCode,
-                intradaySelected = true,
-                intradayWeight = weightPerStock,
-                postMarketSelected = postMarketSelected,
-                postMarketWeight = postMarketWeight
-            )
-
-            // 计算盘中变化追踪指标
-            val priceChangePct = if (factor.open == 0.0) 0.0 else (factor.close - factor.open) / factor.open
-            val volumeRatio = factor.volRatio520
+        val positions = postMarketSelected.map { postMarketPosition ->
+            val factor = factorByCode[postMarketPosition.tsCode]
+            val priceChangePct = factor?.let { if (it.open == 0.0) 0.0 else (it.close - it.open) / it.open } ?: 0.0
+            val volumeRatio = factor?.volRatio520 ?: 0.0
 
             TargetPosition(
-                tsCode = tsCode,
-                rankScore = selection.selectionScore,
-                selected = exposure > 0.0, // 情绪为0时不买入
-                targetWeight = if (exposure > 0.0) weightPerStock else 0.0,
+                tsCode = postMarketPosition.tsCode,
+                rankScore = postMarketPosition.selectionScore,
+                selected = postMarketPosition.selected,
+                targetWeight = postMarketPosition.targetWeight,
                 sentimentExposure = exposure,
                 priceChangePct = priceChangePct,
                 volumeRatio = volumeRatio,
-                postMarketSelected = postMarketSelected,
-                postMarketWeight = postMarketWeight,
-                action = action,
-                actionReason = actionReason
+                postMarketSelected = true,
+                postMarketWeight = postMarketPosition.targetWeight,
+                action = null,
+                actionReason = null
             )
         }
-
-        // 7. 处理 SELL 建议（盘中未选中但盘后选中的股票）
-        val sellPositions = postMarketCodes
-            .filter { it !in selectedCodes }
-            .mapNotNull { tsCode ->
-                postMarketMap[tsCode]?.let { postMarketPos ->
-                    TargetPosition(
-                        tsCode = tsCode,
-                        rankScore = 0.0,
-                        selected = false,
-                        targetWeight = 0.0,
-                        sentimentExposure = exposure,
-                        priceChangePct = 0.0,
-                        volumeRatio = 0.0,
-                        postMarketSelected = true,
-                        postMarketWeight = postMarketPos.targetWeight,
-                        action = "SELL",
-                        actionReason = "盘后持仓但盘中未选中"
-                    )
-                }
-            }
-
-        // 合并结果
-        val allPositions = positions + sellPositions
 
         val elapsed = System.currentTimeMillis() - startTime
         if (elapsed > 50) {
             println("[WARN] 组合生成耗时超过50ms: ${elapsed}ms")
         }
 
-        return allPositions
-    }
-
-    /**
-     * 确定调仓建议
-     *
-     * 逻辑：
-     * - BUY: 盘中选中，盘后未选中
-     * - SELL: 盘中未选中，盘后选中
-     * - HOLD: 盘中盘后都选中，但权重变化 > 10%
-     * - null: 无变化
-     *
-     * @param tsCode 股票代码
-     * @param intradaySelected 盘中是否选中
-     * @param intradayWeight 盘中目标权重
-     * @param postMarketSelected 盘后是否选中
-     * @param postMarketWeight 盘后目标权重
-     * @return Pair(动作, 原因)
-     */
-    private fun determineAction(
-        tsCode: String,
-        intradaySelected: Boolean,
-        intradayWeight: Double,
-        postMarketSelected: Boolean?,
-        postMarketWeight: Double?
-    ): Pair<String?, String?> {
-        return when {
-            // BUY: 盘中选中，盘后未选中
-            intradaySelected && postMarketSelected == false -> {
-                "BUY" to "新进入TOP_$TOP_N"
-            }
-
-            // BUY: 盘中选中，盘后无记录（新上市或首次进入）
-            intradaySelected && postMarketSelected == null -> {
-                "BUY" to "新进入TOP_$TOP_N"
-            }
-
-            // HOLD: 盘中盘后都选中，但权重变化 > 10%
-            intradaySelected && postMarketSelected == true -> {
-                val weightChange = kotlin.math.abs(intradayWeight - (postMarketWeight ?: 0.0))
-                if (weightChange > WEIGHT_CHANGE_THRESHOLD) {
-                    "HOLD" to "权重变化 ${formatPercent(weightChange)}，需调仓"
-                } else {
-                    null to null // 无变化
-                }
-            }
-
-            // SELL: 盘中未选中，盘后选中（在调用方处理）
-            !intradaySelected && postMarketSelected == true -> {
-                "SELL" to "跌出TOP_$TOP_N"
-            }
-
-            // 其他情况：无变化
-            else -> null to null
-        }
-    }
-
-    /**
-     * 批量生成组合（用于高效处理多批次）
-     *
-     * @param tradeDate 交易日期
-     * @param timestamp 计算时间戳
-     * @param factorBatches 因子批次列表（按板块或流动性分组）
-     * @param sentiment 市场情绪快照
-     * @param topN 每批选股数量
-     * @return 合并后的目标持仓列表
-     */
-    fun generateBatch(
-        tradeDate: LocalDate,
-        timestamp: Long,
-        factorBatches: List<List<StockFactorSnapshot>>,
-        sentiment: MarketSentimentSnapshot,
-        topN: Int = TOP_N
-    ): List<TargetPosition> {
-        // 合并所有批次
-        val allFactors = factorBatches.flatten()
-        return generate(tradeDate, timestamp, allFactors, sentiment, topN)
-    }
-
-    /**
-     * 格式化百分比（避免使用 String.format，JS平台不兼容）
-     */
-    private fun formatPercent(value: Double): String {
-        val rounded = kotlin.math.round(value * 1000) / 10
-        return "${rounded}%"
+        return positions
     }
 }

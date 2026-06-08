@@ -48,6 +48,7 @@ fun Application.ktorRouting() {
 
         // Local CLI tools logic API
         internalCliRoutes()
+        researchDataRoutes()
 
         // 匿名分享：/s/{token} HTML 页 + /api/v1/public/share/{token}/candles
         // 必须挂在 SPA fallback 之前，否则会被 SPA 接住

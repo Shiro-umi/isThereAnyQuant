@@ -88,7 +88,7 @@ fun SecondaryMetricsCard(
 
 fun factorInsight(fft: Double, residual: Double, floor: Double): String {
     return when {
-        floor < 0.5 -> "绝对水位保护已触发，当前不满足建仓安全条件，建议空仓观望。"
+        floor < 0.5 -> "绝对水位保护已触发，当前不满足情绪安全条件，但模型 Top5 仍会展示。"
         residual >= 0.70 && fft >= 0.70 -> "周期底部与超卖信号共振，情绪拐点向上概率较高，可积极布局。"
         residual >= 0.70 && fft < 0.40 -> "市场虽处周期顶部回落段，但残差提示明显超卖，存在左侧博弈机会。"
         residual < 0.40 && fft >= 0.70 -> "周期虽处回升段，但残差显示价格已高于预期，追高需谨慎。"

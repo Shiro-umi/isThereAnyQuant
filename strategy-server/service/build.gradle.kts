@@ -33,3 +33,17 @@ application {
 tasks.test {
     useJUnitPlatform()
 }
+
+tasks.register<JavaExec>("backfillProfitPredictionSelections") {
+    group = "application"
+    description = "Backfill daily profit prediction selections from the model into daily_profit_prediction_selection"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.shiroumi.strategy.service.BackfillProfitPredictionSelectionsKt")
+    systemProperties(
+        System.getProperties()
+            .stringPropertyNames()
+            .filter { it.startsWith("quant.profitPrediction.") || it == "quant.projectRoot" || it == "quant.project.root" }
+            .associateWith { System.getProperty(it) }
+    )
+    jvmArgs("-Xmx4g")
+}

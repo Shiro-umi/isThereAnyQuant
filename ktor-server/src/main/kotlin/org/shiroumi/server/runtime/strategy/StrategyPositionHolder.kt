@@ -4,10 +4,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import model.ws.PositionSource
+import model.ws.StrategySelectionSnapshot
 import model.ws.StrategyPositionSnapshot
 import org.shiroumi.database.common.repository.TradingCalendarRepository
+import org.shiroumi.database.strategy.daily.repository.DailyProfitPredictionSelectionRepository
 import org.shiroumi.database.strategy.daily.repository.DailyStrategyAuditRepository
-import org.shiroumi.database.strategy.daily.repository.DailyTargetPortfolioRepository
 import org.shiroumi.server.runtime.market.resolveEffectiveTradeDate
 import utils.logger
 import java.time.Clock
@@ -69,12 +70,12 @@ object StrategyPositionHolder {
         }
         val auditPositions = summary.currentPositions
         val positions = auditPositions.ifEmpty {
-            DailyTargetPortfolioRepository.findSelectionsByTargetDate(summary.tradeDate)
+            DailyProfitPredictionSelectionRepository.findSelectionsByTargetDate(summary.tradeDate)
                 .map { it.tsCode }
         }
-        val nextSessionSelections = DailyTargetPortfolioRepository.findSelectionsByTradeDates(listOf(summary.tradeDate))
+        val nextSessionSelectionRecords = DailyProfitPredictionSelectionRepository.findSelectionsByTradeDates(listOf(summary.tradeDate))
             .getOrElse(summary.tradeDate) { emptyList() }
-            .map { it.tsCode }
+        val nextSessionSelections = nextSessionSelectionRecords.map { it.tsCode }
         val newlySelected = nextSessionSelections.filterNot { it in positions }
 
         val effectiveTradeDate = runCatching { resolveEffectiveTradeDate(Clock.systemDefaultZone()) }.getOrNull()
@@ -90,6 +91,9 @@ object StrategyPositionHolder {
             currentPositions = positions,
             source = PositionSource.HISTORICAL_AUDIT,
             nextSessionSelections = nextSessionSelections,
+            nextSessionSelectionDetails = nextSessionSelectionRecords.map {
+                StrategySelectionSnapshot(tsCode = it.tsCode, modelScore = it.modelScore)
+            },
             newlySelected = newlySelected,
         )
     }

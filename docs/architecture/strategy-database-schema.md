@@ -17,7 +17,7 @@ The strategy pipeline is intentionally split into three layers.
 
 - `daily_stock_factor`: confirmed daily factor snapshots. The `rank_score` column is the raw per-symbol factor score, not the final portfolio selection score.
 - `daily_market_sentiment`: confirmed daily sentiment snapshots, including the derived guard inputs (`ratio_norm`, `vol_score`, `accel_score`, `absolute_floor`, `vol_cap`) used by clients and audit views.
-- `daily_target_portfolio`: confirmed post-market target portfolio. `selection_score` is the final cross-sectional portfolio score after sentiment-weighted ranking.
+- `daily_profit_prediction_selection`: confirmed post-market 7% profit-prediction selections. `model_score` is the model probability used for all selected-stock ordering; readers sort by `model_score DESC, ts_code ASC`.
 - `daily_strategy_audit`: daily audit summary for UI and operational checks. Position lists are stored as JSON arrays and are not the source of truth for confirmed selections.
 
 Intraday portfolio output is a runtime projection only. It is published through in-memory holders and WebSocket payloads, and must not be persisted as a long-lived strategy result.

@@ -7,7 +7,7 @@ import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.shiroumi.strategy.core.daily.MarketSentimentSnapshot
 import org.shiroumi.strategy.core.daily.StockFactorSnapshot
-import org.shiroumi.strategy.core.daily.TargetPortfolioGenerator
+import org.shiroumi.strategy.core.daily.TargetPosition
 
 class StrategyAuditGeneratorTest {
 
@@ -55,7 +55,18 @@ class StrategyAuditGeneratorTest {
             reason = null,
         )
 
-        val targets = TargetPortfolioGenerator.generate(tradeDate, targetDate, factors, sentiment)
+        val targets = listOf("600010.SH", "600011.SH", "600012.SH", "600013.SH", "600014.SH").mapIndexed { idx, code ->
+            TargetPosition(
+                tradeDate = tradeDate,
+                targetDate = targetDate,
+                tsCode = code,
+                selectionScore = 0.9 - idx * 0.01,
+                selected = true,
+                targetWeight = 0.1,
+                sentimentExposure = sentiment.sentimentExposure,
+                selectionReason = "profit-prediction-7pct:test:Top5",
+            )
+        }
         val currentPositions = setOf("600010.SH", "600011.SH", "600012.SH", "600013.SH", "600014.SH")
 
         val auditSummary = StrategyAuditGenerator.generate(
@@ -85,7 +96,7 @@ class StrategyAuditGeneratorTest {
     }
 
     @Test
-    @DisplayName("生成审计：情绪为0时应报告正确原因")
+    @DisplayName("生成审计：模型无结果时应报告正确原因")
     fun testAuditEmptyReason() {
         val tradeDate = LocalDate(2026, 3, 27)
 
@@ -112,7 +123,7 @@ class StrategyAuditGeneratorTest {
             reason = "触发水线",
         )
 
-        val targets = TargetPortfolioGenerator.generate(tradeDate, targetDate, factors, sentiment)
+        val targets = emptyList<TargetPosition>()
 
         val auditSummary = StrategyAuditGenerator.generate(
             tradeDate = tradeDate,
@@ -124,7 +135,6 @@ class StrategyAuditGeneratorTest {
             currentPositions = emptySet(),
         )
 
-        assertTrue(auditSummary.emptyReason?.contains("情绪仓位为0") == true)
-        assertTrue(auditSummary.emptyReason?.contains("触发水线") == true)
+        assertEquals("模型选股为空或无足够评分", auditSummary.emptyReason)
     }
 }

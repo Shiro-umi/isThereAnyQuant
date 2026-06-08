@@ -2,7 +2,7 @@ package org.shiroumi.strategy.service.postmarket
 
 import kotlinx.datetime.LocalDate
 import org.shiroumi.database.common.repository.TradingCalendarRepository
-import org.shiroumi.database.strategy.daily.repository.DailyTargetPortfolioRepository
+import org.shiroumi.database.strategy.daily.repository.DailyProfitPredictionSelectionRepository
 import utils.logger
 
 private val logger by logger("PostMarketOrchestrator")
@@ -72,11 +72,11 @@ object PostMarketOrchestrator {
 
         val firstPreviousTradeDate = TradingCalendarRepository.findPreviousTradingDate(tradeDates.first())
         var previousCurrentPositionSymbols = if (firstPreviousTradeDate != null) {
-            DailyTargetPortfolioRepository.findSelectedSymbolsByTargetDate(firstPreviousTradeDate)
+            DailyProfitPredictionSelectionRepository.findSelectedSymbolsByTargetDate(firstPreviousTradeDate)
         } else {
             emptySet()
         }
-        var currentPositionSymbols = DailyTargetPortfolioRepository.findSelectedSymbolsByTargetDate(
+        var currentPositionSymbols = DailyProfitPredictionSelectionRepository.findSelectedSymbolsByTargetDate(
             tradeDates.first(),
         )
         val processedDates = mutableListOf<LocalDate>()

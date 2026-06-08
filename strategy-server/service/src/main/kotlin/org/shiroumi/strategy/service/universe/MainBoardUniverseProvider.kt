@@ -5,11 +5,15 @@ import org.shiroumi.database.common.repository.StockBasicRepository
 object MainBoardUniverseProvider {
     const val UNIVERSE_TYPE = "main_board"
 
-    fun getActiveSymbols(): List<String> = StockBasicRepository.getActiveSymbols()
-        .filter(::isMainBoard)
+    fun getActiveSymbols(): List<String> = StockBasicRepository.findActiveProfiles()
+        .asSequence()
+        .filter { isTenCentimeterMainBoard(it.tsCode, it.name) }
+        .map { it.tsCode }
         .sorted()
+        .toList()
 
-    private fun isMainBoard(tsCode: String): Boolean {
+    internal fun isTenCentimeterMainBoard(tsCode: String, name: String): Boolean {
+        if (name.contains("ST", ignoreCase = true)) return false
         val code = tsCode.substringBefore('.')
         val market = tsCode.substringAfter('.', "")
         return when (market) {

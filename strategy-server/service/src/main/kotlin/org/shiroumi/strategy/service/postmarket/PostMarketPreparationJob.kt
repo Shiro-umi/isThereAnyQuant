@@ -14,7 +14,7 @@ import org.shiroumi.database.strategy.daily.repository.DailyMarketSentimentRepos
 import org.shiroumi.database.strategy.daily.repository.DailyMarketSentimentStateRepository
 import org.shiroumi.database.strategy.daily.repository.DailyStockFactorRepository
 import org.shiroumi.database.strategy.daily.repository.DailyStrategyAuditRepository
-import org.shiroumi.database.strategy.daily.repository.DailyTargetPortfolioRepository
+import org.shiroumi.database.strategy.daily.repository.DailyProfitPredictionSelectionRepository
 import org.shiroumi.database.strategy.daily.repository.DefaultStrategyBarRepository
 import org.shiroumi.database.strategy.daily.repository.SentimentRuntimeSeedRepository
 import org.shiroumi.quant_kmp.strategy.daily.model.PreparedBar
@@ -25,9 +25,9 @@ import org.shiroumi.strategy.core.daily.MarketSentimentRollingState
 import org.shiroumi.strategy.core.daily.MarketSentimentSnapshot
 import org.shiroumi.strategy.core.daily.StockFactorCalculator
 import org.shiroumi.strategy.core.daily.StockFactorSnapshot
-import org.shiroumi.strategy.core.daily.TargetPortfolioGenerator
 import org.shiroumi.strategy.core.daily.preprocessing.PreparedBarFactory
 import org.shiroumi.strategy.core.daily.seed.toRuntimeSeed
+import org.shiroumi.strategy.service.model.ProfitPredictionModelSelector
 import org.shiroumi.strategy.service.preprocessing.DefaultStrategyPreprocessor
 import org.shiroumi.strategy.service.universe.MainBoardUniverseProvider
 import utils.logger
@@ -65,6 +65,8 @@ private data class IncrementalPreparedBars(
  * database 仅提供 Repository / schema 等持久化能力。
  */
 object PostMarketPreparationJob {
+    private val profitPredictionSelector = ProfitPredictionModelSelector()
+
     suspend fun run(
         tradeDate: LocalDate,
         startDate: LocalDate,
@@ -389,10 +391,10 @@ object PostMarketPreparationJob {
         )
 
         val nextTradeDate = TradingCalendarRepository.findNextTradingDate(tradeDate) ?: tradeDate
-        val targets = TargetPortfolioGenerator.generate(
+        val targets = profitPredictionSelector.generateTargets(
             tradeDate = tradeDate,
             targetDate = nextTradeDate,
-            factors = allFactors,
+            universeSymbols = universeSymbols,
             sentiment = sentimentSnapshot,
         )
         logger.info(
@@ -400,13 +402,13 @@ object PostMarketPreparationJob {
                 "totalPositions=${targets.size}, exposure=${sentimentSnapshot.sentimentExposure}"
         )
 
-        DailyTargetPortfolioRepository.deleteByDate(tradeDate)
-        DailyTargetPortfolioRepository.replaceForDate(
+        DailyProfitPredictionSelectionRepository.deleteByDate(tradeDate)
+        DailyProfitPredictionSelectionRepository.replaceForDate(
             tradeDate = tradeDate,
             positions = targets,
         )
         val resolvedCurrentPositionSymbols = currentPositionSymbols.ifEmpty {
-            DailyTargetPortfolioRepository.findSelectedSymbolsByTargetDate(tradeDate)
+            DailyProfitPredictionSelectionRepository.findSelectedSymbolsByTargetDate(tradeDate)
         }
         val auditSummary = StrategyAuditGenerator.generate(
             tradeDate = tradeDate,

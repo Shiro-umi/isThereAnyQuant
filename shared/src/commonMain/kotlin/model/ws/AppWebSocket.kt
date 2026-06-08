@@ -480,6 +480,12 @@ enum class PositionSource {
 }
 
 @Serializable
+data class StrategySelectionSnapshot(
+    val tsCode: String,
+    val modelScore: Double,
+)
+
+@Serializable
 data class StrategyPositionSnapshot(
     /** 当前交易日。 */
     val tradeDate: String,
@@ -488,6 +494,8 @@ data class StrategyPositionSnapshot(
     val source: PositionSource,
     /** tradeDate 当天产生、用于下一交易日开盘买入的选股结果；允许为空。 */
     val nextSessionSelections: List<String> = emptyList(),
+    /** 带模型评分的下一交易日选股结果，按 modelScore 降序排列。 */
+    val nextSessionSelectionDetails: List<StrategySelectionSnapshot> = emptyList(),
     /** 下一交易日候选中相对当前持仓新进入的股票；用于调入提示，不代表完整策略选股列表。 */
     val newlySelected: List<String> = emptyList(),
 )

@@ -22,6 +22,7 @@ object DefaultRuleChain {
             PriceLimitRule(
                 mainBoardLimit = config.rules.priceLimitMainBoard,
                 growthBoardLimit = config.rules.priceLimitGrowthBoard,
+                abandonIfSignalLimitUp = config.rules.abandonIfSignalLimitUp,
             ),
             TickSizeRule(),
             LotSizeRule(),

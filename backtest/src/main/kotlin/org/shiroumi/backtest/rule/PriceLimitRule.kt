@@ -31,9 +31,17 @@ import java.math.RoundingMode
 class PriceLimitRule(
     private val mainBoardLimit: Double = 0.10,
     private val growthBoardLimit: Double = 0.20,
+    private val abandonIfSignalLimitUp: Boolean = false,
 ) : MarketRule {
 
     override fun apply(order: DraftOrder, ctx: MatchingContext): RuleOutcome {
+        if (abandonIfSignalLimitUp && order.side == Side.BUY && ctx.isSignalLimitUp(order.tsCode)) {
+            return RuleOutcome.Block(
+                BlockReason.LIMIT_UP_BUY,
+                "${order.tsCode} 在信号产生日已涨停，严格实盘口径下放弃买入",
+            )
+        }
+
         val preClose = ctx.preCloseOf(order.tsCode) ?: return RuleOutcome.Pass(order)
         val limitPct = limitFor(order.tsCode)
         val upper = round2(preClose * (1.0 + limitPct))
