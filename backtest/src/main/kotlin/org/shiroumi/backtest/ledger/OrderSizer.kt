@@ -27,14 +27,28 @@ class OrderSizer(
 
     fun size(decisions: List<StrategyDecision>, ledger: LedgerView, ctx: MatchingContext): SizingResult {
         val intents = expand(decisions, ledger)
-        val reverseBlocks = sameDayReverseBlocks(intents, ctx)
+
+        // 退出管理器生成的 SELL 与策略新 BUY 冲突时，退出优先：移除冲突的 BUY，保留 SELL
+        val exitSellCodes = intents
+            .filter { it.intendedSide == Side.SELL && isExitReason(it.reason) }
+            .map { it.tsCode }
+            .toSet()
+        val resolvedIntents = if (exitSellCodes.isNotEmpty()) {
+            intents.filter { intent ->
+                !(intent.tsCode in exitSellCodes && intent.intendedSide == Side.BUY)
+            }
+        } else {
+            intents
+        }
+
+        val reverseBlocks = sameDayReverseBlocks(resolvedIntents, ctx)
         val reversedTsCodes = reverseBlocks.map { it.source.tsCode }.toSet()
 
         val drafts = mutableListOf<DraftOrder>()
         val blocked = reverseBlocks.toMutableList()
         var index = 0
 
-        for (intent in intents) {
+        for (intent in resolvedIntents) {
             if (intent.tsCode in reversedTsCodes) continue
             val currentQty = ledger.totalQty(intent.tsCode)
             when {
@@ -58,7 +72,12 @@ class OrderSizer(
                     }
                 }
                 currentQty > 0L && intent.targetWeight <= 0.0 -> {
-                    val price = ctx.bar(intent.tsCode)?.open?.toDouble()
+                    // 退出管理器传来的限价单使用其指定价格，否则用开盘价
+                    val price = if (intent.hint == ExecutionHint.LIMIT && intent.limitPrice != null) {
+                        intent.limitPrice
+                    } else {
+                        ctx.bar(intent.tsCode)?.open?.toDouble()
+                    }
                     drafts += DraftOrder(
                         orderId = orderId(ctx, intent.tsCode, Side.SELL, index++),
                         effectiveDate = ctx.tradeDate,
@@ -109,6 +128,7 @@ class OrderSizer(
                         hint = decision.hint,
                         reason = decision.reason,
                         explicitSide = decision.side,
+                        limitPrice = decision.limitPrice,
                     )
                 }
             }
@@ -223,6 +243,7 @@ class OrderSizer(
         val hint: ExecutionHint,
         val reason: String,
         val explicitSide: Side?,
+        val limitPrice: Double? = null,
     ) {
         val intendedSide: Side?
             get() = explicitSide ?: when {
@@ -239,6 +260,10 @@ class OrderSizer(
 
     private companion object {
         const val LOT = 100L
+
+        /** 判定是否来自 [PositionExitManager] 的退出订单。 */
+        fun isExitReason(reason: String): Boolean =
+            reason.contains("止盈") || reason.contains("时间止损") || reason.contains("价格止损")
     }
 }
 

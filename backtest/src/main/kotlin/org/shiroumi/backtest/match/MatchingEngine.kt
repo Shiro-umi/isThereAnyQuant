@@ -1,6 +1,7 @@
 package org.shiroumi.backtest.match
 
 import kotlinx.datetime.LocalDate
+import org.shiroumi.backtest.domain.ExecutionHint
 import org.shiroumi.backtest.domain.Fill
 import org.shiroumi.backtest.domain.MatchingContext
 import org.shiroumi.backtest.domain.Money
@@ -10,12 +11,33 @@ import org.shiroumi.backtest.domain.ValidatedOrder
  * 撮合引擎：把已通过规则校验的订单转换为成交回报 [Fill]。
  *
  * 本类不修改账户，账户变更只能由下游 AccountLedger.apply(fills) 完成。
+ *
+ * 支持按订单的 [ExecutionHint] 自动选择撮合策略：
+ * - OPEN → OpenPriceMatching（开盘价买入）
+ * - CLOSE → ClosePriceMatching（收盘价卖出，如时间止损 / 价格止损）
+ * - LIMIT → LimitOrderMatching（限价单，如止盈卖出）
+ * - VWAP → VwapMatching
  */
 class MatchingEngine(
-    private val policy: MatchingPolicy,
+    private val policies: Map<ExecutionHint, MatchingPolicy> = mapOf(
+        ExecutionHint.OPEN to OpenPriceMatching,
+        ExecutionHint.CLOSE to ClosePriceMatching,
+        ExecutionHint.VWAP to VwapMatching,
+        ExecutionHint.LIMIT to LimitOrderMatching,
+    ),
     private val slippage: SlippageModel = SlippageModel(),
     private val costs: CostModel = CostModel(),
 ) {
+    constructor(
+        policy: MatchingPolicy,
+        slippage: SlippageModel = SlippageModel(),
+        costs: CostModel = CostModel(),
+    ) : this(
+        policies = ExecutionHint.entries.associateWith { policy },
+        slippage = slippage,
+        costs = costs,
+    )
+
     private val unfilled: MutableList<UnfilledOrder> = mutableListOf()
 
     fun unfilledSnapshot(): List<UnfilledOrder> = unfilled.toList()
@@ -29,7 +51,8 @@ class MatchingEngine(
                 continue
             }
 
-            val price = policy.matchPrice(order, bar, slippage)
+            val selectedPolicy = policies[order.hint] ?: policies[ExecutionHint.OPEN] ?: OpenPriceMatching
+            val price = selectedPolicy.matchPrice(order, bar, slippage)
             if (price == null || !price.isFinite() || price <= 0.0) {
                 unfilled += UnfilledOrder.from(order, ctx.tradeDate, "撮合条件未触发")
                 continue

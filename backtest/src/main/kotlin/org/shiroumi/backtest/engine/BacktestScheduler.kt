@@ -29,7 +29,12 @@ import org.shiroumi.backtest.rule.ValidationResult
 /**
  * 按交易日推进回测主循环。
  *
- * 每个交易日严格按 preOpen → fetchDecisions → size → validate → match → ledger.apply → postClose 执行。
+ * 每个交易日严格按 preOpen → fetchDecisions → checkExits → size → validate → match
+ * → ledger.apply → recordEntryMeta → postClose 执行。
+ *
+ * 当 [exitManager] 提供时，调度器会在盘前自动检查持仓退出条件（止盈/止损），
+ * 并在成交后记录入场元数据供后续退出判定使用。
+ *
  * 单日失败会被记录为 FAILED，调度器继续推进后续交易日。
  */
 class BacktestScheduler(
@@ -42,15 +47,11 @@ class BacktestScheduler(
     private val orderSizer: OrderSizer = OrderSizer(config.costs),
     private val validator: RuleValidator = DefaultRuleChain.build(config),
     private val matchingEngine: MatchingEngine = MatchingEngine(
-        policy = when (config.matching.policy) {
-            MatchingPolicyKind.OPEN_PRICE -> OpenPriceMatching
-            MatchingPolicyKind.VWAP -> VwapMatching
-            MatchingPolicyKind.CLOSE_PRICE -> ClosePriceMatching
-            MatchingPolicyKind.LIMIT -> LimitOrderMatching
-        },
         slippage = SlippageModel(config.slippage),
         costs = CostModel(config.costs),
     ),
+    /** 持仓退出管理器。为 null 时不启用自动退出管理（保持原有行为）。 */
+    private val exitManager: PositionExitManager? = null,
 ) {
 
     fun runLoop(
@@ -68,6 +69,22 @@ class BacktestScheduler(
         val unfilledBefore = matchingEngine.unfilledSnapshot().size
         return try {
             settler.preOpen(date)
+            val decisions = decisionFeed.decisionsFor(date).toMutableList()
+
+            // 检查持仓退出条件（止盈 / 时间止损 / 价格止损）
+            val exitDecisions = exitManager?.checkExits(date, ledger.positions).orEmpty()
+            if (exitDecisions.isNotEmpty()) {
+                decisions.addAll(exitDecisions)
+            }
+
+            if (decisions.isEmpty() && ledger.positions.isEmpty()) {
+                val settlement = settler.postClose(date, emptyMap())
+                return DailyRunRecord(
+                    tradeDate = date,
+                    status = DailyRunStatus.COMPLETED,
+                    settlement = settlement,
+                )
+            }
             val market = marketDataFeed.marketDataFor(date)
             val ctx = MatchingContext(
                 tradeDate = date,
@@ -78,8 +95,8 @@ class BacktestScheduler(
                 suspended = market.suspended,
                 ipoFrozen = market.ipoFrozen,
                 delisted = market.delisted,
+                signalLimitUp = market.signalLimitUp,
             )
-            val decisions = decisionFeed.decisionsFor(date)
             val sizing = orderSizer.size(decisions, ledger, ctx)
             val validated = mutableListOf<ValidatedOrder>()
             val blocked = sizing.blockedOrders.toMutableList()
@@ -91,6 +108,24 @@ class BacktestScheduler(
             }
             val fills = matchingEngine.match(validated, ctx)
             ledger.apply(fills)
+
+            // 记录入场元数据 / 清除离场元数据（供退出管理器使用）
+            if (exitManager != null) {
+                for (fill in fills) {
+                    when (fill.side) {
+                        org.shiroumi.backtest.domain.Side.BUY -> {
+                            exitManager.onEntry(fill.tsCode, date, fill.price)
+                        }
+                        org.shiroumi.backtest.domain.Side.SELL -> {
+                            val remaining = ledger.totalQty(fill.tsCode)
+                            if (remaining <= 0L) {
+                                exitManager.onExit(fill.tsCode)
+                            }
+                        }
+                    }
+                }
+            }
+
             val settlement = settler.postClose(date, market.closePriceMap())
             DailyRunRecord(
                 tradeDate = date,

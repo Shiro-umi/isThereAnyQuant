@@ -18,6 +18,7 @@ data class DailyMarketData(
     val suspended: Set<String> = emptySet(),
     val ipoFrozen: Set<String> = emptySet(),
     val delisted: Set<String> = emptySet(),
+    val signalLimitUp: Set<String> = emptySet(),
 ) {
     fun closePriceMap(): Map<String, Double> = quotes.mapValues { (_, candle) -> candle.close.toDouble() }
 }

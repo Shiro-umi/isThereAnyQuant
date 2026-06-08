@@ -25,9 +25,8 @@ sealed interface StrategyDecision {
     /**
      * 目标组合：T+1 想要持有的整组权重快照。
      *
-     * @param targetWeights 标的 → 权重（0.0 ~ 1.0）；累加值通常 ≤ [sentimentExposure]，
-     *                       剩余仓位以现金形式持有
-     * @param sentimentExposure 当期总暴露上限（由策略侧情绪推导），用于回归校验
+     * @param targetWeights 标的 → 权重（0.0 ~ 1.0），剩余仓位以现金形式持有
+     * @param sentimentExposure 策略侧市场情绪水位，仅用于复盘审计，不约束目标组合权重
      */
     @Serializable
     @SerialName("target-portfolio")
@@ -55,5 +54,7 @@ sealed interface StrategyDecision {
         val side: Side,
         val weight: Double? = null,
         val hint: ExecutionHint = ExecutionHint.OPEN,
+        /** 限价单的委托价格（仅 LIMIT hint 时需要）。 */
+        val limitPrice: Double? = null,
     ) : StrategyDecision
 }

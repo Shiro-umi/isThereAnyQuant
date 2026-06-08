@@ -89,6 +89,8 @@ data class RulesConfig(
      * 例如 0.05 = 单标的当日委托数量 ≤ 当日成交量 × 5%。
      */
     val liquidityFractionLimit: Double? = null,
+    /** 如果信号产生日（选出日）已经是涨停价，是否在执行日放弃买入。 */
+    val abandonIfSignalLimitUp: Boolean = false,
 )
 
 /**

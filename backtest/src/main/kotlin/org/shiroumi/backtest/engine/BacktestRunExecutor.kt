@@ -2,6 +2,7 @@ package org.shiroumi.backtest.engine
 
 import java.nio.file.Path
 import java.util.UUID
+import kotlinx.datetime.LocalDate
 import org.shiroumi.backtest.config.BacktestConfig
 import org.shiroumi.backtest.feed.DbBackedDecisionFeed
 import org.shiroumi.backtest.feed.DecisionFileExporter
@@ -9,7 +10,10 @@ import org.shiroumi.backtest.feed.ExportResult
 import org.shiroumi.backtest.feed.FileBackedDecisionFeed
 import org.shiroumi.backtest.feed.InMemoryDecisionFeed
 import org.shiroumi.backtest.feed.JsonReplayDecisionFeed
+import org.shiroumi.backtest.feed.PreloadedDecisionFeed
 import org.shiroumi.backtest.feed.StrategyDecisionFeed
+import org.shiroumi.backtest.feed.isLimitUpOnTradeDate
+import org.shiroumi.backtest.feed.preloadLimitUpSymbols
 import org.shiroumi.backtest.output.BacktestSummary
 import org.shiroumi.backtest.output.EquityCurveCsvExporter
 import org.shiroumi.backtest.output.FileBackedResultWriter
@@ -38,8 +42,13 @@ class BacktestRunExecutor(
     }
 
     /**
-     * 本地文件模式：把策略决策导出到 [workspace.decisionsDir]，并基于 [FileBackedDecisionFeed] 跑一次回测，
+     * 本地文件模式：把策略决策导出到 [workspace.decisionsDir]，并基于预加载的全内存数据跑一次回测，
      * 最终把所有产物写入 [workspace.outputDir]，不写任何 DB 表。
+     *
+     * 预加载优化：
+     * - 行情数据：构造时 1 次批量查询 `stock_daily_data`，替代逐日 500-750 次 DB 查询
+     * - 决策数据：构造时 1 次批量查询 `daily_profit_prediction_selection`，替代逐日 250 次 DB 查询
+     * - 回测主循环全程零 DB 访问
      *
      * 对齐 docs/architecture/backtest-engine-design.md §11.4.5：
      *  - `runLocal` 的 `runId` 复用 [BacktestWorkspace.runId]（即目录名 `bt-{timestamp}`）
@@ -51,17 +60,66 @@ class BacktestRunExecutor(
         workspace: BacktestWorkspace,
         config: BacktestConfig,
         exportDecisions: Boolean = true,
+        filterLimitUp: Boolean = false,
+        includeAuditSignalsWhenTargetsMissing: Boolean = true,
+        /** 持仓退出规则。为 null 时不启用自动退出管理（保持原有每日调仓行为）。 */
+        exitRules: ExitRulesConfig? = null,
     ): LocalBacktestResult {
-        val export = if (exportDecisions) {
-            exportDecisions(workspace, config)
+        val dates = calendar.tradingDays(config.startDate, config.endDate)
+
+        // 预加载行情数据：1 次批量查询替代逐日 DB 访问
+        val marketFeed = PreloadedMarketDataFeed.fromDatabase(
+            rules = config.rules,
+            from = config.startDate,
+            to = config.endDate,
+        )
+
+        // 预加载决策数据：1-2 次批量查询替代逐日 DB 访问
+        val decisionFeed: StrategyDecisionFeed
+        val export: ExportResult
+
+        // 若需涨停过滤，用预加载的蜡烛和日历数据在内存中批量计算涨停集合
+        val limitUpSymbols = if (filterLimitUp) {
+            val symbolMap: Map<LocalDate, Set<String>> = preloadLimitUpSymbols(
+                dates = dates,
+                candlesByDate = marketFeed.candlesByDate,
+                openDates = marketFeed.openDates,
+            )
+            fun lookup(date: LocalDate): Set<String> = symbolMap[date].orEmpty()
+            ::lookup
         } else {
-            ExportResult(emptyList())
+            fun noFilter(date: LocalDate): Set<String> = emptySet()
+            ::noFilter
+        }
+
+        if (exportDecisions) {
+            val preloadedFeed = PreloadedDecisionFeed.fromDatabase(
+                executionDates = dates,
+                filterSignalLimitUp = filterLimitUp,
+                limitUpSymbols = limitUpSymbols,
+                includeAuditFallback = includeAuditSignalsWhenTargetsMissing,
+            )
+            decisionFeed = preloadedFeed
+            // 用预加载的 feed 导出到文件：纯内存查询 + 文件写入，零 DB
+            export = exportFromPreloaded(workspace, dates, preloadedFeed)
+        } else {
+            decisionFeed = FileBackedDecisionFeed(workspace.decisionsDir)
+            export = ExportResult(emptyList())
+        }
+
+        val exitManager = exitRules?.let {
+            PositionExitManager(
+                config = it,
+                calendar = calendar,
+                marketDataFeed = marketFeed,
+            )
         }
         val scheduler = BacktestScheduler(
             config = config,
             calendar = calendar,
-            marketDataFeed = marketDataFeedFactory(config),
-            decisionFeed = FileBackedDecisionFeed(workspace.decisionsDir),
+            marketDataFeed = marketFeed,
+            decisionFeed = decisionFeed,
+            exitManager = exitManager,
         )
         val result = aggregator.aggregate(workspace.runId, scheduler.runLoop())
         val summary = buildSummary(workspace.runId, config, result)
@@ -71,15 +129,34 @@ class BacktestRunExecutor(
         return LocalBacktestResult(workspace = workspace, simulation = result, summary = summary, export = export)
     }
 
+    private fun exportFromPreloaded(
+        workspace: BacktestWorkspace,
+        dates: List<LocalDate>,
+        feed: StrategyDecisionFeed,
+    ): ExportResult {
+        val exporter = DecisionFileExporter(workspace.decisionsDir, feed)
+        return exporter.exportRange(dates)
+    }
+
     /**
      * 仅导出策略决策到 workspace/decisions/，不跑回测。
      *
      * 用于 `cli backtest export` 子命令。
      */
-    fun exportDecisions(workspace: BacktestWorkspace, config: BacktestConfig): ExportResult {
+    fun exportDecisions(
+        workspace: BacktestWorkspace,
+        config: BacktestConfig,
+        filterLimitUp: Boolean = false,
+        includeAuditSignalsWhenTargetsMissing: Boolean = true,
+    ): ExportResult {
         val executionDates = calendar.tradingDays(config.startDate, config.endDate)
-        val exporter = DecisionFileExporter(workspace.decisionsDir)
-        return exporter.exportRange(executionDates)
+        // 使用预加载决策源：批量查询 → 内存转换 → 逐文件写出
+        val preloadedFeed = PreloadedDecisionFeed.fromDatabase(
+            executionDates = executionDates,
+            filterSignalLimitUp = filterLimitUp,
+            includeAuditFallback = includeAuditSignalsWhenTargetsMissing,
+        )
+        return exportFromPreloaded(workspace, executionDates, preloadedFeed)
     }
 
     private fun buildSummary(
