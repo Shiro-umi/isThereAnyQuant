@@ -37,7 +37,7 @@ internal class ProfitPredictionModelSelector(
     ),
     private val modelDir: String = System.getProperty(
         "quant.profitPrediction.modelDir",
-        "research/profit-prediction/models/market-gated-bce-20260606"
+        "research/profit-prediction-v2/models/v2-lambda0.0"
     ),
     private val pythonWorkDir: String = System.getProperty(
         "quant.profitPrediction.pythonWorkDir",
@@ -45,7 +45,7 @@ internal class ProfitPredictionModelSelector(
     ),
     private val command: List<String> = System.getProperty(
         "quant.profitPrediction.command",
-        "uv run quant-train-profit-prediction"
+        "uv run quant-infer-v2"
     ).split(Regex("\\s+")).filter { it.isNotBlank() },
     private val timeoutSeconds: Long = System.getProperty("quant.profitPrediction.timeoutSeconds", "180").toLong(),
     private val topN: Int = System.getProperty("quant.profitPrediction.topN", DEFAULT_TOP_N.toString()).toInt(),

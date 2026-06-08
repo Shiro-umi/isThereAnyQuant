@@ -220,12 +220,16 @@ def run_v2_service(args):
             predictions.sort(key=lambda r: (-r["score"], r["tsCode"]))
             selected = {r["tsCode"] for r in predictions[:top_n]}
             for row in predictions:
+                row["selectedByThreshold"] = False  # V2 does not use threshold-based selection
                 row["selectedByTopN"] = row["tsCode"] in selected
 
             result = {
                 "modelId": "v2-20dim",
                 "topic": "profit-prediction-v2",
-                "tradeDate": trade_date, "topN": top_n,
+                "tradeDate": trade_date,
+                "thresholdName": "recall_0_2",
+                "threshold": 0.5,
+                "topN": top_n,
                 "predictions": predictions, "skipped": skipped,
                 "coverage": {"requested": len(payload.get("universe", [])), "scored": len(predictions), "skipped": len(skipped)},
             }
