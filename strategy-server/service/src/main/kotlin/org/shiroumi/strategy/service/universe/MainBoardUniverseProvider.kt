@@ -11,13 +11,29 @@ object MainBoardUniverseProvider {
 
     fun getActiveSymbols(): List<String> = StockBasicRepository.findActiveProfiles()
         .asSequence()
-        .filter { isEligible(it.tsCode, it.name) }
+        .filter { isEligible(it.tsCode, it.name, it.listStatus, it.delistDate) }
         .map { it.tsCode }
         .sorted()
         .toList()
 
-    internal fun isEligible(tsCode: String, name: String): Boolean {
-        // 过滤风险警示股和退市整理股
+    /**
+     * 名称 + 退市状态双判断：
+     * - 名称命中 ST/PT/退/N新股 → 排除（数据源若已改名，名称兜底）
+     * - listStatus 为 D（退市）/ P（暂停上市）或 delistDate 已落值 → 排除（数据源若状态已更新而名称未改，状态兜底）
+     * 两者互补，覆盖「改名滞后」与「状态滞后」两种数据源不同步情形。
+     */
+    internal fun isEligible(
+        tsCode: String,
+        name: String,
+        listStatus: String,
+        delistDate: kotlinx.datetime.LocalDate?,
+    ): Boolean {
+        // 退市状态兜底
+        when (listStatus.uppercase()) {
+            "D", "P" -> return false
+        }
+        if (delistDate != null) return false
+        // 过滤风险警示股和退市整理股（名称兜底）
         if (name.contains("ST", ignoreCase = true)) return false
         if (name.contains("PT", ignoreCase = true)) return false
         if (name.contains("退", ignoreCase = true)) return false

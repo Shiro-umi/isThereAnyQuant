@@ -2,6 +2,7 @@ package org.shiroumi.database.common.repository
 
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.daysUntil
+import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.jdbc.selectAll
@@ -21,8 +22,19 @@ object StockBasicRepository {
             .map { it[StockBasicTable.tsCode] }
     }
 
-    /** 标的静态画像（ts_code -> 名称 + 上市日），供研究层划「可投资域」（ST 看名称、次新看上市日）。 */
-    data class BasicProfile(val tsCode: String, val name: String, val listDate: LocalDate?)
+    /**
+     * 标的静态画像，供研究层划「可投资域」。
+     * - name：ST 看名称
+     * - listDate：次新看上市日
+     * - listStatus / delistDate：退市看状态（数据源对退市的反映可能滞后于名称，三者任一命中即排除）
+     */
+    data class BasicProfile(
+        val tsCode: String,
+        val name: String,
+        val listDate: LocalDate?,
+        val listStatus: String,
+        val delistDate: LocalDate?,
+    )
     data class BacktestBasicProfile(
         val tsCode: String,
         val name: String,
@@ -31,26 +43,22 @@ object StockBasicRepository {
     )
 
     fun findProfiles(): List<BasicProfile> = stockDb.transaction(StockBasicTable, log = false) {
-        StockBasicTable.selectAll().map { row ->
-            BasicProfile(
-                tsCode = row[StockBasicTable.tsCode],
-                name = row[StockBasicTable.name],
-                listDate = parseBasicDate(row[StockBasicTable.listDate]),
-            )
-        }
+        StockBasicTable.selectAll().map(::basicProfileFromRow)
     }
 
     fun findActiveProfiles(): List<BasicProfile> = stockDb.transaction(StockBasicTable, log = false) {
         StockBasicTable.selectAll()
             .where { StockBasicTable.listStatus eq "L" }
-            .map { row ->
-                BasicProfile(
-                    tsCode = row[StockBasicTable.tsCode],
-                    name = row[StockBasicTable.name],
-                    listDate = parseBasicDate(row[StockBasicTable.listDate]),
-                )
-            }
+            .map(::basicProfileFromRow)
     }
+
+    private fun basicProfileFromRow(row: ResultRow): BasicProfile = BasicProfile(
+        tsCode = row[StockBasicTable.tsCode],
+        name = row[StockBasicTable.name],
+        listDate = parseBasicDate(row[StockBasicTable.listDate]),
+        listStatus = row[StockBasicTable.listStatus],
+        delistDate = parseBasicDate(row[StockBasicTable.delistDate]),
+    )
 
     fun findBacktestProfiles(): List<BacktestBasicProfile> = stockDb.transaction(StockBasicTable, log = false) {
         StockBasicTable.selectAll()
