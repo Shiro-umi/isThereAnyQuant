@@ -6,6 +6,7 @@ import org.shiroumi.database.strategy.daily.table.DailyMarketSentimentStateTable
 import org.shiroumi.database.strategy.daily.table.DailyMarketSentimentTable
 import org.shiroumi.database.strategy.daily.table.DailyProfitPredictionSelectionTable
 import org.shiroumi.database.strategy.daily.table.DailyStrategyAuditTable
+import org.shiroumi.database.strategy.daily.table.DailyStrategyHoldingTable
 import org.shiroumi.database.strategy.daily.table.SentimentRuntimeSeedTable
 import org.shiroumi.database.transaction
 
@@ -34,6 +35,7 @@ object StrategyStateSchemaBootstrap {
                 DailyMarketSentimentTable,
                 DailyProfitPredictionSelectionTable,
                 DailyStrategyAuditTable,
+                DailyStrategyHoldingTable,
                 log = false
             ) {
                 SchemaUtils.createMissingTablesAndColumns(
@@ -42,6 +44,7 @@ object StrategyStateSchemaBootstrap {
                     DailyMarketSentimentTable,
                     DailyProfitPredictionSelectionTable,
                     DailyStrategyAuditTable,
+                    DailyStrategyHoldingTable,
                 )
                 exec(
                     """

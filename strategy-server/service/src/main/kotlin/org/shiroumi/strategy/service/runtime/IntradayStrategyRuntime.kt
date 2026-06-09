@@ -25,6 +25,7 @@ import org.shiroumi.database.strategy.daily.repository.DailyMarketSentimentRepos
 import org.shiroumi.database.strategy.daily.repository.DailyProfitPredictionSelectionRepository
 import org.shiroumi.database.strategy.daily.repository.DailyStockFactorRepository
 import org.shiroumi.database.strategy.daily.repository.DailyStrategyAuditRepository
+import org.shiroumi.database.strategy.daily.repository.DailyStrategyHoldingRepository
 import org.shiroumi.database.strategy.daily.repository.SentimentRuntimeSeedRepository
 import org.shiroumi.quant_kmp.strategy.daily.model.PreparedBar
 import org.shiroumi.strategy.client.LocalStrategySnapshotHub
@@ -553,7 +554,7 @@ class DefaultIntradayStrategyRuntimeDataSource(
         DailyMarketSentimentRepository.findByDate(tradeDate)
 
     override fun loadCurrentPositionCodes(tradeDate: LocalDate): List<String> =
-        DailyProfitPredictionSelectionRepository.findSelectionsByTargetDate(tradeDate)
+        DailyStrategyHoldingRepository.findByTradeDate(tradeDate)
             .map { it.tsCode }
             .ifEmpty {
                 DailyStrategyAuditRepository.getRecentRecords(1)

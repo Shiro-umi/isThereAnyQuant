@@ -60,8 +60,10 @@ internal fun buildTimelineFromDays(
         normalizedDays.zipWithNext { current, next ->
             addAll(buildHoldContinueEdges(current, next))
             addAll(buildExitClearEdges(current, next))
-            addAll(buildEnterHoldingEdges(current, next))
         }
+        // 入场连线：多日持有下，新进持仓可能源于 1~N 天前的选股。
+        // 按持仓 buyDate（=入场日）追溯到「买入日的前一交易日」那一天的选股节点连线。
+        addAll(buildEnterHoldingEdges(normalizedDays))
     }
     return StrategyPositionTrackingTimeline(
         days = normalizedDays,
@@ -106,18 +108,39 @@ private fun buildExitClearEdges(
     }
 }
 
+/**
+ * 入场连线（跨多日追溯）。
+ *
+ * 多日持有 + 止盈止损语义下，一只持仓票的入场日 [StrategyTrackingStockNode.buyDate] 可能早于昨天。
+ * 它在「入场日的前一交易日」被选出（今天选、次日买入）。本函数对每一天的持仓，
+ * 找出当天「新入场」的票（buyDate == 当天 tradeDate，且前一交易日未持有），
+ * 连回前一交易日的选股节点。每只票只在入场当日画一条入线，避免重复。
+ */
 private fun buildEnterHoldingEdges(
-    current: StrategyPositionTrackingDay,
-    next: StrategyPositionTrackingDay,
+    days: List<StrategyPositionTrackingDay>,
 ): List<TrackingEdge> {
-    val nextHoldings = next.holdings.associateBy { it.stockCode }
-    return current.selection.mapNotNull { from ->
-        nextHoldings[from.stockCode]?.toEdge(
-            from = from,
-            currentDate = current.tradeDate,
-            nextDate = next.tradeDate,
-            kind = TrackingEdgeKind.ENTER_HOLDING,
-        )
+    if (days.size < 2) return emptyList()
+    return buildList {
+        for (index in 1 until days.size) {
+            val buyDay = days[index]
+            val selectionDay = days[index - 1]
+            val previousHoldingCodes = selectionDay.holdings.mapTo(mutableSetOf()) { it.stockCode }
+            val selectionByCode = selectionDay.selection.associateBy { it.stockCode }
+            for (holding in buyDay.holdings) {
+                // 仅对「入场日 == 当天 且 前一交易日未持有」的新进持仓追溯入线
+                if (holding.buyDate != buyDay.tradeDate) continue
+                if (holding.stockCode in previousHoldingCodes) continue
+                val from = selectionByCode[holding.stockCode] ?: continue
+                add(
+                    holding.toEdge(
+                        from = from,
+                        currentDate = selectionDay.tradeDate,
+                        nextDate = buyDay.tradeDate,
+                        kind = TrackingEdgeKind.ENTER_HOLDING,
+                    )
+                )
+            }
+        }
     }
 }
 

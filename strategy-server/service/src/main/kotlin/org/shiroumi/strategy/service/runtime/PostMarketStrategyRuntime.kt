@@ -9,6 +9,7 @@ import model.ws.StrategySelectionSnapshot
 import model.ws.StrategyPositionSnapshot
 import org.shiroumi.database.common.repository.TradingCalendarRepository
 import org.shiroumi.database.strategy.daily.repository.DailyProfitPredictionSelectionRepository
+import org.shiroumi.database.strategy.daily.repository.DailyStrategyHoldingRepository
 import org.shiroumi.database.strategy.daily.repository.ProfitPredictionSelection
 import org.shiroumi.database.strategy.daily.repository.DailyStrategyAuditRepository
 import org.shiroumi.strategy.client.LocalStrategySnapshotHub
@@ -183,7 +184,7 @@ object DefaultPostMarketStrategyRuntimeDataSource : PostMarketStrategyRuntimeDat
         DailyStrategyAuditRepository.findByDate(tradeDate)
 
     override fun loadCurrentPositionCodes(tradeDate: LocalDate): List<String> =
-        DailyProfitPredictionSelectionRepository.findSelectionsByTargetDate(tradeDate)
+        DailyStrategyHoldingRepository.findByTradeDate(tradeDate)
             .map { it.tsCode }
 
     override fun loadNextSessionSelections(tradeDate: LocalDate): List<ProfitPredictionSelection> =

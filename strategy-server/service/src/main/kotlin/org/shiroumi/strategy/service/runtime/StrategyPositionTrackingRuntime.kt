@@ -13,8 +13,10 @@ import model.candle.StrategyTrackingStockNode
 import model.ws.PositionSource
 import model.ws.StrategyPositionSnapshot
 import org.shiroumi.database.stock.StockReader
+import org.shiroumi.database.strategy.daily.repository.DailyHoldingState
 import org.shiroumi.database.strategy.daily.repository.DailyProfitPredictionSelectionRepository
 import org.shiroumi.database.strategy.daily.repository.DailyStrategyAuditRepository
+import org.shiroumi.database.strategy.daily.repository.DailyStrategyHoldingRepository
 import org.shiroumi.database.strategy.daily.repository.ProfitPredictionSelection
 import org.shiroumi.strategy.client.LocalStrategySnapshotHub
 import org.shiroumi.strategy.contract.StrategySnapshotEnvelope
@@ -73,20 +75,20 @@ class StrategyPositionTrackingRuntime(
 
         val tradeDates = records.map { it.tradeDate }
         val selectionsByTradeDate = dataSource.loadSelectionsByTradeDate(tradeDates)
-        val holdingsByTargetDate = dataSource.loadHoldingsByTargetDate(tradeDates)
+        val holdingsByTradeDate = dataSource.loadHoldingsByTradeDate(tradeDates)
         val allCodes = records.flatMap { summary ->
             val selections = selectionsByTradeDate[summary.tradeDate].orEmpty().map { it.tsCode }
-            val holdings = summary.positionSymbols(holdingsByTargetDate[summary.tradeDate].orEmpty())
+            val holdings = holdingsByTradeDate[summary.tradeDate].orEmpty().map { it.tsCode }
             selections + holdings
         }.distinct()
         val stockNames = dataSource.loadStockNames(allCodes)
 
         val days = records.mapIndexed { index, summary ->
-            val currentPositions = summary.positionSymbols(holdingsByTargetDate[summary.tradeDate].orEmpty())
-            val currentPositionCodes = currentPositions.toSet()
+            val currentHoldings = holdingsByTradeDate[summary.tradeDate].orEmpty()
+            val currentPositionCodes = currentHoldings.mapTo(mutableSetOf()) { it.tsCode }
+            // 选股列：当日选出（target_date=次日）的 selected 票
             val selections = selectionsByTradeDate[summary.tradeDate]
                 .orEmpty()
-                .filterNot { it.tsCode in currentPositionCodes }
                 .take(MAX_TRACKING_SLOT_COUNT)
                 .mapIndexed { idx, selection ->
                     trackingNode(
@@ -97,27 +99,33 @@ class StrategyPositionTrackingRuntime(
                         modelScore = selection.modelScore
                     )
                 }
-            val holdings = currentPositions.mapIndexed { idx, code ->
-                trackingNode(
-                    code = code,
-                    stockNames = stockNames,
-                    section = StrategyTrackingSection.HOLDINGS,
-                    slotIndex = idx
-                )
-            }
+            // 持仓列：当日仍在持有的票，buyDate 取状态机 entryDate（用于前端跨多日连线追溯）
+            val holdings = currentHoldings
+                .take(MAX_TRACKING_SLOT_COUNT)
+                .mapIndexed { idx, holding ->
+                    trackingNode(
+                        code = holding.tsCode,
+                        stockNames = stockNames,
+                        section = StrategyTrackingSection.HOLDINGS,
+                        slotIndex = idx,
+                        buyDate = holding.entryDate.toString()
+                    )
+                }
+            // 清仓列：前一交易日持仓中，今日已不在持有的票
             val cleared = if (index == 0) {
                 emptyList()
             } else {
                 val previousSummary = records[index - 1]
-                previousSummary.positionSymbols(holdingsByTargetDate[previousSummary.tradeDate].orEmpty())
-                    .filterNot { it in currentPositionCodes }
+                holdingsByTradeDate[previousSummary.tradeDate].orEmpty()
+                    .filterNot { it.tsCode in currentPositionCodes }
                     .take(MAX_TRACKING_SLOT_COUNT)
-                    .mapIndexed { idx, code ->
+                    .mapIndexed { idx, holding ->
                         trackingNode(
-                            code = code,
+                            code = holding.tsCode,
                             stockNames = stockNames,
                             section = StrategyTrackingSection.CLEARED,
-                            slotIndex = idx
+                            slotIndex = idx,
+                            buyDate = holding.entryDate.toString()
                         )
                     }
             }
@@ -154,7 +162,10 @@ class StrategyPositionTrackingRuntime(
         }
         val currentPositions = positionSnapshot.currentPositions.take(MAX_TRACKING_SLOT_COUNT)
         val currentPositionCodes = currentPositions.toSet()
-        val previousHoldings = currentDays.lastOrNull()?.holdings?.map { it.stockCode }?.toSet().orEmpty()
+        val previousHoldingNodes = currentDays.lastOrNull()?.holdings.orEmpty()
+        val previousHoldings = previousHoldingNodes.map { it.stockCode }.toSet()
+        // 实时持仓 buyDate 继承上一交易日同票的 entryDate；若是当日新进则记为当日
+        val buyDateByCode = previousHoldingNodes.associate { it.stockCode to it.buyDate }
         val realtimeSelections = positionSnapshot.nextSessionSelectionDetails
             .takeIf { it.isNotEmpty() }
             ?: positionSnapshot.nextSessionSelections.map {
@@ -178,13 +189,19 @@ class StrategyPositionTrackingRuntime(
                     )
                 },
             holdings = currentPositions.mapIndexed { idx, code ->
-                trackingNode(code, stockNames, StrategyTrackingSection.HOLDINGS, idx)
+                trackingNode(
+                    code, stockNames, StrategyTrackingSection.HOLDINGS, idx,
+                    buyDate = buyDateByCode[code] ?: tradeDate
+                )
             },
-            cleared = previousHoldings
-                .filterNot { it in currentPositionCodes }
+            cleared = previousHoldingNodes
+                .filterNot { it.stockCode in currentPositionCodes }
                 .take(MAX_TRACKING_SLOT_COUNT)
-                .mapIndexed { idx, code ->
-                    trackingNode(code, stockNames, StrategyTrackingSection.CLEARED, idx)
+                .mapIndexed { idx, node ->
+                    trackingNode(
+                        node.stockCode, stockNames, StrategyTrackingSection.CLEARED, idx,
+                        buyDate = node.buyDate
+                    )
                 }
         )
         return enrichPnl(baseDays + realtimeDay)
@@ -195,18 +212,19 @@ class StrategyPositionTrackingRuntime(
         stockNames: Map<String, String>,
         section: StrategyTrackingSection,
         slotIndex: Int,
-        modelScore: Double? = null
+        modelScore: Double? = null,
+        buyDate: String? = null
     ) = StrategyTrackingStockNode(
         stockCode = code,
         stockName = stockNames[code] ?: code,
         section = section,
         slotIndex = slotIndex,
-        modelScore = modelScore
+        modelScore = modelScore,
+        buyDate = buyDate
     )
 
     private fun enrichPnl(days: List<StrategyPositionTrackingDay>): StrategyPositionTrackingResponse {
         if (days.isEmpty()) return StrategyPositionTrackingResponse(emptyList())
-        val buyDatesByCode = buildCycleBuyDates(days)
         val allCodes = days.flatMap { day -> day.holdings + day.cleared }
             .map { it.stockCode }
             .distinct()
@@ -222,11 +240,12 @@ class StrategyPositionTrackingRuntime(
             days = days.map { day ->
                 val observationDate = LocalDate.parse(day.tradeDate)
                 day.copy(
+                    // buyDate 由持仓状态机 entryDate 写入，直接据此算盈亏，无需再从持仓周期推导
                     holdings = day.holdings.map { node ->
-                        fillPnl(node, buyDatesByCode[node.stockCode]?.get(observationDate), observationDate, candleMap)
+                        fillPnl(node, node.buyDate?.let(LocalDate::parse), observationDate, candleMap)
                     },
                     cleared = day.cleared.map { node ->
-                        fillPnl(node, buyDatesByCode[node.stockCode]?.get(observationDate), observationDate, candleMap)
+                        fillPnl(node, node.buyDate?.let(LocalDate::parse), observationDate, candleMap)
                     }
                 )
             }
@@ -237,7 +256,8 @@ class StrategyPositionTrackingRuntime(
 interface StrategyPositionTrackingDataSource {
     fun loadAuditSummaries(limit: Int): List<StrategyAuditSummary>
     fun loadSelectionsByTradeDate(tradeDates: List<LocalDate>): Map<LocalDate, List<ProfitPredictionSelection>>
-    fun loadHoldingsByTargetDate(targetDates: List<LocalDate>): Map<LocalDate, List<ProfitPredictionSelection>>
+    /** 按交易日加载持仓状态快照（含 entryDate），key=tradeDate。 */
+    fun loadHoldingsByTradeDate(tradeDates: List<LocalDate>): Map<LocalDate, List<DailyHoldingState>>
     fun loadStockNames(tsCodes: Collection<String>): Map<String, String>
     fun loadCandles(tsCodes: List<String>, startDate: LocalDate, endDate: LocalDate): Map<String, Map<LocalDate, Candle>>
 }
@@ -249,8 +269,10 @@ object DefaultStrategyPositionTrackingDataSource : StrategyPositionTrackingDataS
     override fun loadSelectionsByTradeDate(tradeDates: List<LocalDate>): Map<LocalDate, List<ProfitPredictionSelection>> =
         DailyProfitPredictionSelectionRepository.findSelectionsByTradeDates(tradeDates)
 
-    override fun loadHoldingsByTargetDate(targetDates: List<LocalDate>): Map<LocalDate, List<ProfitPredictionSelection>> =
-        DailyProfitPredictionSelectionRepository.findSelectionsByTargetDates(targetDates)
+    override fun loadHoldingsByTradeDate(tradeDates: List<LocalDate>): Map<LocalDate, List<DailyHoldingState>> =
+        tradeDates.distinct().associateWith { date ->
+            DailyStrategyHoldingRepository.findByTradeDate(date)
+        }
 
     override fun loadStockNames(tsCodes: Collection<String>): Map<String, String> =
         StockReader.getStockNames(tsCodes)
@@ -263,45 +285,6 @@ object DefaultStrategyPositionTrackingDataSource : StrategyPositionTrackingDataS
         tsCodes.distinct().associateWith { code ->
             StockReader.getStockHistory(code, startDate, endDate).associateBy { it.date }
         }
-}
-
-private fun StrategyAuditSummary.positionSymbols(
-    fallbackTargetSelections: List<ProfitPredictionSelection>
-): List<String> {
-    val auditSymbols = currentPositions.take(MAX_TRACKING_SLOT_COUNT)
-    if (auditSymbols.isNotEmpty()) return auditSymbols
-    return fallbackTargetSelections.map { it.tsCode }.take(MAX_TRACKING_SLOT_COUNT)
-}
-
-private fun buildCycleBuyDates(
-    days: List<StrategyPositionTrackingDay>
-): Map<String, Map<LocalDate, LocalDate>> {
-    if (days.isEmpty()) return emptyMap()
-
-    val activeBuyDates = mutableMapOf<String, LocalDate>()
-    val buyDatesByCode = mutableMapOf<String, MutableMap<LocalDate, LocalDate>>()
-    var previousHoldingCodes = emptySet<String>()
-
-    days.forEach { day ->
-        val tradeDate = LocalDate.parse(day.tradeDate)
-        val holdingCodes = day.holdings.map { it.stockCode }.toSet()
-        val enteredHoldingCodes = holdingCodes - previousHoldingCodes
-
-        enteredHoldingCodes.forEach { stockCode ->
-            activeBuyDates[stockCode] = tradeDate
-        }
-
-        val observedNodes = day.holdings + day.cleared
-        observedNodes.forEach { node ->
-            val buyDate = activeBuyDates[node.stockCode] ?: return@forEach
-            buyDatesByCode.getOrPut(node.stockCode) { mutableMapOf() }[tradeDate] = buyDate
-        }
-
-        activeBuyDates.keys.retainAll(holdingCodes)
-        previousHoldingCodes = holdingCodes
-    }
-
-    return buyDatesByCode
 }
 
 private fun fillPnl(

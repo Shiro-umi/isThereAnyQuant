@@ -9,6 +9,7 @@ import model.candle.StrategyPositionTrackingResponse
 import model.ws.PositionSource
 import model.ws.StrategySelectionSnapshot
 import model.ws.StrategyPositionSnapshot
+import org.shiroumi.database.strategy.daily.repository.DailyHoldingState
 import org.shiroumi.database.strategy.daily.repository.ProfitPredictionSelection
 import org.shiroumi.strategy.client.LocalStrategySnapshotHub
 import org.shiroumi.strategy.contract.StrategyTopic
@@ -39,9 +40,9 @@ class StrategyPositionTrackingRuntimeTest {
                     day1 to listOf(selection(day1, "000002.SZ", 0.7)),
                     day2 to listOf(selection(day2, "000003.SZ", 0.93))
                 ),
-                holdingsByTargetDate = mapOf(
-                    day1 to listOf(selection(day1, "000001.SZ", 0.6)),
-                    day2 to listOf(selection(day1, "000002.SZ", 0.7))
+                holdingsByTradeDate = mapOf(
+                    day1 to listOf(holding(day1, "000001.SZ", entryDate = day1)),
+                    day2 to listOf(holding(day2, "000002.SZ", entryDate = day2))
                 ),
                 names = mapOf(
                     "000001.SZ" to "A",
@@ -124,6 +125,15 @@ class StrategyPositionTrackingRuntimeTest {
         volCap = 1.0
     )
 
+    private fun holding(tradeDate: LocalDate, tsCode: String, entryDate: LocalDate) =
+        DailyHoldingState(
+            tradeDate = tradeDate,
+            tsCode = tsCode,
+            entryDate = entryDate,
+            entryPrice = 10.0,
+            signalDateLow = 9.0,
+        )
+
     private fun selection(tradeDate: LocalDate, tsCode: String, modelScore: Double) =
         ProfitPredictionSelection(
             tradeDate = tradeDate,
@@ -162,7 +172,7 @@ class StrategyPositionTrackingRuntimeTest {
 private class FakeTrackingDataSource(
     private val audits: List<StrategyAuditSummary>,
     private val selectionsByTradeDate: Map<LocalDate, List<ProfitPredictionSelection>>,
-    private val holdingsByTargetDate: Map<LocalDate, List<ProfitPredictionSelection>>,
+    private val holdingsByTradeDate: Map<LocalDate, List<DailyHoldingState>>,
     private val names: Map<String, String>,
     private val candles: Map<String, Map<LocalDate, Candle>>
 ) : StrategyPositionTrackingDataSource {
@@ -171,8 +181,8 @@ private class FakeTrackingDataSource(
     override fun loadSelectionsByTradeDate(tradeDates: List<LocalDate>): Map<LocalDate, List<ProfitPredictionSelection>> =
         selectionsByTradeDate.filterKeys { it in tradeDates }
 
-    override fun loadHoldingsByTargetDate(targetDates: List<LocalDate>): Map<LocalDate, List<ProfitPredictionSelection>> =
-        holdingsByTargetDate.filterKeys { it in targetDates }
+    override fun loadHoldingsByTradeDate(tradeDates: List<LocalDate>): Map<LocalDate, List<DailyHoldingState>> =
+        holdingsByTradeDate.filterKeys { it in tradeDates }
 
     override fun loadStockNames(tsCodes: Collection<String>): Map<String, String> =
         names.filterKeys { it in tsCodes }

@@ -2,7 +2,8 @@ package org.shiroumi.strategy.service.postmarket
 
 import kotlinx.datetime.LocalDate
 import org.shiroumi.database.common.repository.TradingCalendarRepository
-import org.shiroumi.database.strategy.daily.repository.DailyProfitPredictionSelectionRepository
+import org.shiroumi.database.strategy.daily.repository.DailyHoldingState
+import org.shiroumi.database.strategy.daily.repository.DailyStrategyHoldingRepository
 import utils.logger
 
 private val logger by logger("PostMarketOrchestrator")
@@ -70,15 +71,13 @@ object PostMarketOrchestrator {
             return ExecutionResult(processedDates = emptyList())
         }
 
+        // 持仓链初值：从前一交易日的持仓状态表加载，逐日由状态机推进。
         val firstPreviousTradeDate = TradingCalendarRepository.findPreviousTradingDate(tradeDates.first())
-        var previousCurrentPositionSymbols = if (firstPreviousTradeDate != null) {
-            DailyProfitPredictionSelectionRepository.findSelectedSymbolsByTargetDate(firstPreviousTradeDate)
+        var previousHoldings: List<DailyHoldingState> = if (firstPreviousTradeDate != null) {
+            DailyStrategyHoldingRepository.findByTradeDate(firstPreviousTradeDate)
         } else {
-            emptySet()
+            emptyList()
         }
-        var currentPositionSymbols = DailyProfitPredictionSelectionRepository.findSelectedSymbolsByTargetDate(
-            tradeDates.first(),
-        )
         val processedDates = mutableListOf<LocalDate>()
 
         tradeDates.forEach { tradeDate ->
@@ -90,15 +89,13 @@ object PostMarketOrchestrator {
                     tradeDate = tradeDate,
                     startDate = startDate,
                     endDate = tradeDate,
-                    previousCurrentPositionSymbols = previousCurrentPositionSymbols,
-                    currentPositionSymbols = currentPositionSymbols,
+                    previousHoldings = previousHoldings,
                     requiredHistory = policy.requiredHistory,
                     signalBasis = policy.signalBasis,
                     chunkSize = policy.chunkSize,
                     parallelism = policy.parallelism,
                 )
-                previousCurrentPositionSymbols = currentPositionSymbols
-                currentPositionSymbols = result.nextPositionSymbols
+                previousHoldings = result.holdings
 
                 TradingCalendarRepository.markStrategyUpdated(listOf(tradeDate))
                 processedDates += tradeDate

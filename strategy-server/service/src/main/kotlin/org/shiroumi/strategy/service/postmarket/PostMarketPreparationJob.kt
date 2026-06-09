@@ -9,6 +9,9 @@ import model.Candle
 import model.PriceBasis
 import model.dataprovider.SentimentScopes
 import org.shiroumi.database.common.repository.TradingCalendarRepository
+import org.shiroumi.database.stock.StockDailyCandleRepository
+import org.shiroumi.database.strategy.daily.repository.DailyHoldingState
+import org.shiroumi.database.strategy.daily.repository.DailyStrategyHoldingRepository
 import org.shiroumi.database.strategy.daily.repository.DailyFactorRollingStateRepository
 import org.shiroumi.database.strategy.daily.repository.DailyMarketSentimentRepository
 import org.shiroumi.database.strategy.daily.repository.DailyMarketSentimentStateRepository
@@ -37,9 +40,12 @@ private val logger by logger("PostMarketPreparationJob")
 
 /**
  * 盘后预处理任务结果。
+ *
+ * [holdings] 为当日收盘后的持仓状态快照（含止盈止损推演后的留存 + 当日新入场），
+ * 供 orchestrator 逐日链式推进。
  */
 data class PostMarketPreparationResult(
-    val nextPositionSymbols: Set<String>,
+    val holdings: List<DailyHoldingState>,
 )
 
 private data class ChunkPreparationResult(
@@ -66,13 +72,13 @@ private data class IncrementalPreparedBars(
  */
 object PostMarketPreparationJob {
     private val profitPredictionSelector = ProfitPredictionModelSelector()
+    private val holdingStateMachine = HoldingStateMachine()
 
     suspend fun run(
         tradeDate: LocalDate,
         startDate: LocalDate,
         endDate: LocalDate,
-        previousCurrentPositionSymbols: Set<String>,
-        currentPositionSymbols: Set<String>,
+        previousHoldings: List<DailyHoldingState>,
         requiredHistory: Int = 400,
         signalBasis: PriceBasis = PriceBasis.HFQ,
         chunkSize: Int = 300,
@@ -407,30 +413,81 @@ object PostMarketPreparationJob {
             tradeDate = tradeDate,
             positions = targets,
         )
-        val resolvedCurrentPositionSymbols = currentPositionSymbols.ifEmpty {
-            DailyProfitPredictionSelectionRepository.findSelectedSymbolsByTargetDate(tradeDate)
-        }
+
+        // 持仓状态机推进：用前一交易日选股（target_date=tradeDate 的 selected 票）作为当日新入场候选，
+        // 对前一交易日持仓做止盈止损判定，产出当日持仓快照。
+        val holdingResult = advanceHoldings(
+            tradeDate = tradeDate,
+            previousTradeDate = previousTradeDate,
+            previousHoldings = previousHoldings,
+        )
+        DailyStrategyHoldingRepository.replaceForDate(tradeDate, holdingResult.holdings)
+
+        val currentPositionSymbols = holdingResult.holdings.map { it.tsCode }.toSet()
+        val previousPositionSymbols = previousHoldings.map { it.tsCode }.toSet()
         val auditSummary = StrategyAuditGenerator.generate(
             tradeDate = tradeDate,
             universeSize = universeSymbols.size,
             factors = allFactors,
             sentiment = sentimentSnapshot,
             targets = targets,
-            previousCurrentPositions = previousCurrentPositionSymbols,
-            currentPositions = resolvedCurrentPositionSymbols,
+            previousCurrentPositions = previousPositionSymbols,
+            currentPositions = currentPositionSymbols,
         )
 
         DailyStrategyAuditRepository.replaceForDate(auditSummary)
-        val newlySelectedCount = auditSummary.newlySelected.size
-        val droppedCount = auditSummary.dropped.size
         logger.info(
             "[策略预处理] 执行完成 | tradeDate=$tradeDate, selected=${auditSummary.selectedCount}, " +
-                "newlySelected=$newlySelectedCount, dropped=$droppedCount, " +
-                "emptyReason=${auditSummary.emptyReason ?: "无"}"
+                "持仓=${currentPositionSymbols.size}, 新入场=${holdingResult.entered.size}, " +
+                "离场=${holdingResult.exited.size}, emptyReason=${auditSummary.emptyReason ?: "无"}"
         )
 
-        val nextPositionSymbols = targets.asSequence().filter { it.selected }.map { it.tsCode }.toSet()
-        return PostMarketPreparationResult(nextPositionSymbols = nextPositionSymbols)
+        return PostMarketPreparationResult(holdings = holdingResult.holdings)
+    }
+
+    /**
+     * 推进当日持仓状态机。
+     *
+     * - 新入场候选：前一交易日选出、target_date=tradeDate 的 selected 票（今天开盘买入）。
+     *   信号日（选股日，T 日）最低价取 [previousTradeDate] 的 low，用于价格止损。
+     * - 行情：当日蜡烛用于退出判定与入场价；前一日蜡烛用于新入场票信号日低点。
+     * - 交易日间隔由 [TradingCalendarRepository] 计算。
+     */
+    private fun advanceHoldings(
+        tradeDate: LocalDate,
+        previousTradeDate: LocalDate?,
+        previousHoldings: List<DailyHoldingState>,
+    ): HoldingStateMachine.DayResult {
+        val todayCandles = StockDailyCandleRepository.findByTradeDate(tradeDate).associateBy { it.tsCode }
+        val signalDayLowByCode: Map<String, Double> = if (previousTradeDate != null) {
+            StockDailyCandleRepository.findByTradeDate(previousTradeDate)
+                .associate { it.tsCode to it.getLow().toDouble() }
+        } else {
+            emptyMap()
+        }
+
+        // 新入场候选：前一交易日选出、今日生效买入的 selected 票
+        val newEntries = DailyProfitPredictionSelectionRepository
+            .findSelectionsByTargetDate(tradeDate)
+            .map { selection ->
+                HoldingStateMachine.EntryCandidate(
+                    tsCode = selection.tsCode,
+                    signalDateLow = signalDayLowByCode[selection.tsCode] ?: 0.0,
+                )
+            }
+
+        return holdingStateMachine.advance(
+            tradeDate = tradeDate,
+            previousHoldings = previousHoldings,
+            newEntries = newEntries,
+            tradingDaysSince = { entryDate, date ->
+                if (date <= entryDate) 0
+                else (TradingCalendarRepository.findOpenDates(entryDate, date).size - 1).coerceAtLeast(0)
+            },
+            candleFor = { tsCode, date ->
+                if (date == tradeDate) todayCandles[tsCode] else null
+            },
+        )
     }
 
     private fun persistNextTradeDateSentimentSeed(
