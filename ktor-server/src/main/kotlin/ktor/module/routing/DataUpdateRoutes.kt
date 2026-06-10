@@ -2,16 +2,23 @@ package ktor.module.routing
 
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import kotlinx.serialization.Serializable
 import org.shiroumi.server.service.DataUpdateService
 import utils.logger
 
 private val logger by logger("DataUpdateRoutes")
 
+@Serializable
+private data class TriggerUpdateResponse(
+    val success: Boolean,
+    val message: String,
+)
+
 /**
  * 数据更新相关路由
  */
 fun Route.dataUpdateRoutes() {
-    
+
     /**
      * REST API: 获取当前数据更新状态
      */
@@ -25,18 +32,13 @@ fun Route.dataUpdateRoutes() {
      */
     post("/api/data/trigger") {
         // TODO: 添加管理员权限校验
-        
+
         val success = DataUpdateService.triggerUpdate()
-        if (success) {
-            call.respond(mapOf(
-                "success" to true,
-                "message" to "数据更新已启动"
-            ))
-        } else {
-            call.respond(mapOf(
-                "success" to false,
-                "message" to "数据更新正在进行中"
-            ))
-        }
+        call.respond(
+            TriggerUpdateResponse(
+                success = success,
+                message = if (success) "数据更新已启动" else "数据更新正在进行中"
+            )
+        )
     }
 }
