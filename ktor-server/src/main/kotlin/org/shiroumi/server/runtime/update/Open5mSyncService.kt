@@ -40,17 +40,27 @@ class Open5mSyncService(
     private val shanghaiZone: ZoneId = ZoneId.of("Asia/Shanghai"),
 ) {
 
-    /** 盘后增量：补 [fromInclusive, maxEligible] 内 open5m 尚缺的交易日（全 symbol 拉这些日的首根）。 */
-    suspend fun syncPendingDates(fromInclusive: LocalDate = LocalDate(2010, 1, 1)) {
+    /**
+     * 盘后增量：补近期 open5m 尚缺的交易日（全 symbol 拉这些日的首根）。
+     *
+     * 约束：只补最近 [lookbackDays] 个交易日内的缺口，避免远古缺口（如 2010 年）
+     * 阻塞盘后主链路。远古缺口由独立全量回填任务处理。
+     */
+    suspend fun syncPendingDates(lookbackDays: Int = 30) {
         val today = java.time.LocalDate.now(shanghaiZone)
         val maxDate = TradingCalendarRepository.findLatestTradingDateOnOrBefore(
             LocalDate(today.year, today.monthValue, today.dayOfMonth)
         ) ?: return
+        // 计算 lookback 起始日期：从 maxDate 往前数 lookbackDays 个开盘日
+        val allOpenDates = TradingCalendarRepository.findOpenDates(
+            LocalDate(2010, 1, 1), maxDate
+        )
+        val fromInclusive = allOpenDates.takeLast(lookbackDays).firstOrNull() ?: return
         val openDates = TradingCalendarRepository.findOpenDates(fromInclusive, maxDate)
         val existing = StockOpen5mRepository.findExistingTradeDates(fromInclusive, maxDate)
         val missing = openDates.filter { it !in existing }
         if (missing.isEmpty()) { logger.info("[open5m] 无缺口交易日，盘后追平跳过。"); return }
-        logger.info("[open5m] 盘后追平：${missing.size} 个缺口交易日 [${missing.first()}..${missing.last()}]")
+        logger.info("[open5m] 盘后追平：${missing.size} 个缺口交易日 [${missing.first()}..${missing.last()}] (lookback=${lookbackDays}d)")
         // 缺口通常很少（盘后只差当日）；逐缺口日对全 symbol 并发拉单根。
         val symbols = StockBasicRepository.getActiveSymbols()
         for (date in missing) {
