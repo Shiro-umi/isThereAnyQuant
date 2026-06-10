@@ -7,10 +7,12 @@ import org.shiroumi.database.strategy.daily.repository.DailyHoldingState
 /**
  * 生产侧持仓状态机——多日持有 + 止盈止损。
  *
- * 业务主权在 strategy-server。规则数值对齐回测 `PositionExitManager`（不依赖回测模块）：
- * - 止盈：当日 HIGH 触及入场价 ×(1 + 7%) → 离场
- * - 时间止损：入场后第 T+3 个交易日收盘强制离场
- * - 价格止损：入场后（T+1 之后）某日收盘 < 信号日（选股日）最低价 → 离场
+ * 业务主权在 strategy-server。规则数值对齐 V3 正式版模型在 2020-06~2026-05 全样本外验证的最优运营点
+ * （研究文档 `private/research-docs/v3-honest-model-paper.html`）：
+ * - 止盈：当日 HIGH 触及入场价 ×(1 + 5%) → 离场
+ * - 时间止损：入场后第 15 个交易日收盘强制离场
+ * - 价格止损：默认关闭（验证结论：收盘价止损拦不住跳空深亏，反而消灭深蹲后反弹触达的盈利交易）
+ * - 入场跳空过滤：开盘较信号日收盘跳空 > 3% 不入场（跳空利润属于昨日持有者，追入为负期望）
  * - T+1 禁售：入场当日不离场
  *
  * 退出优先级：止盈 > 时间止损 > 价格止损。
@@ -21,11 +23,13 @@ import org.shiroumi.database.strategy.daily.repository.DailyHoldingState
 class HoldingStateMachine(
     private val config: ExitRules = ExitRules(),
 ) {
-    /** 止盈止损规则配置，数值默认对齐回测。 */
+    /** 止盈止损与入场规则配置，数值默认对齐 V3 模型全样本外验证最优运营点。 */
     data class ExitRules(
-        val takeProfitPct: Double = 0.07,
-        val timeStopDays: Int = 3,
-        val priceStopEnabled: Boolean = true,
+        val takeProfitPct: Double = 0.05,
+        val timeStopDays: Int = 15,
+        val priceStopEnabled: Boolean = false,
+        /** 入场跳空上限：开盘价较信号日收盘价的涨幅超过该值时放弃入场。非正数表示关闭过滤。 */
+        val entryGapMaxPct: Double = 0.03,
     ) {
         init {
             require(takeProfitPct > 0.0) { "止盈比例必须为正，当前: $takeProfitPct" }
@@ -38,6 +42,8 @@ class HoldingStateMachine(
         val tsCode: String,
         /** 信号日（选股日，T 日）最低价。 */
         val signalDateLow: Double,
+        /** 信号日（选股日，T 日）收盘价，用于入场跳空过滤；非正数表示缺失（不过滤）。 */
+        val signalDateClose: Double = 0.0,
     )
 
     /** 单日推进结果。 */
@@ -92,6 +98,11 @@ class HoldingStateMachine(
             val bar = candleFor(candidate.tsCode, tradeDate) ?: continue
             val entryPrice = bar.getOpen().toDouble()
             if (entryPrice <= 0.0) continue
+            // 入场跳空过滤：开盘较信号日收盘跳空超限 → 放弃入场（跳空利润属于昨日持有者）
+            if (config.entryGapMaxPct > 0.0 && candidate.signalDateClose > 0.0) {
+                val gap = entryPrice / candidate.signalDateClose - 1.0
+                if (gap > config.entryGapMaxPct + EPS) continue
+            }
             survivors += DailyHoldingState(
                 tradeDate = tradeDate,
                 tsCode = candidate.tsCode,

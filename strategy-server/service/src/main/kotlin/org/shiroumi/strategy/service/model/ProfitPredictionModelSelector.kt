@@ -37,7 +37,7 @@ internal class ProfitPredictionModelSelector(
     ),
     private val modelDir: String = System.getProperty(
         "quant.profitPrediction.modelDir",
-        "research/profit-prediction-v2/models/v2-lambda0.0"
+        "research/profit-prediction-v2/models/v3-honest-20260611"
     ),
     private val pythonWorkDir: String = System.getProperty(
         "quant.profitPrediction.pythonWorkDir",
@@ -45,8 +45,14 @@ internal class ProfitPredictionModelSelector(
     ),
     private val command: List<String> = System.getProperty(
         "quant.profitPrediction.command",
-        "uv run quant-infer-v2"
+        "uv run quant-infer-v3"
     ).split(Regex("\\s+")).filter { it.isNotBlank() },
+    // 训练侧特征在全历史上计算后切片(最长滚动窗 60 日)。推理取窗必须额外携带等长上下文,
+    // 由推理服务在全窗上计算特征后取末 seqLen 行, 保证训练/推理特征数值一致。
+    private val featureContextDays: Int = System.getProperty(
+        "quant.profitPrediction.featureContextDays",
+        "60"
+    ).toInt(),
     private val timeoutSeconds: Long = System.getProperty("quant.profitPrediction.timeoutSeconds", "180").toLong(),
     private val topN: Int = System.getProperty("quant.profitPrediction.topN", DEFAULT_TOP_N.toString()).toInt(),
     private val seqLen: Int = System.getProperty("quant.profitPrediction.seqLen", DEFAULT_SEQ_LEN.toString()).toInt(),
@@ -121,7 +127,7 @@ internal class ProfitPredictionModelSelector(
         val windows = dataSource.loadRecentOhlcvWindows(
             tsCodes = candidateSymbols,
             endDateInclusive = tradeDate,
-            limitPerStock = seqLen,
+            limitPerStock = seqLen + featureContextDays,
         )
         val request = buildRequest(tradeDate, candidateSymbols, windows)
         validateCoverage(tradeDate, request)
@@ -152,7 +158,7 @@ internal class ProfitPredictionModelSelector(
                 selected = selected,
                 targetWeight = if (selected) weightPerStock else 0.0,
                 sentimentExposure = exposure,
-                selectionReason = "profit-prediction-7pct:${scored.modelId}:${candidateMode.propertyValue}:" +
+                selectionReason = "profit-prediction-v3:${scored.modelId}:${candidateMode.propertyValue}:" +
                     "${if (selected) "Top$topN" else "candidate"} score=${"%.6f".format(prediction.score)}",
             )
         }
@@ -183,7 +189,7 @@ internal class ProfitPredictionModelSelector(
         val historicalWindows = dataSource.loadRecentOhlcvWindows(
             tsCodes = candidateSymbols,
             endDateInclusive = previousTradeDate,
-            limitPerStock = seqLen - 1,
+            limitPerStock = seqLen - 1 + featureContextDays,
         )
         val windows = buildIntradayWindows(
             tradeDate = tradeDate,
@@ -218,7 +224,7 @@ internal class ProfitPredictionModelSelector(
                 selected = true,
                 targetWeight = weightPerStock,
                 sentimentExposure = exposure,
-                selectionReason = "intraday-profit-prediction-7pct:${scored.modelId}:${intradayCandidateMode.propertyValue}:Top$topN score=${"%.6f".format(prediction.score)}",
+                selectionReason = "intraday-profit-prediction-v3:${scored.modelId}:${intradayCandidateMode.propertyValue}:Top$topN score=${"%.6f".format(prediction.score)}",
             )
         }
     }
@@ -267,8 +273,12 @@ internal class ProfitPredictionModelSelector(
         windows: Map<String, List<ProductionOhlcvWindowRow>>,
     ): ProfitPredictionInput {
         val stocks = universeSymbols.mapNotNull { tsCode ->
-            val rows = windows[tsCode].orEmpty()
-            if (rows.size < seqLen || rows.lastOrNull()?.tradeDate != tradeDate || rows.any { !it.adjustedComplete }) {
+            // 仅裁掉"最后一个未复权行"之前的上下文; 末段 seqLen 行的完整性要求与原先一致,
+            // 上下文行不完整时按可用上下文优雅降级, 不影响覆盖率门槛。
+            val fetched = windows[tsCode].orEmpty()
+            val lastIncomplete = fetched.indexOfLast { !it.adjustedComplete }
+            val rows = if (lastIncomplete >= 0) fetched.drop(lastIncomplete + 1) else fetched
+            if (rows.size < seqLen || rows.lastOrNull()?.tradeDate != tradeDate) {
                 return@mapNotNull null
             }
             ProfitPredictionInput.Stock(
@@ -301,12 +311,14 @@ internal class ProfitPredictionModelSelector(
     ): Map<String, List<ProductionOhlcvWindowRow>> {
         val result = linkedMapOf<String, List<ProductionOhlcvWindowRow>>()
         candidateSymbols.forEach { tsCode ->
-            val historical = historicalWindows[tsCode].orEmpty()
-            if (historical.size < seqLen - 1 || historical.any { !it.adjustedComplete }) {
+            val fetched = historicalWindows[tsCode].orEmpty()
+            val lastIncomplete = fetched.indexOfLast { !it.adjustedComplete }
+            val historical = if (lastIncomplete >= 0) fetched.drop(lastIncomplete + 1) else fetched
+            if (historical.size < seqLen - 1) {
                 return@forEach
             }
             val realtime = realtimeDailyCandles[tsCode]?.toIntradayOhlcvWindowRow(tradeDate) ?: return@forEach
-            result[tsCode] = historical.takeLast(seqLen - 1) + realtime
+            result[tsCode] = historical.takeLast(seqLen - 1 + featureContextDays) + realtime
         }
         return result
     }

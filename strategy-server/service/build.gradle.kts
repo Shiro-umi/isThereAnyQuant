@@ -32,6 +32,7 @@ application {
 
 tasks.test {
     useJUnitPlatform()
+    maxHeapSize = "2g"
 }
 
 tasks.register<JavaExec>("backfillProfitPredictionSelections") {

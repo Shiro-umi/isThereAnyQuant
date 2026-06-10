@@ -449,8 +449,9 @@ object PostMarketPreparationJob {
      * 推进当日持仓状态机。
      *
      * - 新入场候选：前一交易日选出、target_date=tradeDate 的 selected 票（今天开盘买入）。
-     *   信号日（选股日，T 日）最低价取 [previousTradeDate] 的 low，用于价格止损。
-     * - 行情：当日蜡烛用于退出判定与入场价；前一日蜡烛用于新入场票信号日低点。
+     *   信号日（选股日，T 日）low/close 取 [previousTradeDate] 蜡烛：low 用于价格止损（默认关闭），
+     *   close 用于入场跳空过滤（开盘较信号日收盘跳空 > 3% 不入场）。
+     * - 行情：当日蜡烛用于退出判定与入场价；前一日蜡烛用于新入场票信号日基准。
      * - 交易日间隔由 [TradingCalendarRepository] 计算。
      */
     private fun advanceHoldings(
@@ -459,9 +460,8 @@ object PostMarketPreparationJob {
         previousHoldings: List<DailyHoldingState>,
     ): HoldingStateMachine.DayResult {
         val todayCandles = StockDailyCandleRepository.findByTradeDate(tradeDate).associateBy { it.tsCode }
-        val signalDayLowByCode: Map<String, Double> = if (previousTradeDate != null) {
-            StockDailyCandleRepository.findByTradeDate(previousTradeDate)
-                .associate { it.tsCode to it.getLow().toDouble() }
+        val signalDayCandleByCode: Map<String, model.Candle> = if (previousTradeDate != null) {
+            StockDailyCandleRepository.findByTradeDate(previousTradeDate).associateBy { it.tsCode }
         } else {
             emptyMap()
         }
@@ -470,9 +470,11 @@ object PostMarketPreparationJob {
         val newEntries = DailyProfitPredictionSelectionRepository
             .findSelectionsByTargetDate(tradeDate)
             .map { selection ->
+                val signalBar = signalDayCandleByCode[selection.tsCode]
                 HoldingStateMachine.EntryCandidate(
                     tsCode = selection.tsCode,
-                    signalDateLow = signalDayLowByCode[selection.tsCode] ?: 0.0,
+                    signalDateLow = signalBar?.getLow()?.toDouble() ?: 0.0,
+                    signalDateClose = signalBar?.getPrice()?.toDouble() ?: 0.0,
                 )
             }
 

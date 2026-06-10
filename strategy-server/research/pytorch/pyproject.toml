@@ -15,6 +15,7 @@ quant-train-crash-transformer = "quant_research_training.crash_transformer:main"
 quant-train-profit-prediction = "quant_research_training.profit_prediction_7pct:main"
 quant-infer-film = "quant_research_training.profit_prediction_film:main"
 quant-infer-v2 = "quant_research_training.profit_prediction_v2_infer:main"
+quant-infer-v3 = "quant_research_training.profit_prediction_v3_infer:main"
 
 [build-system]
 requires = ["hatchling"]

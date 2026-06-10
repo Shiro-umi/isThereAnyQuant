@@ -28,6 +28,8 @@ fun main() = runBlocking {
     val overwrite = System.getProperty("quant.profitPrediction.backfill.overwrite", "true").toBoolean()
     val chunkSize = System.getProperty("quant.profitPrediction.backfill.chunkSize", "120").toInt().coerceAtLeast(1)
     val seqLen = System.getProperty("quant.profitPrediction.seqLen", "20").toInt().coerceAtLeast(1)
+    // 与 ProfitPredictionModelSelector 的取窗一致: seqLen + 特征上下文(最长滚动窗 60 日)
+    val featureContextDays = System.getProperty("quant.profitPrediction.featureContextDays", "60").toInt().coerceAtLeast(0)
     val warmupStart = LocalDate.parse(System.getProperty("quant.profitPrediction.backfill.warmupStart", "2009-01-01"))
 
     val allOpenDates = TradingCalendarRepository.findOpenDates(warmupStart, end)
@@ -43,7 +45,7 @@ fun main() = runBlocking {
 
     tradeDates.chunked(chunkSize).forEachIndexed { chunkIndex, chunkDates ->
         val firstIndex = allOpenDates.indexOf(chunkDates.first())
-        val warmupIndex = (firstIndex - seqLen - 5).coerceAtLeast(0)
+        val warmupIndex = (firstIndex - seqLen - featureContextDays - 5).coerceAtLeast(0)
         val preloadStart = allOpenDates[warmupIndex]
         val preloadEnd = chunkDates.last()
         val ohlcvRows = StockDailyCandleRepository.findProductionOhlcvRange(
