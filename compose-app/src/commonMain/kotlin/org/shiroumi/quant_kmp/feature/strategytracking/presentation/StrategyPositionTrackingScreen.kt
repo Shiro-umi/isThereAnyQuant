@@ -1595,28 +1595,24 @@ private fun codeTextStyle(
 private fun TrackingLoadingState(
     modifier: Modifier = Modifier,
 ) {
-    Surface(
+    Column(
         modifier = modifier,
-        shape = MaterialTheme.shapes.extraLarge,
-        color = MaterialTheme.colorScheme.surfaceContainerLow
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 28.dp, vertical = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            CircularProgressIndicator()
-            Text(
-                text = "正在整理策略持仓跟踪",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                text = "正在加载最近 20 个交易日的持仓变化、调入与清仓关系。",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        CircularProgressIndicator(
+            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        )
+        Text(
+            text = "正在整理策略持仓跟踪",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = "正在加载最近 20 个交易日的持仓变化、调入与清仓关系",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
