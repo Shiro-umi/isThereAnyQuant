@@ -56,27 +56,36 @@ fun Route.authRoutes(authService: AuthService) {
     /**
      * 刷新 Access Token
      * POST /api/auth/refresh
+     *
+     * 优先使用请求体中的 refresh token（Android 端显式提供），
+     * 回退到 Cookie（Web 端依赖 HttpOnly Cookie）。
+     * 这样避免 Android 端 HttpCookies 插件自动携带的过期 Cookie
+     * 覆盖请求体中有效的 refresh token。
      */
     post("/api/auth/refresh") {
-        val refreshToken = call.request.cookies[AuthConstants.REFRESH_TOKEN_COOKIE]
-            ?: run {
-                val requestToken = runCatching {
-                    call.receiveNullable<RefreshTokenRequest>()?.refreshToken
-                }.getOrNull()
-                if (requestToken.isNullOrBlank()) {
-                    return@post call.respondAuthError(
-                        AuthErrorCodes.UNAUTHORIZED,
-                        "缺少 Refresh Token",
-                        HttpStatusCode.Unauthorized
-                    )
-                }
-                requestToken
-            }
+        // 1) 先从请求体取（Android 端显式提供）
+        val bodyToken = runCatching {
+            call.receiveNullable<RefreshTokenRequest>()?.refreshToken
+        }.getOrNull()
+
+        // 2) 再从 Cookie 取（Web 端）
+        val cookieToken = call.request.cookies[AuthConstants.REFRESH_TOKEN_COOKIE]
+
+        // 3) 优先用请求体，回退到 Cookie
+        val refreshToken = when {
+            !bodyToken.isNullOrBlank() -> bodyToken
+            !cookieToken.isNullOrBlank() -> cookieToken
+            else -> return@post call.respondAuthError(
+                AuthErrorCodes.UNAUTHORIZED,
+                "缺少 Refresh Token",
+                HttpStatusCode.Unauthorized
+            )
+        }
 
         when (val result = authService.refreshAccessToken(refreshToken)) {
             is AuthResult.Success -> {
                 val (accessToken, expiresIn) = result.data
-                // 兼容旧版已发出的 session refresh cookie：刷新成功时升级为持久 cookie，避免部署/PWA 恢复后掉登录态。
+                // 刷新成功时补发持久 cookie，避免部署/PWA 恢复后掉登录态
                 call.setRefreshTokenCookie(refreshToken, rememberMe = true)
                 call.respond(HttpStatusCode.OK, RefreshTokenResponse(accessToken, expiresIn))
             }
