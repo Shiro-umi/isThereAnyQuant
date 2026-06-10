@@ -895,7 +895,8 @@
             var _origFetch = window.fetch.bind(window);
 
             // 拦截全局 fetch：仅对 .wasm 文件注入下载进度追踪。
-            // 用 clone() 分出旁路读取字节数，原始 Response 原样返回给 instantiateStreaming。
+            // 用 response.clone() 旁路读取 body 统计字节数，不影响原始 Response
+            // 返回给调用方（Kotlin/Wasm 的 instantiateStreaming）。
             window.fetch = function(input, init) {
                 var url = urlFromFetchInput(input);
                 var clean = url.split('?')[0].split('#')[0];
@@ -1259,7 +1260,7 @@
         // Service Worker 注册
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function() {
-                navigator.serviceWorker.register('sw.js?v=release-20260422-1255')
+                navigator.serviceWorker.register('sw.js?v=__SHELL_VERSION__')
                     .then(function(registration) {
                         console.log('ServiceWorker registration successful:', registration.scope);
                     })

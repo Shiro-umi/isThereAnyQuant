@@ -171,6 +171,7 @@ fun injectCacheVersion(staticDir: File, mode: String) {
             .replace(Regex("""\?v=[^"']+"""), "?v=$shellVersion")
             .replace("__CODE_VERSION__", codeVersion)
             .replace("__CACHE_VERSION__", shellVersion)
+            .replace("__SHELL_VERSION__", shellVersion)
         indexHtml.writeText(content)
     }
 

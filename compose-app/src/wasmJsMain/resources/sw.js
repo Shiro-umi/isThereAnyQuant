@@ -123,13 +123,21 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // 代码资源完全不走 SW：
-    // - compose-app.js 由构建注入的 code version 决定 URL
-    // - webpack 输出的 `[hash].wasm` / `[hash].js` 文件名本身就是指纹
-    // 浏览器 HTTP 缓存足够；让 SW 介入只会在版本切换瞬间
-    // 触发新旧 SW 接管竞态（旧 SW 拦截了对新 hash 的请求 → 缓存没有 → fetch
-    // 时若被新 SW 抢占 controller 即失败 → 整个首屏挂掉，需要再刷一次才能恢复）。
+    // 代码资源策略：
+    // - compose-app.js：完全不走 SW。它由构建注入的 code version 决定 URL，
+    //   且 webpack runtime 通过 document.currentScript 解析 publicPath，
+    //   SW 介入会在新旧 SW 切换瞬间触发竞态（旧 SW 拦截新 hash 请求 → 缓存
+    //   没有 → fetch 时被新 SW 抢占 controller → 失败）。
+    // - .wasm：让 SW 缓存。Safari 的 HTTP 缓存对大文件（30MB+）不可靠，
+    //   每次刷新都重新下载；SW Cache API 在 Safari 中对大文件稳定工作。
+    //   wasm 文件名带 content hash，新旧版本 URL 不同，无竞态风险。
     if (isCodeAsset(url.pathname)) {
+        return;
+    }
+
+    // .wasm 文件：SW 缓存优先（解决 Safari HTTP 缓存不持久问题）
+    if (url.pathname.endsWith('.wasm')) {
+        event.respondWith(cacheFirst(request));
         return;
     }
 
@@ -162,14 +170,14 @@ self.addEventListener('fetch', (event) => {
 });
 
 /**
- * 判断是否是 webpack 输出的指纹化资源（文件名形如 `<16+位 hex>.wasm/.js`）。
- * 这类资源换内容必然换 URL，由 HTTP 缓存处理最稳，不该被 SW 拦截。
+ * 判断是否是 compose-app.js（主脚本入口）。
+ * compose-app.js 不走 SW，因为 webpack runtime 依赖 document.currentScript
+ * 推断 publicPath，SW 介入会在新旧版本切换时触发竞态失败。
+ * .wasm 文件虽然也是指纹化资源，但 Safari HTTP 缓存对大文件不可靠，
+ * 需要 SW 介入缓存；wasm 文件名带 content hash，新旧版本 URL 不同，无竞态。
  */
 function isCodeAsset(pathname) {
-    if (pathname === '/compose-app.js' || pathname.endsWith('/compose-app.js')) {
-        return true;
-    }
-    return /\/[0-9a-f]{16,}\.(wasm|js)$/i.test(pathname);
+    return pathname === '/compose-app.js' || pathname.endsWith('/compose-app.js');
 }
 
 /**
