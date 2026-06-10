@@ -82,6 +82,11 @@ internal class ProfitPredictionModelSelector(
 
     private val servicePort: Int = System.getProperty("quant.profitPrediction.servicePort", "9875").toInt()
     private val serviceUrl = "http://127.0.0.1:$servicePort"
+    /** 健康检查要求 /health 响应包含该标识, 防止复用端口上残留的旧模型服务; 默认取模型目录名。 */
+    private val expectedModelId: String = System.getProperty(
+        "quant.profitPrediction.expectedModelId",
+        modelDir.trimEnd('/').substringAfterLast('/')
+    )
     private val httpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(10))
         .build()
@@ -413,7 +418,17 @@ internal class ProfitPredictionModelSelector(
                 .GET()
                 .build()
             val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
-            response.statusCode() == 200
+            if (response.statusCode() != 200) return false
+            // 端口可能被旧实例的推理服务残留进程占用; 必须校验模型身份, 否则会复用错误模型打分
+            val healthyModelMatches = response.body().contains(expectedModelId)
+            if (!healthyModelMatches) {
+                logger.error(
+                    "Inference service on port $servicePort serves unexpected model " +
+                        "(expected '$expectedModelId', health=${response.body()}). " +
+                        "Kill the stale process holding the port before retrying."
+                )
+            }
+            healthyModelMatches
         } catch (e: Exception) {
             false
         }
