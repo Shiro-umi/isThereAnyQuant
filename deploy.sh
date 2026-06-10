@@ -137,10 +137,9 @@ STRATEGY_ROLLBACK_DIR="$DEPLOY_DIR/strategy-service.rollback"
 
 ensure_strategy_deploy_layout() {
     mkdir -p "$DEPLOY_BIN" "$DEPLOY_DIR/logs" "$DEPLOY_DIR/data" "$DEPLOY_DIR/config"
-    if [ ! -f "$STRATEGY_START_SCRIPT" ]; then
-        cp "$SCRIPT_DIR/ktor-server/src/main/scripts/start-strategy-service.sh" "$STRATEGY_START_SCRIPT"
-        chmod 755 "$STRATEGY_START_SCRIPT"
-    fi
+    # 启动脚本每次部署都刷新（stop 走 PID 文件，刷新无副作用）；config 仅缺失时初始化
+    cp "$SCRIPT_DIR/ktor-server/src/main/scripts/start-strategy-service.sh" "$STRATEGY_START_SCRIPT"
+    chmod 755 "$STRATEGY_START_SCRIPT"
     if [ ! -f "$DEPLOY_DIR/config/config.yaml" ]; then
         cp "$CONFIG_FILE" "$DEPLOY_DIR/config/config.yaml"
     fi
