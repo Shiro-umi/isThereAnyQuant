@@ -27,6 +27,16 @@ if [ -z "${STRATEGY_SOCKET_PORT:-}" ]; then
     export STRATEGY_SOCKET_BIND_HOST="${STRATEGY_SOCKET_BIND_HOST:-127.0.0.1}"
 fi
 
+# 盈利预测推理子进程端口按部署族隔离：release=9875、其余(debug/debug-wan)=9874。
+# 两族共用同一端口时，先启动族的推理进程会被后启动族复用；推理进程在 service 被杀后可能
+# 残留为孤儿继续占端口（健康检查已校验模型身份，错配会快速失败而非静默用错模型）。
+if [ -z "${PROFIT_PREDICTION_INFER_PORT:-}" ]; then
+    case "$QUANT_MODE" in
+        release|prod|production) export PROFIT_PREDICTION_INFER_PORT=9875 ;;
+        *)                       export PROFIT_PREDICTION_INFER_PORT=9874 ;;
+    esac
+fi
+
 JVM_OPTS="${JVM_OPTS:-"
     -server
     -Xms256m
@@ -42,6 +52,7 @@ APP_OPTS="${APP_OPTS:-"
     -Dlogback.configurationFile=${CONFIG_DIR}/logback.xml
     -Dserver.data.dir=${DATA_DIR}
     -Dquant.project.root=${PROJECT_ROOT}
+    -Dquant.profitPrediction.servicePort=${PROFIT_PREDICTION_INFER_PORT}
 "}"
 
 mkdir -p "$LOG_DIR"

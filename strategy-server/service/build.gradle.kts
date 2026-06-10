@@ -35,6 +35,23 @@ tasks.test {
     maxHeapSize = "2g"
 }
 
+tasks.register<JavaExec>("rebuildStrategyRange") {
+    group = "application"
+    description = "Rebuild full post-market strategy chain (factors/sentiment/selection/audit/holdings) for a trade-date range"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.shiroumi.strategy.service.RebuildStrategyRangeKt")
+    systemProperties(
+        System.getProperties()
+            .stringPropertyNames()
+            .filter {
+                it.startsWith("quant.profitPrediction.") || it.startsWith("quant.strategy.rebuild.") ||
+                    it == "quant.projectRoot" || it == "quant.project.root"
+            }
+            .associateWith { System.getProperty(it) }
+    )
+    jvmArgs("-Xmx6g")
+}
+
 tasks.register<JavaExec>("backfillProfitPredictionSelections") {
     group = "application"
     description = "Backfill daily profit prediction selections from the model into daily_profit_prediction_selection"
