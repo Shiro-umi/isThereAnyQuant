@@ -224,6 +224,132 @@ class HoldingStateMachineTest {
         assertEquals(d2, b.tradeDate)
     }
 
+    /** v5 快线规则：止盈 7% / 时间止损 5 交易日 / 保盈阶梯全档 2.5% / 每日入场上限 1。 */
+    private val fastLaneMachine = HoldingStateMachine(
+        HoldingStateMachine.ExitRules(
+            takeProfitPct = 0.07,
+            timeStopDays = 5,
+            profitProtectLadder = mapOf(1 to 0.025, 2 to 0.025, 3 to 0.025, 4 to 0.025),
+            maxDailyEntries = 1,
+        )
+    )
+
+    @Test
+    fun `保盈阶梯_HIGH触及档位离场_未触及不离场`() {
+        // A 于 d2 入场价 10；d3（daysSinceEntry=1）HIGH 10.20 < 10.25 → 不离场；d4 HIGH 10.26 ≥ +2.5% → 离场
+        val prior = listOf(DailyHoldingState(d2, "A.SZ", entryDate = d2, entryPrice = 10.0, signalDateLow = 9.0))
+        val holdBars = mapOf("A.SZ" to candle(open = 10.0f, high = 10.20f, low = 9.9f, close = 10.0f))
+        val held = fastLaneMachine.advance(
+            tradeDate = d3,
+            previousHoldings = prior,
+            newEntries = emptyList(),
+            tradingDaysSince = ::tradingDaysSince,
+            candleFor = { code, _ -> holdBars[code] },
+        )
+        assertTrue(held.exited.isEmpty())
+        val exitBars = mapOf("A.SZ" to candle(open = 10.0f, high = 10.26f, low = 9.9f, close = 10.1f))
+        val exited = fastLaneMachine.advance(
+            tradeDate = d4,
+            previousHoldings = held.holdings,
+            newEntries = emptyList(),
+            tradingDaysSince = ::tradingDaysSince,
+            candleFor = { code, _ -> exitBars[code] },
+        )
+        assertEquals(listOf("A.SZ"), exited.exited)
+    }
+
+    @Test
+    fun `保盈阶梯_无档位日不触发_默认配置不受影响`() {
+        // 默认 machine（阶梯关闭）：HIGH +2.6% 不触发任何离场
+        val prior = listOf(DailyHoldingState(d2, "A.SZ", entryDate = d2, entryPrice = 10.0, signalDateLow = 9.0))
+        val bars = mapOf("A.SZ" to candle(open = 10.0f, high = 10.26f, low = 9.9f, close = 10.1f))
+        val result = machine.advance(
+            tradeDate = d3,
+            previousHoldings = prior,
+            newEntries = emptyList(),
+            tradingDaysSince = ::tradingDaysSince,
+            candleFor = { code, _ -> bars[code] },
+        )
+        assertTrue(result.exited.isEmpty())
+    }
+
+    @Test
+    fun `保盈阶梯_时间止损v5第5交易日强平`() {
+        // 入场 d2；第 5 个交易日（daysSinceEntry=4）即便 HIGH 平淡也强制离场
+        val prior = listOf(DailyHoldingState(openDates[4], "A.SZ", entryDate = d2, entryPrice = 10.0, signalDateLow = 9.0))
+        val bars = mapOf("A.SZ" to candle(open = 9.8f, high = 9.9f, low = 9.7f, close = 9.8f))
+        val result = fastLaneMachine.advance(
+            tradeDate = openDates[5], // daysSinceEntry = 4 = timeStopDays-1
+            previousHoldings = prior,
+            newEntries = emptyList(),
+            tradingDaysSince = ::tradingDaysSince,
+            candleFor = { code, _ -> bars[code] },
+        )
+        assertEquals(listOf("A.SZ"), result.exited)
+    }
+
+    @Test
+    fun `每日入场上限_按entryPriority挑1只`() {
+        // 三只候选全部可入场，entryPriority: B(0.05) > A(0.03) > C(0.01) → 仅 B 入场
+        val bars = mapOf(
+            "A.SZ" to candle(open = 10f, high = 10.1f, low = 9.9f, close = 10f),
+            "B.SZ" to candle(open = 20f, high = 20.1f, low = 19.9f, close = 20f),
+            "C.SZ" to candle(open = 30f, high = 30.1f, low = 29.9f, close = 30f),
+        )
+        val result = fastLaneMachine.advance(
+            tradeDate = d2,
+            previousHoldings = emptyList(),
+            newEntries = listOf(
+                HoldingStateMachine.EntryCandidate("A.SZ", 9.0, 10.0, entryPriority = 0.03),
+                HoldingStateMachine.EntryCandidate("B.SZ", 19.0, 20.0, entryPriority = 0.05),
+                HoldingStateMachine.EntryCandidate("C.SZ", 29.0, 30.0, entryPriority = 0.01),
+            ),
+            tradingDaysSince = ::tradingDaysSince,
+            candleFor = { code, _ -> bars[code] },
+        )
+        assertEquals(listOf("B.SZ"), result.entered)
+        assertEquals(listOf("B.SZ"), result.holdings.map { it.tsCode })
+    }
+
+    @Test
+    fun `每日入场上限_首选跳空被滤后顺延次选不浪费名额`() {
+        // B 优先级最高但跳空 +4% 被过滤 → 名额顺延给 A
+        val bars = mapOf(
+            "A.SZ" to candle(open = 10f, high = 10.1f, low = 9.9f, close = 10f),
+            "B.SZ" to candle(open = 20.8f, high = 21f, low = 20.7f, close = 20.9f), // 信号收盘20 → 跳空+4%
+        )
+        val result = fastLaneMachine.advance(
+            tradeDate = d2,
+            previousHoldings = emptyList(),
+            newEntries = listOf(
+                HoldingStateMachine.EntryCandidate("A.SZ", 9.0, 10.0, entryPriority = 0.03),
+                HoldingStateMachine.EntryCandidate("B.SZ", 19.0, 20.0, entryPriority = 0.05),
+            ),
+            tradingDaysSince = ::tradingDaysSince,
+            candleFor = { code, _ -> bars[code] },
+        )
+        assertEquals(listOf("A.SZ"), result.entered)
+    }
+
+    @Test
+    fun `每日入场上限_默认关闭时全部入场`() {
+        val bars = mapOf(
+            "A.SZ" to candle(open = 10f, high = 10.1f, low = 9.9f, close = 10f),
+            "B.SZ" to candle(open = 20f, high = 20.1f, low = 19.9f, close = 20f),
+        )
+        val result = machine.advance(
+            tradeDate = d2,
+            previousHoldings = emptyList(),
+            newEntries = listOf(
+                HoldingStateMachine.EntryCandidate("A.SZ", 9.0, 10.0),
+                HoldingStateMachine.EntryCandidate("B.SZ", 19.0, 20.0),
+            ),
+            tradingDaysSince = ::tradingDaysSince,
+            candleFor = { code, _ -> bars[code] },
+        )
+        assertEquals(setOf("A.SZ", "B.SZ"), result.entered.toSet())
+    }
+
     @Test
     fun `已持有票不重复入场`() {
         val prior = listOf(DailyHoldingState(d1, "A.SZ", entryDate = d1, entryPrice = 10.0, signalDateLow = 9.0))

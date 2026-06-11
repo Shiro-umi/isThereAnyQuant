@@ -72,7 +72,43 @@ private data class IncrementalPreparedBars(
  */
 object PostMarketPreparationJob {
     private val profitPredictionSelector = ProfitPredictionModelSelector()
-    private val holdingStateMachine = HoldingStateMachine()
+    private val holdingStateMachine = HoldingStateMachine(loadExitRulesFromProperties())
+
+    /**
+     * 从系统属性装配持仓退出/入场规则；全部缺省时与 `ExitRules()` 默认值一致（V3 现行为）。
+     *
+     * v5 快线体系（TP7%/H5，验证: 生产池+688 76.7%@239笔/年）开启示例：
+     * -Dquant.strategy.holding.takeProfitPct=0.07
+     * -Dquant.strategy.holding.timeStopDays=5
+     * -Dquant.strategy.holding.profitProtectLadder=1:0.025,2:0.025,3:0.025,4:0.025
+     * -Dquant.strategy.holding.maxDailyEntries=1
+     */
+    private fun loadExitRulesFromProperties(): HoldingStateMachine.ExitRules {
+        val defaults = HoldingStateMachine.ExitRules()
+        val ladder = System.getProperty("quant.strategy.holding.profitProtectLadder")
+            ?.split(',')
+            ?.filter { it.isNotBlank() }
+            ?.associate { entry ->
+                val (day, level) = entry.split(':', limit = 2)
+                day.trim().toInt() to level.trim().toDouble()
+            }
+            ?: defaults.profitProtectLadder
+        return HoldingStateMachine.ExitRules(
+            takeProfitPct = System.getProperty("quant.strategy.holding.takeProfitPct")
+                ?.toDouble() ?: defaults.takeProfitPct,
+            timeStopDays = System.getProperty("quant.strategy.holding.timeStopDays")
+                ?.toInt() ?: defaults.timeStopDays,
+            priceStopEnabled = System.getProperty("quant.strategy.holding.priceStopEnabled")
+                ?.toBooleanStrictOrNull() ?: defaults.priceStopEnabled,
+            entryGapMaxPct = System.getProperty("quant.strategy.holding.entryGapMaxPct")
+                ?.toDouble() ?: defaults.entryGapMaxPct,
+            profitProtectLadder = ladder,
+            maxDailyEntries = System.getProperty("quant.strategy.holding.maxDailyEntries")
+                ?.toInt() ?: defaults.maxDailyEntries,
+        ).also {
+            if (it != defaults) logger.info("[策略预处理] 持仓规则非默认配置生效 | $it")
+        }
+    }
 
     suspend fun run(
         tradeDate: LocalDate,
@@ -466,7 +502,9 @@ object PostMarketPreparationJob {
             emptyMap()
         }
 
-        // 新入场候选：前一交易日选出、今日生效买入的 selected 票
+        // 新入场候选：前一交易日选出、今日生效买入的 selected 票。
+        // 每日入场上限开启时，入场优先级 = 信号日 20 日对数收益波动率（v5 验证：高波动优先 +1.8pp）。
+        val entryCapEnabled = holdingStateMachine.entryCapEnabled
         val newEntries = DailyProfitPredictionSelectionRepository
             .findSelectionsByTargetDate(tradeDate)
             .map { selection ->
@@ -475,6 +513,11 @@ object PostMarketPreparationJob {
                     tsCode = selection.tsCode,
                     signalDateLow = signalBar?.getLow()?.toDouble() ?: 0.0,
                     signalDateClose = signalBar?.getPrice()?.toDouble() ?: 0.0,
+                    entryPriority = if (entryCapEnabled && previousTradeDate != null) {
+                        signalDayVolatility20(selection.tsCode, previousTradeDate)
+                    } else {
+                        0.0
+                    },
                 )
             }
 
@@ -490,6 +533,21 @@ object PostMarketPreparationJob {
                 if (date == tradeDate) todayCandles[tsCode] else null
             },
         )
+    }
+
+    /**
+     * 信号日 20 日对数收益波动率（前复权收盘），作为每日入场上限开启时的入场优先级。
+     * 数据不足 10 根有效收益时返回 0.0（排序中自然落后）。
+     */
+    private fun signalDayVolatility20(tsCode: String, signalDate: LocalDate): Double {
+        val closes = StockDailyCandleRepository
+            .findRecent(tsCode = tsCode, limit = 21, endDateInclusive = signalDate)
+            .map { it.getPrice(useAdjusted = true).toDouble() }
+            .filter { it > 0.0 }
+        if (closes.size < 11) return 0.0
+        val logReturns = closes.zipWithNext { prev, cur -> kotlin.math.ln(cur / prev) }
+        val mean = logReturns.average()
+        return kotlin.math.sqrt(logReturns.sumOf { (it - mean) * (it - mean) } / logReturns.size)
     }
 
     private fun persistNextTradeDateSentimentSeed(
