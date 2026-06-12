@@ -4,56 +4,57 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import model.candle.StrategyPositionTrackingDay
 import model.candle.StrategyPositionTrackingResponse
+import model.candle.StrategyTrackingEdge
+import model.candle.StrategyTrackingEdgeKind
+import model.candle.StrategyTrackingExitReason
 import model.candle.StrategyTrackingSection
 import model.candle.StrategyTrackingStockNode
 
 class StrategyPositionTrackingModelsTest {
 
     @Test
-    fun buildsHoldContinueEnterAndExitEdgesFromAdjacentDays() {
+    fun toTimelinePassesThroughCloudEdgesAndRealtimeFlag() {
         val timeline = StrategyPositionTrackingResponse(
             days = listOf(
                 day(
                     tradeDate = "2026-04-14",
-                    selection = listOf(node("000001.SZ", "平安银行", StrategyTrackingSection.SELECTION, 0)),
-                    holdings = listOf(
-                        node("600519.SH", "贵州茅台", StrategyTrackingSection.HOLDINGS, 0),
-                        node("000333.SZ", "美的集团", StrategyTrackingSection.HOLDINGS, 1),
-                    ),
+                    holdings = listOf(node("600519.SH", "贵州茅台", StrategyTrackingSection.HOLDINGS, 0)),
                 ),
                 day(
                     tradeDate = "2026-04-15",
-                    holdings = listOf(
-                        node("600519.SH", "贵州茅台", StrategyTrackingSection.HOLDINGS, 0),
-                        node("000001.SZ", "平安银行", StrategyTrackingSection.HOLDINGS, 1),
-                    ),
-                    cleared = listOf(node("000333.SZ", "美的集团", StrategyTrackingSection.CLEARED, 0)),
+                    holdings = listOf(node("600519.SH", "贵州茅台", StrategyTrackingSection.HOLDINGS, 0)),
                 ),
-            )
+            ),
+            edges = listOf(
+                edge(
+                    fromDate = "2026-04-14",
+                    toDate = "2026-04-15",
+                    kind = StrategyTrackingEdgeKind.HOLD_CONTINUE,
+                    pnlPct = 1.25f,
+                ),
+            ),
+            realtimeTradeDate = "2026-04-15",
         ).toTimeline()
 
-        assertEquals(3, timeline.edges.size)
-        assertEquals(1, timeline.edges.count { it.kind == TrackingEdgeKind.HOLD_CONTINUE })
-        assertEquals(1, timeline.edges.count { it.kind == TrackingEdgeKind.ENTER_HOLDING })
-        assertEquals(1, timeline.edges.count { it.kind == TrackingEdgeKind.EXIT_CLEAR })
+        assertEquals(1, timeline.edges.size)
+        assertEquals(1.25f, timeline.edges.single().pnlPct)
+        assertEquals("2026-04-15", timeline.realtimeTradeDate)
+        assertEquals(true, timeline.isRealtimeDay(timeline.days.last()))
+        assertEquals(false, timeline.isRealtimeDay(timeline.days.first()))
     }
 
     @Test
-    fun skipsEnterEdgeWhenSelectionDoesNotBecomeHoldingNextDay() {
+    fun toTimelineDropsEdgesBeyondSlotLimit() {
         val timeline = StrategyPositionTrackingResponse(
-            days = listOf(
-                day(
-                    tradeDate = "2026-04-16",
-                    selection = listOf(node("300750.SZ", "宁德时代", StrategyTrackingSection.SELECTION, 0)),
-                ),
-                day(
-                    tradeDate = "2026-04-17",
-                    holdings = emptyList(),
-                ),
-            )
+            days = listOf(day(tradeDate = "2026-04-14"), day(tradeDate = "2026-04-15")),
+            edges = listOf(
+                edge("2026-04-14", "2026-04-15", StrategyTrackingEdgeKind.HOLD_CONTINUE, toSlotIndex = TrackingSlotCount),
+                edge("2026-04-14", "2026-04-15", StrategyTrackingEdgeKind.HOLD_CONTINUE, toSlotIndex = 0),
+            ),
         ).toTimeline()
 
-        assertEquals(0, timeline.edges.size)
+        assertEquals(1, timeline.edges.size)
+        assertEquals(0, timeline.edges.single().toSlotIndex)
     }
 
     @Test
@@ -67,6 +68,45 @@ class StrategyPositionTrackingModelsTest {
 
         assertEquals(2, timeline.days.size)
         assertEquals(0, timeline.edges.size)
+        assertEquals(null, timeline.realtimeTradeDate)
+    }
+
+    @Test
+    fun exitEdgeLabelCombinesReasonAndRealizedPnl() {
+        val label = edge(
+            fromDate = "2026-04-14",
+            toDate = "2026-04-15",
+            kind = StrategyTrackingEdgeKind.EXIT_CLEAR,
+            pnlPct = 7.0f,
+            exitReason = StrategyTrackingExitReason.TAKE_PROFIT,
+        ).toLabelData()
+
+        assertEquals("止盈 +7.00%", label?.text)
+        assertEquals(true, label?.positive)
+    }
+
+    @Test
+    fun holdEdgeLabelShowsDailyChangeOnly() {
+        val label = edge(
+            fromDate = "2026-04-14",
+            toDate = "2026-04-15",
+            kind = StrategyTrackingEdgeKind.HOLD_CONTINUE,
+            pnlPct = -2.5f,
+        ).toLabelData()
+
+        assertEquals("-2.50%", label?.text)
+        assertEquals(false, label?.positive)
+    }
+
+    @Test
+    fun enterEdgeWithoutPnlHasNoLabel() {
+        val label = edge(
+            fromDate = "2026-04-14",
+            toDate = "2026-04-15",
+            kind = StrategyTrackingEdgeKind.ENTER_HOLDING,
+        ).toLabelData()
+
+        assertEquals(null, label)
     }
 
     private fun day(
@@ -91,5 +131,26 @@ class StrategyPositionTrackingModelsTest {
         stockName = name,
         section = section,
         slotIndex = slotIndex,
+    )
+
+    private fun edge(
+        fromDate: String,
+        toDate: String,
+        kind: StrategyTrackingEdgeKind,
+        pnlPct: Float? = null,
+        exitReason: StrategyTrackingExitReason? = null,
+        toSlotIndex: Int = 0,
+    ) = StrategyTrackingEdge(
+        fromDate = fromDate,
+        fromSection = StrategyTrackingSection.HOLDINGS,
+        fromStockCode = "600519.SH",
+        fromSlotIndex = 0,
+        toDate = toDate,
+        toSection = StrategyTrackingSection.HOLDINGS,
+        toStockCode = "600519.SH",
+        toSlotIndex = toSlotIndex,
+        kind = kind,
+        pnlPct = pnlPct,
+        exitReason = exitReason,
     )
 }

@@ -2,6 +2,7 @@ package org.shiroumi.quant_kmp.feature.strategytracking.presentation
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import model.candle.StrategyTrackingEdgeKind
 import model.candle.StrategyTrackingSection
 
 class TrackingComputeRuntimeTest {
@@ -19,7 +20,7 @@ class TrackingComputeRuntimeTest {
                         toDate = "2026-04-15",
                         toSection = StrategyTrackingSection.HOLDINGS,
                         toSlotIndex = 1,
-                        kind = TrackingEdgeKind.ENTER_HOLDING,
+                        kind = StrategyTrackingEdgeKind.ENTER_HOLDING,
                     ),
                     TrackingEdgeTaskPayload(
                         fromDate = "2026-04-15",
@@ -28,7 +29,7 @@ class TrackingComputeRuntimeTest {
                         toDate = "2026-04-16",
                         toSection = StrategyTrackingSection.CLEARED,
                         toSlotIndex = 2,
-                        kind = TrackingEdgeKind.EXIT_CLEAR,
+                        kind = StrategyTrackingEdgeKind.EXIT_CLEAR,
                     ),
                 ),
             ),
@@ -54,7 +55,7 @@ class TrackingComputeRuntimeTest {
                         toDate = "2026-04-15",
                         toSection = StrategyTrackingSection.HOLDINGS,
                         toSlotIndex = 0,
-                        kind = TrackingEdgeKind.ENTER_HOLDING,
+                        kind = StrategyTrackingEdgeKind.ENTER_HOLDING,
                     ),
                 ),
             ),

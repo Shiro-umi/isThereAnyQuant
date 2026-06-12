@@ -61,6 +61,42 @@ class HoldingStateMachine(
                 profitProtectLadder = emptyMap(),
                 maxDailyEntries = 0,
             )
+
+            /**
+             * 从系统属性装配持仓规则；全部缺省时与 `ExitRules()` 默认值一致
+             * （v5 快线运营点：TP7%/H5/全档 2.5% 阶梯/每日入场 1，2026-06-12 实装为生产默认）。
+             * 盘后状态机推进与持仓跟踪展示链路共用同一装配入口，保证两侧规则口径一致。
+             *
+             * 回滚到 [V3_OPERATING_POINT] 的覆盖示例：
+             * -Dquant.strategy.holding.takeProfitPct=0.05
+             * -Dquant.strategy.holding.timeStopDays=15
+             * -Dquant.strategy.holding.profitProtectLadder=    （空值 = 关闭阶梯）
+             * -Dquant.strategy.holding.maxDailyEntries=0
+             */
+            fun fromSystemProperties(): ExitRules {
+                val defaults = ExitRules()
+                val ladder = System.getProperty("quant.strategy.holding.profitProtectLadder")
+                    ?.split(',')
+                    ?.filter { it.isNotBlank() }
+                    ?.associate { entry ->
+                        val (day, level) = entry.split(':', limit = 2)
+                        day.trim().toInt() to level.trim().toDouble()
+                    }
+                    ?: defaults.profitProtectLadder
+                return ExitRules(
+                    takeProfitPct = System.getProperty("quant.strategy.holding.takeProfitPct")
+                        ?.toDouble() ?: defaults.takeProfitPct,
+                    timeStopDays = System.getProperty("quant.strategy.holding.timeStopDays")
+                        ?.toInt() ?: defaults.timeStopDays,
+                    priceStopEnabled = System.getProperty("quant.strategy.holding.priceStopEnabled")
+                        ?.toBooleanStrictOrNull() ?: defaults.priceStopEnabled,
+                    entryGapMaxPct = System.getProperty("quant.strategy.holding.entryGapMaxPct")
+                        ?.toDouble() ?: defaults.entryGapMaxPct,
+                    profitProtectLadder = ladder,
+                    maxDailyEntries = System.getProperty("quant.strategy.holding.maxDailyEntries")
+                        ?.toInt() ?: defaults.maxDailyEntries,
+                )
+            }
         }
 
         init {
@@ -85,6 +121,24 @@ class HoldingStateMachine(
          * v5 体系填信号日 20 日对数收益波动率（高波动优先，验证 +1.8pp）。
          */
         val entryPriority: Double = 0.0,
+    )
+
+    /** 离场原因，按退出优先级排列。 */
+    enum class ExitReason {
+        TAKE_PROFIT,
+        PROFIT_PROTECT,
+        TIME_STOP,
+        PRICE_STOP,
+    }
+
+    /**
+     * 离场判决：原因 + 规则口径离场价。
+     * 触价类（止盈/保盈）的离场价 = max(当日开盘, 触发价)——高开直接越过触发价时按开盘价成交；
+     * 收盘类（时间止损/价格止损）的离场价 = 当日收盘价。
+     */
+    data class ExitVerdict(
+        val reason: ExitReason,
+        val exitPrice: Double,
     )
 
     /** 单日推进结果。 */
@@ -125,7 +179,7 @@ class HoldingStateMachine(
                 survivors += holding.copy(tradeDate = tradeDate)
                 continue
             }
-            if (shouldExit(holding, tradeDate, bar, tradingDaysSince)) {
+            if (evaluateExit(holding, tradeDate, bar, tradingDaysSince) != null) {
                 exited += holding.tsCode
             } else {
                 survivors += holding.copy(tradeDate = tradeDate)
@@ -164,35 +218,52 @@ class HoldingStateMachine(
         return DayResult(holdings = survivors, exited = exited, entered = entered)
     }
 
-    private fun shouldExit(
+    /**
+     * 离场判决。null = 当日不离场。
+     *
+     * 盘后状态机推进与持仓跟踪展示链路共用此判定，保证「该不该走」与「按什么价走、为什么走」
+     * 出自同一规则源。注意展示链路重建历史判决时，行情口径与交易日计数必须与生产推进一致。
+     */
+    fun evaluateExit(
         holding: DailyHoldingState,
         tradeDate: LocalDate,
         bar: Candle,
         tradingDaysSince: (LocalDate, LocalDate) -> Int,
-    ): Boolean {
+    ): ExitVerdict? {
         val daysSinceEntry = tradingDaysSince(holding.entryDate, tradeDate)
-        if (daysSinceEntry < 0) return false
+        if (daysSinceEntry < 0) return null
         // T+1 禁售：入场当日不离场
-        if (daysSinceEntry == 0) return false
+        if (daysSinceEntry == 0) return null
+
+        val open = bar.getOpen().toDouble()
 
         // 优先级 1：止盈
         val tpPrice = holding.entryPrice * (1.0 + config.takeProfitPct)
-        if (bar.getHigh().toDouble() + EPS >= tpPrice) return true
+        if (bar.getHigh().toDouble() + EPS >= tpPrice) {
+            return ExitVerdict(ExitReason.TAKE_PROFIT, maxOf(open, tpPrice))
+        }
 
         // 优先级 2：保盈阶梯（当日 HIGH 触及入场价 ×(1+档位) 即离场；档位按 daysSinceEntry 查表）
         val ladderLevel = config.profitProtectLadder[daysSinceEntry]
-        if (ladderLevel != null && bar.getHigh().toDouble() + EPS >= holding.entryPrice * (1.0 + ladderLevel)) {
-            return true
+        if (ladderLevel != null) {
+            val ladderPrice = holding.entryPrice * (1.0 + ladderLevel)
+            if (bar.getHigh().toDouble() + EPS >= ladderPrice) {
+                return ExitVerdict(ExitReason.PROFIT_PROTECT, maxOf(open, ladderPrice))
+            }
         }
 
         // 优先级 3：时间止损（入场后第 timeStopDays 个交易日收盘）
-        if (daysSinceEntry >= config.timeStopDays - 1) return true
+        if (daysSinceEntry >= config.timeStopDays - 1) {
+            return ExitVerdict(ExitReason.TIME_STOP, bar.getPrice().toDouble())
+        }
 
         // 优先级 4：价格止损（收盘 < 信号日最低）
         if (config.priceStopEnabled && daysSinceEntry >= 1) {
-            if (bar.getPrice().toDouble() + EPS < holding.signalDateLow) return true
+            if (bar.getPrice().toDouble() + EPS < holding.signalDateLow) {
+                return ExitVerdict(ExitReason.PRICE_STOP, bar.getPrice().toDouble())
+            }
         }
-        return false
+        return null
     }
 
     private companion object {

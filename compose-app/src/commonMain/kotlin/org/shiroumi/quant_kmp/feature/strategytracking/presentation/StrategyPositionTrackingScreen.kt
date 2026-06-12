@@ -1,5 +1,6 @@
 package org.shiroumi.quant_kmp.feature.strategytracking.presentation
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterTransition
@@ -7,8 +8,8 @@ import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateIntOffsetAsState
@@ -37,7 +38,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyRow
@@ -62,8 +62,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ViewList
+import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -88,11 +91,17 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -101,19 +110,28 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import model.candle.StrategyPositionTrackingDay
+import model.candle.StrategyTrackingEdgeKind
 import model.candle.StrategyTrackingSection
 import model.candle.StrategyTrackingStockNode
 import org.shiroumi.quant_kmp.di.HttpClientProvider
 import org.shiroumi.quant_kmp.feature.candle.data.repository.CandleRepositoryImpl
+import org.shiroumi.quant_kmp.ui.agent.theme.AgentTheme
+import org.shiroumi.quant_kmp.ui.animation.AnimationDurations
 import org.shiroumi.quant_kmp.ui.core.adaptive.m3.rememberAdaptiveLayoutConfig
 import org.shiroumi.quant_kmp.ui.navigation.ProvideMobileTitleBar
+import org.shiroumi.quant_kmp.ui.navigation.RegisterTransientBack
 
 private val CompactPagePadding = 16.dp
 private val DefaultPagePadding = 24.dp
+
+/** 列表底部为常驻全景图按钮预留的占位高度（ExtendedFAB 56dp + 上下留白）。 */
+private val TrackingPanoramaButtonReserve = 96.dp
+
+/** Compact/Medium 列表形态的内容最大宽度，与全局 Compact contentMaxWidth 一致。 */
+private val TrackingCompactListMaxWidth = 600.dp
 private val HoldContinueStroke = 3.0f
 private val ExitClearStroke = 2.25f
 private val EnterHoldingStroke = 1.75f
-private const val HeaderEnterDurationMs = 250
 private const val TimelineEnterDurationMs = 300
 private const val EdgeEnterDurationMs = 250
 private const val CardEnterDurationMs = 300
@@ -161,8 +179,11 @@ fun StrategyPositionTrackingScreen(
         else -> PaddingValues(horizontal = 16.dp, vertical = 0.dp)
     }
     var disclaimerVisible by remember { mutableStateOf(false) }
+    // ≥840dp（Expanded 及以上）左列表 + 右全景流转图双栏；<840dp 列表为主、底部按钮切换全景图
+    val useSplitPanes = config.isExpanded || config.isLarge || config.isXLarge
+    var panoramaOpen by remember { mutableStateOf(false) }
     // Compact / Medium 由 TopBar 承载标题；Expanded 及以上由页内 TrackingPageHeader 大字承载
-    if (config.isCompact || config.isMedium) {
+    if (!useSplitPanes) {
         ProvideMobileTitleBar(
             title = "策略持仓跟踪",
             actions = {
@@ -173,12 +194,21 @@ fun StrategyPositionTrackingScreen(
             },
         )
     }
+    // 跨断点切换到双栏形态时收起全景图，避免缩回窄屏时直接落在全景而非列表默认形态
+    LaunchedEffect(useSplitPanes) {
+        if (useSplitPanes) panoramaOpen = false
+    }
     var overlayAnchor by remember {
         mutableStateOf<TrackingOverlayAnchorState?>(null)
     }
     val timelineOverlayState = remember { TrackingTimelineOverlayState() }
     var detailContentVisible by remember { mutableStateOf(false) }
     val detailVisible = selectedStock != null
+    // 弹层统一返回链：两个消费者无条件注册且顺序固定（返回链按注册逆序消费），
+    // Back 永远先关详情浮层、再收全景图、最后回退路由；若放进断点分支，
+    // 跨断点重组会重排注册顺序导致消费倒置。双栏形态下 panoramaOpen 恒 false，注册无副作用。
+    RegisterTransientBack(isOpen = panoramaOpen, onClose = { panoramaOpen = false })
+    RegisterTransientBack(isOpen = detailVisible, onClose = viewModel::dismissDetail)
 
     LaunchedEffect(selectedStock?.cardKey) {
         val stock = selectedStock ?: return@LaunchedEffect
@@ -234,23 +264,106 @@ fun StrategyPositionTrackingScreen(
                         label = "tracking_shared_scope"
                     ) {
                         val timelineAnimatedScope = this
+                        val onStockClick: (StrategyTrackingStockNode, StrategyTrackingSection, String) -> Unit =
+                            { node, section, tradeDate -> viewModel.selectStock(node, section, tradeDate) }
                         Box(modifier = Modifier.fillMaxSize()) {
-                            TrackingTimelineScaffold(
-                                timeline = timeline,
-                                isLoading = isLoading,
-                                error = error,
-                                onRefresh = viewModel::refresh,
-                                sharedTransitionScope = this@SharedTransitionLayout,
-                                animatedVisibilityScope = timelineAnimatedScope,
-                                overlayState = timelineOverlayState,
-                                showInlineHeader = !config.isCompact && !config.isMedium,
-                                disclaimerVisible = disclaimerVisible,
-                                onDisclaimerToggle = { disclaimerVisible = !disclaimerVisible },
-                                onStockClick = { node, section, tradeDate ->
-                                    viewModel.selectStock(node, section, tradeDate)
-                                },
-                                modifier = Modifier.fillMaxSize(),
-                            )
+                            if (useSplitPanes) {
+                                Column(
+                                    modifier = Modifier.fillMaxSize(),
+                                    verticalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.lg),
+                                ) {
+                                    TrackingPageHeader(
+                                        disclaimerExpanded = disclaimerVisible,
+                                        onDisclaimerToggle = { disclaimerVisible = !disclaimerVisible },
+                                    )
+                                    Row(
+                                        modifier = Modifier.weight(1f),
+                                        horizontalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.lg),
+                                    ) {
+                                        TrackingOverviewListPanel(
+                                            timeline = timeline,
+                                            isLoading = isLoading,
+                                            error = error,
+                                            onRefresh = viewModel::refresh,
+                                            onStockClick = onStockClick,
+                                            modifier = Modifier
+                                                .width(AgentTheme.Sizing.sidePanelWidthMax)
+                                                .fillMaxHeight(),
+                                        )
+                                        TrackingTimelineScaffold(
+                                            timeline = timeline,
+                                            isLoading = isLoading,
+                                            error = error,
+                                            onRefresh = viewModel::refresh,
+                                            sharedTransitionScope = this@SharedTransitionLayout,
+                                            animatedVisibilityScope = timelineAnimatedScope,
+                                            overlayState = timelineOverlayState,
+                                            onStockClick = onStockClick,
+                                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                                        )
+                                    }
+                                }
+                            } else {
+                                AnimatedContent(
+                                    targetState = panoramaOpen,
+                                    transitionSpec = {
+                                        fadeIn(tween(AnimationDurations.NORMAL, easing = LinearOutSlowInEasing)) togetherWith
+                                            fadeOut(tween(AnimationDurations.FAST, easing = LinearOutSlowInEasing))
+                                    },
+                                    modifier = Modifier.fillMaxSize(),
+                                    label = "tracking_compact_mode",
+                                ) { showPanorama ->
+                                    if (showPanorama) {
+                                        TrackingTimelineScaffold(
+                                            timeline = timeline,
+                                            isLoading = isLoading,
+                                            error = error,
+                                            onRefresh = viewModel::refresh,
+                                            sharedTransitionScope = this@SharedTransitionLayout,
+                                            animatedVisibilityScope = timelineAnimatedScope,
+                                            overlayState = timelineOverlayState,
+                                            onStockClick = onStockClick,
+                                            // 与列表形态同款底部预留：矮窗口垂直滚动到底时不被常驻按钮压住清仓区
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .padding(bottom = TrackingPanoramaButtonReserve),
+                                        )
+                                    } else {
+                                        Box(modifier = Modifier.fillMaxSize()) {
+                                            TrackingOverviewListPanel(
+                                                timeline = timeline,
+                                                isLoading = isLoading,
+                                                error = error,
+                                                onRefresh = viewModel::refresh,
+                                                onStockClick = onStockClick,
+                                                // 列表底部为全景图按钮预留占位空间，避免末行被常驻按钮遮挡
+                                                bottomContentPadding = TrackingPanoramaButtonReserve,
+                                                modifier = Modifier
+                                                    .fillMaxHeight()
+                                                    .widthIn(max = TrackingCompactListMaxWidth)
+                                                    .align(Alignment.TopCenter),
+                                            )
+                                        }
+                                    }
+                                }
+                                ExtendedFloatingActionButton(
+                                    onClick = { panoramaOpen = !panoramaOpen },
+                                    icon = {
+                                        Icon(
+                                            imageVector = if (panoramaOpen) {
+                                                Icons.AutoMirrored.Outlined.ViewList
+                                            } else {
+                                                Icons.Outlined.AccountTree
+                                            },
+                                            contentDescription = null,
+                                        )
+                                    },
+                                    text = { Text(if (panoramaOpen) "列表" else "全景图") },
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .padding(bottom = AgentTheme.Spacing.md),
+                                )
+                            }
 
                             AnimatedVisibility(
                                 visible = detailVisible && overlayAnchor != null,
@@ -302,9 +415,6 @@ private fun TrackingTimelineScaffold(
     sharedTransitionScope: SharedTransitionScope,
     animatedVisibilityScope: AnimatedVisibilityScope,
     overlayState: TrackingTimelineOverlayState,
-    showInlineHeader: Boolean,
-    disclaimerVisible: Boolean,
-    onDisclaimerToggle: () -> Unit,
     onStockClick: (StrategyTrackingStockNode, StrategyTrackingSection, String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -336,20 +446,10 @@ private fun TrackingTimelineScaffold(
             var revealedConnectorCount by remember { mutableStateOf(0) }
             var revealStartDayIndex by remember { mutableStateOf(0) }
             var revealStartConnectorIndex by remember { mutableStateOf(0) }
-            val headerAlpha by animateFloatAsState(
-                targetValue = if (pageVisible) 1f else 0f,
-                animationSpec = tween(durationMillis = HeaderEnterDurationMs, easing = LinearOutSlowInEasing),
-                label = "tracking_header_alpha"
-            )
             val timelineAlpha by animateFloatAsState(
                 targetValue = if (pageVisible) 1f else 0f,
                 animationSpec = tween(durationMillis = TimelineEnterDurationMs, delayMillis = 60, easing = LinearOutSlowInEasing),
                 label = "tracking_timeline_alpha"
-            )
-            val headerOffset by animateIntOffsetAsState(
-                targetValue = if (pageVisible) IntOffset.Zero else IntOffset(0, 16),
-                animationSpec = tween(durationMillis = HeaderEnterDurationMs, easing = LinearOutSlowInEasing),
-                label = "tracking_header_offset"
             )
             val timelineOffset by animateIntOffsetAsState(
                 targetValue = if (pageVisible) IntOffset.Zero else IntOffset(0, 20),
@@ -378,32 +478,10 @@ private fun TrackingTimelineScaffold(
                 }
             }
 
-            val titleContentGap = when {
-                config.isExpanded || config.isLarge || config.isXLarge -> 24.dp
-                config.isMedium -> 18.dp
-                else -> 14.dp
-            }
-
-            Column(
-                modifier = modifier,
-                verticalArrangement = Arrangement.spacedBy(titleContentGap)
-            ) {
-                if (showInlineHeader) {
-                    Box(
-                        modifier = Modifier
-                            .offset { headerOffset }
-                            .graphicsLayer(alpha = headerAlpha)
-                    ) {
-                        TrackingPageHeader(
-                            disclaimerExpanded = disclaimerVisible,
-                            onDisclaimerToggle = onDisclaimerToggle,
-                        )
-                    }
-                }
-
+            Box(modifier = modifier) {
                 Box(
                     modifier = Modifier
-                        .weight(1f)
+                        .fillMaxSize()
                         .offset { timelineOffset }
                         .graphicsLayer(alpha = timelineAlpha)
                 ) {
@@ -709,6 +787,23 @@ private fun TrackingTimelineContent(
             edgeLayout = nextLayout
         }
     }
+    // 流转边盈亏标签：盈亏数值由云端计算并随边下发，这里按边业务键回连布局结果
+    val edgeLabels = remember(timeline, edgeLayout) {
+        val labelByKey = timeline.edges.associateBy({ it.lookupKey() }, { it.toLabelData() })
+        val tradeDates = timeline.days.map { it.tradeDate }
+        edgeLayout.indexedEdges.map { indexed ->
+            val fromDate = tradeDates.getOrNull(indexed.fromIndex)
+            val toDate = tradeDates.getOrNull(indexed.toIndex)
+            if (fromDate == null || toDate == null) {
+                null
+            } else {
+                labelByKey[
+                    "$fromDate|${indexed.fromSection}|${indexed.fromSlotIndex}|" +
+                        "$toDate|${indexed.toSection}|${indexed.toSlotIndex}|${indexed.kind}"
+                ]
+            }
+        }
+    }
 
     LaunchedEffect(shouldAutoScrollToLatest) {
         if (shouldAutoScrollToLatest && timeline.days.isNotEmpty() && !animateTimelineSequence) {
@@ -806,6 +901,7 @@ private fun TrackingTimelineContent(
                         listState = listState,
                         geometry = geometry,
                         indexedEdges = edgeLayout.indexedEdges,
+                        edgeLabels = edgeLabels,
                         connectorRevealProgress = connectorRevealProgress,
                         revealStartConnectorIndex = revealStartConnectorIndex,
                         edgeAlpha = edgeAlpha,
@@ -852,6 +948,7 @@ private fun TrackingTimelineContent(
                     listState = listState,
                     geometry = geometry,
                     indexedEdges = edgeLayout.indexedEdges,
+                    edgeLabels = edgeLabels,
                     connectorRevealProgress = connectorRevealProgress,
                     revealStartConnectorIndex = revealStartConnectorIndex,
                     edgeAlpha = edgeAlpha,
@@ -878,6 +975,7 @@ private fun TrackingTimelineEdgesCanvas(
     listState: androidx.compose.foundation.lazy.LazyListState,
     geometry: TimelineGeometry,
     indexedEdges: List<IndexedTrackingEdgePayload>,
+    edgeLabels: List<TrackingEdgeLabelData?>,
     connectorRevealProgress: Float,
     revealStartConnectorIndex: Int,
     edgeAlpha: Float,
@@ -895,9 +993,23 @@ private fun TrackingTimelineEdgesCanvas(
         Stroke(width = EnterHoldingStroke, cap = StrokeCap.Round, join = StrokeJoin.Round)
     }
 
+    // 带原始下标分组，便于绘制时取同位置的盈亏标签
     val edgesByFromIndex = remember(indexedEdges) {
-        indexedEdges.groupBy { it.fromIndex }
+        indexedEdges.withIndex().groupBy { it.value.fromIndex }
     }
+
+    // 标签文本预测量：边集合不变时不重复 measure，Canvas 每帧只做绘制
+    val textMeasurer = rememberTextMeasurer()
+    val labelStyle = MaterialTheme.typography.labelSmall
+    val measuredLabels: List<TextLayoutResult?> = remember(edgeLabels, labelStyle, textMeasurer) {
+        edgeLabels.map { label ->
+            label?.let { textMeasurer.measure(AnnotatedString(it.text), labelStyle) }
+        }
+    }
+    val labelRise = MaterialTheme.colorScheme.primary
+    val labelFall = MaterialTheme.colorScheme.tertiary
+    val labelNeutral = MaterialTheme.colorScheme.onSurfaceVariant
+    val labelPillColor = MaterialTheme.colorScheme.surfaceContainerHigh
 
     val holdContinueBase = remember(edgePalette) {
         edgePalette.holdContinue.copy(alpha = 0.92f)
@@ -941,11 +1053,15 @@ private fun TrackingTimelineEdgesCanvas(
         fun columnOffset(index: Int): Float =
             firstVisibleOffsetPx + (index - firstVisibleItem.index) * itemStride
 
+        val labelPadHPx = 6.dp.toPx()
+        val labelPadVPx = 2.dp.toPx()
+        val labelCornerPx = 6.dp.toPx()
+
         val fromIndexStart = (visibleStart - 1).coerceAtLeast(0)
         for (fromIndex in fromIndexStart..visibleEnd) {
             val edges = edgesByFromIndex[fromIndex]
             if (edges.isNullOrEmpty()) continue
-            for (indexedEdge in edges) {
+            for ((edgeOrdinal, indexedEdge) in edges) {
                 val connectorIndex = indexedEdge.fromIndex
                 val connectorAlpha = when {
                     connectorIndex < revealStartConnectorIndex -> edgeAlpha
@@ -979,21 +1095,50 @@ private fun TrackingTimelineEdgesCanvas(
                 )
 
                 val baseColor = when (indexedEdge.kind) {
-                    TrackingEdgeKind.HOLD_CONTINUE -> holdContinueBase
-                    TrackingEdgeKind.EXIT_CLEAR -> exitClearBase
-                    TrackingEdgeKind.ENTER_HOLDING -> enterHoldingBase
+                    StrategyTrackingEdgeKind.HOLD_CONTINUE -> holdContinueBase
+                    StrategyTrackingEdgeKind.EXIT_CLEAR -> exitClearBase
+                    StrategyTrackingEdgeKind.ENTER_HOLDING -> enterHoldingBase
                 }
                 val color = baseColor.copy(alpha = baseColor.alpha * connectorAlpha)
                 val stroke = when (indexedEdge.kind) {
-                    TrackingEdgeKind.HOLD_CONTINUE -> holdContinueStroke
-                    TrackingEdgeKind.EXIT_CLEAR -> exitClearStroke
-                    TrackingEdgeKind.ENTER_HOLDING -> enterHoldingStroke
+                    StrategyTrackingEdgeKind.HOLD_CONTINUE -> holdContinueStroke
+                    StrategyTrackingEdgeKind.EXIT_CLEAR -> exitClearStroke
+                    StrategyTrackingEdgeKind.ENTER_HOLDING -> enterHoldingStroke
                 }
                 drawPath(
                     path = reusablePath,
                     color = color,
                     style = stroke,
                 )
+
+                // 盈亏标签：贝塞尔曲线 t=0.5 处即两端点中点（对称控制点），胶囊底 + 方向色文本
+                val labelLayout = measuredLabels.getOrNull(edgeOrdinal)
+                val labelData = edgeLabels.getOrNull(edgeOrdinal)
+                if (labelLayout != null && labelData != null) {
+                    val midX = (start.x + end.x) / 2f
+                    val midY = (start.y + end.y) / 2f
+                    val textWidth = labelLayout.size.width.toFloat()
+                    val textHeight = labelLayout.size.height.toFloat()
+                    drawRoundRect(
+                        color = labelPillColor.copy(alpha = 0.88f * connectorAlpha),
+                        topLeft = Offset(
+                            midX - textWidth / 2f - labelPadHPx,
+                            midY - textHeight / 2f - labelPadVPx,
+                        ),
+                        size = Size(textWidth + labelPadHPx * 2, textHeight + labelPadVPx * 2),
+                        cornerRadius = CornerRadius(labelCornerPx, labelCornerPx),
+                    )
+                    val labelColor = when (labelData.positive) {
+                        true -> labelRise
+                        false -> labelFall
+                        null -> labelNeutral
+                    }
+                    drawText(
+                        textLayoutResult = labelLayout,
+                        color = labelColor.copy(alpha = connectorAlpha),
+                        topLeft = Offset(midX - textWidth / 2f, midY - textHeight / 2f),
+                    )
+                }
             }
         }
     }
@@ -1401,7 +1546,6 @@ private fun TrackingSlotRow(
                             )
                             .padding(horizontal = 10.dp, vertical = 2.dp)
                     ) {
-                        val hasPnl = node.actualPnl != null || node.maxPnl != null
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1440,32 +1584,7 @@ private fun TrackingSlotRow(
                                     )
                                 )
                             }
-                            if (hasPnl) {
-                                Column(
-                                    horizontalAlignment = Alignment.End,
-                                    verticalArrangement = Arrangement.spacedBy(0.dp),
-                                ) {
-                                    node.actualPnl?.let {
-                                        val color = if (it >= 0) pnlRise else pnlFall
-                                        Text(
-                                            text = formatPnlPercent(it),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = color,
-                                            fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1,
-                                        )
-                                    }
-                                    node.maxPnl?.let {
-                                        val color = if (it >= 0) pnlRise else pnlFall
-                                        Text(
-                                            text = "最高 ${formatPnlPercent(it)}",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = color.copy(alpha = 0.65f),
-                                            maxLines = 1,
-                                        )
-                                    }
-                                }
-                            }
+                            TrackingSlotPnlColumn(node = node, pnlRise = pnlRise, pnlFall = pnlFall)
                         }
                     }
                 }
@@ -1519,7 +1638,6 @@ private fun TrackingStaticSlotRow(
                 )
                 .padding(horizontal = 10.dp, vertical = 2.dp)
         ) {
-            val hasPnl = node.actualPnl != null || node.maxPnl != null
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1542,33 +1660,49 @@ private fun TrackingStaticSlotRow(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                if (hasPnl) {
-                    Column(
-                        horizontalAlignment = Alignment.End,
-                        verticalArrangement = Arrangement.spacedBy(0.dp),
-                    ) {
-                        node.actualPnl?.let {
-                            val color = if (it >= 0) pnlRise else pnlFall
-                            Text(
-                                text = formatPnlPercent(it),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = color,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                            )
-                        }
-                        node.maxPnl?.let {
-                            val color = if (it >= 0) pnlRise else pnlFall
-                            Text(
-                                text = "最高 ${formatPnlPercent(it)}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = color.copy(alpha = 0.65f),
-                                maxLines = 1,
-                            )
-                        }
-                    }
-                }
+                TrackingSlotPnlColumn(node = node, pnlRise = pnlRise, pnlFall = pnlFall)
             }
+        }
+    }
+}
+
+/**
+ * 槽位右侧盈亏列。清仓节点优先展示规则口径已实现收益与离场原因
+ * （止盈/保盈按触价、到期按收盘，云端 HoldingStateMachine 判决重建）；
+ * 持有节点展示浮动收益与持有期最高收益。
+ */
+@Composable
+private fun TrackingSlotPnlColumn(
+    node: StrategyTrackingStockNode,
+    pnlRise: Color,
+    pnlFall: Color,
+) {
+    val primaryPnl = node.exitPnl ?: node.actualPnl
+    val secondaryText = node.exitReason?.label()
+        ?: node.maxPnl?.let { "最高 ${formatPnlPercent(it)}" }
+    if (primaryPnl == null && secondaryText == null) return
+    Column(
+        horizontalAlignment = Alignment.End,
+        verticalArrangement = Arrangement.spacedBy(0.dp),
+    ) {
+        primaryPnl?.let {
+            val color = if (it >= 0) pnlRise else pnlFall
+            Text(
+                text = formatPnlPercent(it),
+                style = MaterialTheme.typography.labelSmall,
+                color = color,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
+        }
+        secondaryText?.let {
+            val color = primaryPnl?.let { pnl -> if (pnl >= 0) pnlRise else pnlFall } ?: pnlRise
+            Text(
+                text = it,
+                style = MaterialTheme.typography.labelSmall,
+                color = color.copy(alpha = 0.65f),
+                maxLines = 1,
+            )
         }
     }
 }
@@ -1684,7 +1818,7 @@ private fun StrategyPositionTrackingDay.accessibilityDescription(
     }
 
 private fun StrategyPositionTrackingTimeline.summaryText(): String =
-    "共 ${days.size} 列，持有主干 ${edges.count { it.kind == TrackingEdgeKind.HOLD_CONTINUE }} 条，调入支路 ${edges.count { it.kind == TrackingEdgeKind.ENTER_HOLDING }} 条，清仓支路 ${edges.count { it.kind == TrackingEdgeKind.EXIT_CLEAR }} 条。"
+    "共 ${days.size} 列，持有主干 ${edges.count { it.kind == StrategyTrackingEdgeKind.HOLD_CONTINUE }} 条，调入支路 ${edges.count { it.kind == StrategyTrackingEdgeKind.ENTER_HOLDING }} 条，清仓支路 ${edges.count { it.kind == StrategyTrackingEdgeKind.EXIT_CLEAR }} 条。"
 
 private fun StrategyPositionTrackingTimeline.accessibilityDescription(): String =
     "策略持仓跟踪时间轴。${summaryText()} 按时间从左到右展开，右侧为最新日期。"
@@ -1701,13 +1835,3 @@ private fun mutedColor(container: Color, surface: Color, ratio: Float): Color =
         green = container.green * ratio + surface.green * (1f - ratio),
         blue = container.blue * ratio + surface.blue * (1f - ratio),
     )
-
-private fun formatPnlPercent(value: Float): String {
-    val rounded = kotlin.math.round(value * 100) / 100f
-    val sign = if (rounded >= 0) "+" else "-"
-    val absVal = kotlin.math.abs(rounded)
-    val intPart = absVal.toInt()
-    val decimal = kotlin.math.round((absVal - intPart) * 100).toInt()
-    val decimalStr = if (decimal < 10) "0$decimal" else "$decimal"
-    return "$sign$intPart.$decimalStr%"
-}

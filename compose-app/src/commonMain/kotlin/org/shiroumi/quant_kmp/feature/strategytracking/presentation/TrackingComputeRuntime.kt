@@ -1,6 +1,7 @@
 package org.shiroumi.quant_kmp.feature.strategytracking.presentation
 
 import kotlinx.serialization.Serializable
+import model.candle.StrategyTrackingEdgeKind
 import model.candle.StrategyTrackingSection
 
 internal interface PlatformComputeRuntime {
@@ -17,7 +18,7 @@ internal data class TrackingEdgeTaskPayload(
     val toDate: String,
     val toSection: StrategyTrackingSection,
     val toSlotIndex: Int,
-    val kind: TrackingEdgeKind,
+    val kind: StrategyTrackingEdgeKind,
 )
 
 @Serializable
@@ -28,7 +29,7 @@ internal data class TrackingEdgeLayoutInput(
 
 @Serializable
 internal data class IndexedTrackingEdgePayload(
-    val kind: TrackingEdgeKind,
+    val kind: StrategyTrackingEdgeKind,
     val fromSection: StrategyTrackingSection,
     val fromSlotIndex: Int,
     val toSection: StrategyTrackingSection,

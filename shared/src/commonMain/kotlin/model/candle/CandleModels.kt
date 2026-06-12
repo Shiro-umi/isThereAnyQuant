@@ -159,6 +159,15 @@ enum class StrategyTrackingSection {
     CLEARED,
 }
 
+/** 持仓状态机离场原因，与 strategy-service HoldingStateMachine 的退出优先级一一对应。 */
+@Serializable
+enum class StrategyTrackingExitReason {
+    TAKE_PROFIT,
+    PROFIT_PROTECT,
+    TIME_STOP,
+    PRICE_STOP,
+}
+
 @Serializable
 data class StrategyTrackingStockNode(
     val stockCode: String,
@@ -170,6 +179,42 @@ data class StrategyTrackingStockNode(
     val buyPrice: Float? = null,
     val actualPnl: Float? = null,
     val maxPnl: Float? = null,
+    /** 观察日价格：历史日为收盘价，盘中实时日为最新价。 */
+    val currentPrice: Float? = null,
+    /** 观察日当日涨跌幅 %，选股节点填充，用于判断次日入场的跳空空间。 */
+    val dayChangePct: Float? = null,
+    /** 清仓节点：状态机离场原因，服务端按生产持仓规则重建。 */
+    val exitReason: StrategyTrackingExitReason? = null,
+    /** 清仓节点：规则口径已实现收益 %（止盈/保盈按触价、到期按收盘）。 */
+    val exitPnl: Float? = null,
+)
+
+/** 流转边类型：跨日持有主干 / 选股→次日买入 / 持有→清仓。 */
+@Serializable
+enum class StrategyTrackingEdgeKind {
+    HOLD_CONTINUE,
+    ENTER_HOLDING,
+    EXIT_CLEAR,
+}
+
+/**
+ * 持仓跟踪时间线流转边，由 strategy-service 云端计算，前端只负责渲染。
+ * [pnlPct] 语义按 [kind] 区分：HOLD_CONTINUE = 目标日当日涨跌幅；
+ * ENTER_HOLDING = 入场日开盘→收盘涨跌幅；EXIT_CLEAR = 规则口径已实现收益。
+ */
+@Serializable
+data class StrategyTrackingEdge(
+    val fromDate: String,
+    val fromSection: StrategyTrackingSection,
+    val fromStockCode: String,
+    val fromSlotIndex: Int,
+    val toDate: String,
+    val toSection: StrategyTrackingSection,
+    val toStockCode: String,
+    val toSlotIndex: Int,
+    val kind: StrategyTrackingEdgeKind,
+    val pnlPct: Float? = null,
+    val exitReason: StrategyTrackingExitReason? = null,
 )
 
 @Serializable
@@ -182,7 +227,11 @@ data class StrategyPositionTrackingDay(
 
 @Serializable
 data class StrategyPositionTrackingResponse(
-    val days: List<StrategyPositionTrackingDay>
+    val days: List<StrategyPositionTrackingDay>,
+    /** 跨日流转边（含盈亏百分比），服务端计算产物。 */
+    val edges: List<StrategyTrackingEdge> = emptyList(),
+    /** 最后一日为盘中实时投影时的交易日；null 表示全部为确认交易日。 */
+    val realtimeTradeDate: String? = null,
 )
 
 /**

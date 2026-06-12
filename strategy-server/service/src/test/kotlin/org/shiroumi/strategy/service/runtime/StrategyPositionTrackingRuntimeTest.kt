@@ -6,6 +6,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.decodeFromJsonElement
 import model.Candle
 import model.candle.StrategyPositionTrackingResponse
+import model.candle.StrategyTrackingEdgeKind
+import model.candle.StrategyTrackingExitReason
+import model.candle.StrategyTrackingSection
 import model.ws.PositionSource
 import model.ws.StrategySelectionSnapshot
 import model.ws.StrategyPositionSnapshot
@@ -31,6 +34,7 @@ class StrategyPositionTrackingRuntimeTest {
         val runtime = StrategyPositionTrackingRuntime(
             snapshotHub = hub,
             json = json,
+            exitRules = org.shiroumi.strategy.service.postmarket.HoldingStateMachine.ExitRules(),
             dataSource = FakeTrackingDataSource(
                 audits = listOf(
                     audit(day2, currentPositions = listOf("000002.SZ")),
@@ -41,19 +45,37 @@ class StrategyPositionTrackingRuntimeTest {
                     day2 to listOf(selection(day2, "000003.SZ", 0.93))
                 ),
                 holdingsByTradeDate = mapOf(
-                    day1 to listOf(holding(day1, "000001.SZ", entryDate = day1)),
-                    day2 to listOf(holding(day2, "000002.SZ", entryDate = day2))
+                    day1 to listOf(
+                        holding(day1, "000001.SZ", entryDate = day1),
+                        holding(day1, "000005.SZ", entryDate = day1),
+                    ),
+                    day2 to listOf(
+                        holding(day2, "000002.SZ", entryDate = day2),
+                        holding(day2, "000005.SZ", entryDate = day1),
+                    )
                 ),
                 names = mapOf(
                     "000001.SZ" to "A",
                     "000002.SZ" to "B",
                     "000003.SZ" to "C",
-                    "000004.SZ" to "D"
+                    "000004.SZ" to "D",
+                    "000005.SZ" to "E"
                 ),
                 candles = mapOf(
-                    "000001.SZ" to mapOf(day1 to candle("000001.SZ", day1, open = 10f, close = 11f)),
-                    "000002.SZ" to mapOf(day2 to candle("000002.SZ", day2, open = 20f, close = 22f))
-                )
+                    "000001.SZ" to mapOf(
+                        day1 to candle("000001.SZ", day1, open = 10f, close = 11f),
+                        // 高点 10.8 触及止盈价 10×1.07=10.7，收盘回落 10.2：
+                        // 规则口径已实现收益应为 +7%（触价），而非收盘口径的 +2%
+                        day2 to candle("000001.SZ", day2, open = 10.1f, close = 10.2f, high = 10.8f)
+                    ),
+                    "000002.SZ" to mapOf(day2 to candle("000002.SZ", day2, open = 20f, close = 22f)),
+                    // 跨两日持有：HOLD_CONTINUE 边盈亏 = 目标日当日涨跌 (51-50)/50 = +2%
+                    "000005.SZ" to mapOf(
+                        day1 to candle("000005.SZ", day1, open = 49f, close = 50f),
+                        day2 to candle("000005.SZ", day2, open = 50f, close = 51f)
+                    )
+                ),
+                tradeDates = listOf(day1, day2)
             )
         )
 
@@ -77,8 +99,37 @@ class StrategyPositionTrackingRuntimeTest {
         assertEquals(listOf("2026-04-29", "2026-04-30"), payload.days.map { it.tradeDate })
         assertEquals(listOf("000003.SZ"), payload.days.last().selection.map { it.stockCode })
         assertEquals(listOf(0.93), payload.days.last().selection.map { it.modelScore })
-        assertEquals(listOf("000002.SZ"), payload.days.last().holdings.map { it.stockCode })
+        assertEquals(setOf("000002.SZ", "000005.SZ"), payload.days.last().holdings.map { it.stockCode }.toSet())
         assertEquals(StrategyTopic.POSITION_TRACKING, envelope.topic)
+        assertEquals(null, payload.realtimeTradeDate)
+
+        // 清仓节点：服务端按生产规则重建离场判决——止盈触价 +7%，而非收盘口径 +2%
+        val clearedNode = assertNotNull(payload.days.last().cleared.singleOrNull())
+        assertEquals("000001.SZ", clearedNode.stockCode)
+        assertEquals(StrategyTrackingExitReason.TAKE_PROFIT, clearedNode.exitReason)
+        assertEquals(7.0f, assertNotNull(clearedNode.exitPnl), absoluteTolerance = 0.01f)
+        assertEquals(2.0f, assertNotNull(clearedNode.actualPnl), absoluteTolerance = 0.01f)
+
+        // 流转边由服务端计算：清仓支路带规则口径收益与原因，入场支路带入场日开→收涨幅
+        val exitEdge = assertNotNull(
+            payload.edges.singleOrNull { it.kind == StrategyTrackingEdgeKind.EXIT_CLEAR }
+        )
+        assertEquals("000001.SZ", exitEdge.toStockCode)
+        assertEquals(StrategyTrackingExitReason.TAKE_PROFIT, exitEdge.exitReason)
+        assertEquals(7.0f, assertNotNull(exitEdge.pnlPct), absoluteTolerance = 0.01f)
+        val enterEdge = assertNotNull(
+            payload.edges.singleOrNull { it.kind == StrategyTrackingEdgeKind.ENTER_HOLDING }
+        )
+        assertEquals("000002.SZ", enterEdge.toStockCode)
+        assertEquals(StrategyTrackingSection.SELECTION, enterEdge.fromSection)
+        assertEquals(10.0f, assertNotNull(enterEdge.pnlPct), absoluteTolerance = 0.01f)
+        // 持有主干边：跨两日持有的票，盈亏 = 目标日当日涨跌 (51-50)/50 = +2%
+        val holdEdge = assertNotNull(
+            payload.edges.singleOrNull { it.kind == StrategyTrackingEdgeKind.HOLD_CONTINUE }
+        )
+        assertEquals("000005.SZ", holdEdge.toStockCode)
+        assertEquals(StrategyTrackingSection.HOLDINGS, holdEdge.fromSection)
+        assertEquals(2.0f, assertNotNull(holdEdge.pnlPct), absoluteTolerance = 0.01f)
 
         runtime.publishFromPositions(
             StrategyPositionSnapshot(
@@ -97,6 +148,7 @@ class StrategyPositionTrackingRuntimeTest {
         )
         assertEquals(listOf("000004.SZ"), updated.days.last().selection.map { it.stockCode })
         assertEquals(listOf(0.97), updated.days.last().selection.map { it.modelScore })
+        assertEquals(day2.toString(), updated.realtimeTradeDate)
     }
 
     private fun audit(
@@ -148,12 +200,12 @@ class StrategyPositionTrackingRuntimeTest {
             candidateMode = "all-universe"
         )
 
-    private fun candle(tsCode: String, date: LocalDate, open: Float, close: Float) =
+    private fun candle(tsCode: String, date: LocalDate, open: Float, close: Float, high: Float? = null) =
         Candle(
             tsCode = tsCode,
             date = date,
             open = open,
-            high = maxOf(open, close),
+            high = high ?: maxOf(open, close),
             low = minOf(open, close),
             close = close,
             adj = 1f,
@@ -174,7 +226,8 @@ private class FakeTrackingDataSource(
     private val selectionsByTradeDate: Map<LocalDate, List<ProfitPredictionSelection>>,
     private val holdingsByTradeDate: Map<LocalDate, List<DailyHoldingState>>,
     private val names: Map<String, String>,
-    private val candles: Map<String, Map<LocalDate, Candle>>
+    private val candles: Map<String, Map<LocalDate, Candle>>,
+    private val tradeDates: List<LocalDate> = emptyList(),
 ) : StrategyPositionTrackingDataSource {
     override fun loadAuditSummaries(limit: Int): List<StrategyAuditSummary> = audits.take(limit)
 
@@ -193,4 +246,7 @@ private class FakeTrackingDataSource(
         endDate: LocalDate
     ): Map<String, Map<LocalDate, Candle>> =
         candles.filterKeys { it in tsCodes }
+
+    override fun tradingDaysSince(entryDate: LocalDate, date: LocalDate): Int =
+        tradeDates.count { it > entryDate && it <= date }
 }

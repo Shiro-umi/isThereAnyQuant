@@ -168,7 +168,7 @@ private object JsPlatformComputeRuntime : PlatformComputeRuntime {
             TrackingEdgeLayoutResult(
                 indexedEdges = indexedEdges.map { edge ->
                     IndexedTrackingEdgePayload(
-                        kind = TrackingEdgeKind.valueOf(edge.kind),
+                        kind = model.candle.StrategyTrackingEdgeKind.valueOf(edge.kind),
                         fromSection = model.candle.StrategyTrackingSection.valueOf(edge.fromSection),
                         fromSlotIndex = edge.fromSlotIndex,
                         toSection = model.candle.StrategyTrackingSection.valueOf(edge.toSection),

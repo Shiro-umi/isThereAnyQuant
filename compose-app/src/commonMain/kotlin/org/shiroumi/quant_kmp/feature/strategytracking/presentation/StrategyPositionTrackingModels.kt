@@ -1,38 +1,22 @@
 package org.shiroumi.quant_kmp.feature.strategytracking.presentation
 
-import kotlinx.serialization.Serializable
-import model.Candle
 import model.candle.StrategyPositionTrackingDay
 import model.candle.StrategyPositionTrackingResponse
+import model.candle.StrategyTrackingEdge
+import model.candle.StrategyTrackingEdgeKind
+import model.candle.StrategyTrackingExitReason
 import model.candle.StrategyTrackingSection
-import model.candle.StrategyTrackingStockNode
-import kotlinx.datetime.LocalDate
 
 internal const val TrackingSlotCount = 5
 internal const val TrackingRealtimeDayLabel = "今天"
 
-@Serializable
-enum class TrackingEdgeKind {
-    HOLD_CONTINUE,
-    ENTER_HOLDING,
-    EXIT_CLEAR,
-}
-
-data class TrackingEdge(
-    val fromDate: String,
-    val fromSection: StrategyTrackingSection,
-    val fromStockCode: String,
-    val fromSlotIndex: Int,
-    val toDate: String,
-    val toSection: StrategyTrackingSection,
-    val toStockCode: String,
-    val toSlotIndex: Int,
-    val kind: TrackingEdgeKind,
-)
-
+/**
+ * 持仓跟踪时间线。节点盈亏、离场判决与流转边盈亏全部由 strategy-service 云端计算
+ * （`StrategyPositionTrackingRuntime`），前端只做槽位裁剪与渲染。
+ */
 data class StrategyPositionTrackingTimeline(
     val days: List<StrategyPositionTrackingDay>,
-    val edges: List<TrackingEdge>,
+    val edges: List<StrategyTrackingEdge>,
     val realtimeTradeDate: String? = null,
 )
 
@@ -48,26 +32,9 @@ internal fun trackingStockCodeKey(cardKey: String): String = "$cardKey/code"
 
 fun StrategyPositionTrackingResponse.toTimeline(): StrategyPositionTrackingTimeline {
     val normalizedDays = days.map { it.limitSlots() }
-    return buildTimelineFromDays(normalizedDays)
-}
-
-internal fun buildTimelineFromDays(
-    days: List<StrategyPositionTrackingDay>,
-    realtimeTradeDate: String? = null,
-): StrategyPositionTrackingTimeline {
-    val normalizedDays = days.map { it.limitSlots() }
-    val edges = buildList {
-        normalizedDays.zipWithNext { current, next ->
-            addAll(buildHoldContinueEdges(current, next))
-            addAll(buildExitClearEdges(current, next))
-        }
-        // 入场连线：多日持有下，新进持仓可能源于 1~N 天前的选股。
-        // 按持仓 buyDate（=入场日）追溯到「买入日的前一交易日」那一天的选股节点连线。
-        addAll(buildEnterHoldingEdges(normalizedDays))
-    }
     return StrategyPositionTrackingTimeline(
         days = normalizedDays,
-        edges = edges,
+        edges = edges.filter { it.fromSlotIndex < TrackingSlotCount && it.toSlotIndex < TrackingSlotCount },
         realtimeTradeDate = realtimeTradeDate,
     )
 }
@@ -78,161 +45,54 @@ private fun StrategyPositionTrackingDay.limitSlots(): StrategyPositionTrackingDa
     cleared = cleared.sortedBy { it.slotIndex }.take(TrackingSlotCount),
 )
 
-private fun buildHoldContinueEdges(
-    current: StrategyPositionTrackingDay,
-    next: StrategyPositionTrackingDay,
-): List<TrackingEdge> {
-    val nextHoldings = next.holdings.associateBy { it.stockCode }
-    return current.holdings.mapNotNull { from ->
-        nextHoldings[from.stockCode]?.toEdge(
-            from = from,
-            currentDate = current.tradeDate,
-            nextDate = next.tradeDate,
-            kind = TrackingEdgeKind.HOLD_CONTINUE,
-        )
-    }
-}
-
-private fun buildExitClearEdges(
-    current: StrategyPositionTrackingDay,
-    next: StrategyPositionTrackingDay,
-): List<TrackingEdge> {
-    val nextCleared = next.cleared.associateBy { it.stockCode }
-    return current.holdings.mapNotNull { from ->
-        nextCleared[from.stockCode]?.toEdge(
-            from = from,
-            currentDate = current.tradeDate,
-            nextDate = next.tradeDate,
-            kind = TrackingEdgeKind.EXIT_CLEAR,
-        )
-    }
-}
-
-/**
- * 入场连线（跨多日追溯）。
- *
- * 多日持有 + 止盈止损语义下，一只持仓票的入场日 [StrategyTrackingStockNode.buyDate] 可能早于昨天。
- * 它在「入场日的前一交易日」被选出（今天选、次日买入）。本函数对每一天的持仓，
- * 找出当天「新入场」的票（buyDate == 当天 tradeDate，且前一交易日未持有），
- * 连回前一交易日的选股节点。每只票只在入场当日画一条入线，避免重复。
- */
-private fun buildEnterHoldingEdges(
-    days: List<StrategyPositionTrackingDay>,
-): List<TrackingEdge> {
-    if (days.size < 2) return emptyList()
-    return buildList {
-        for (index in 1 until days.size) {
-            val buyDay = days[index]
-            val selectionDay = days[index - 1]
-            val previousHoldingCodes = selectionDay.holdings.mapTo(mutableSetOf()) { it.stockCode }
-            val selectionByCode = selectionDay.selection.associateBy { it.stockCode }
-            for (holding in buyDay.holdings) {
-                // 仅对「入场日 == 当天 且 前一交易日未持有」的新进持仓追溯入线
-                if (holding.buyDate != buyDay.tradeDate) continue
-                if (holding.stockCode in previousHoldingCodes) continue
-                val from = selectionByCode[holding.stockCode] ?: continue
-                add(
-                    holding.toEdge(
-                        from = from,
-                        currentDate = selectionDay.tradeDate,
-                        nextDate = buyDay.tradeDate,
-                        kind = TrackingEdgeKind.ENTER_HOLDING,
-                    )
-                )
-            }
-        }
-    }
-}
-
-private fun StrategyTrackingStockNode.toEdge(
-    from: StrategyTrackingStockNode,
-    currentDate: String,
-    nextDate: String,
-    kind: TrackingEdgeKind,
-): TrackingEdge = TrackingEdge(
-    fromDate = currentDate,
-    fromSection = from.section,
-    fromStockCode = from.stockCode,
-    fromSlotIndex = from.slotIndex,
-    toDate = nextDate,
-    toSection = section,
-    toStockCode = stockCode,
-    toSlotIndex = slotIndex,
-    kind = kind,
-)
-
 internal fun StrategyPositionTrackingTimeline.isRealtimeDay(day: StrategyPositionTrackingDay): Boolean =
     realtimeTradeDate != null && day.tradeDate == realtimeTradeDate
 
-internal fun buildTrackingCycleBuyDates(
-    days: List<StrategyPositionTrackingDay>,
-): Map<String, Map<LocalDate, LocalDate>> {
-    if (days.isEmpty()) return emptyMap()
-
-    val activeBuyDates = mutableMapOf<String, LocalDate>()
-    val buyDatesByCode = mutableMapOf<String, MutableMap<LocalDate, LocalDate>>()
-    var previousHoldingCodes = emptySet<String>()
-
-    val firstDay = days.first()
-    firstDay.holdings.forEach { node ->
-        val fallback = LocalDate.parse(firstDay.tradeDate)
-        activeBuyDates[node.stockCode] = node.buyDate?.let { LocalDate.parse(it) } ?: fallback
-    }
-
-    days.forEach { day ->
-        val tradeDate = LocalDate.parse(day.tradeDate)
-        val holdingCodes = day.holdings.map { it.stockCode }.toSet()
-        val enteredHoldingCodes = holdingCodes - previousHoldingCodes
-
-        enteredHoldingCodes.forEach { stockCode ->
-            if (stockCode !in activeBuyDates) {
-                val node = day.holdings.firstOrNull { it.stockCode == stockCode }
-                activeBuyDates[stockCode] = node?.buyDate?.let { LocalDate.parse(it) } ?: tradeDate
-            }
-        }
-
-        val observedNodes = day.holdings + day.cleared
-        observedNodes.forEach { node ->
-            val buyDate = activeBuyDates[node.stockCode] ?: return@forEach
-            buyDatesByCode
-                .getOrPut(node.stockCode) { mutableMapOf() }[tradeDate] = buyDate
-        }
-
-        activeBuyDates.keys.retainAll(holdingCodes)
-        previousHoldingCodes = holdingCodes
-    }
-
-    return buyDatesByCode
+/** 离场原因展示文案。 */
+internal fun StrategyTrackingExitReason.label(): String = when (this) {
+    StrategyTrackingExitReason.TAKE_PROFIT -> "止盈"
+    StrategyTrackingExitReason.PROFIT_PROTECT -> "保盈"
+    StrategyTrackingExitReason.TIME_STOP -> "到期"
+    StrategyTrackingExitReason.PRICE_STOP -> "止损"
 }
 
-internal fun fillRealtimePnl(
-    node: StrategyTrackingStockNode,
-    observationDate: LocalDate,
-    buyDate: LocalDate?,
-    candlesByCode: Map<String, List<Candle>>,
-): StrategyTrackingStockNode {
-    if (buyDate == null) return node
-    val candles = candlesByCode[node.stockCode].orEmpty()
-    if (candles.isEmpty()) return node
+/** 流转边标签数据：文本 + 涨跌方向（null = 中性，无盈亏数值）。 */
+internal data class TrackingEdgeLabelData(
+    val text: String,
+    val positive: Boolean?,
+)
 
-    val candlesByDate = candles.associateBy { it.date }
-    val buyCandle = candlesByDate[buyDate]
-        ?: candles.firstOrNull { it.date >= buyDate }
-        ?: return node
-    val currentCandle = candlesByDate[observationDate] ?: candles.lastOrNull() ?: return node
-    val buyPrice = buyCandle.open.takeIf { it > 0f } ?: buyCandle.openQfq.takeIf { it > 0f } ?: return node
-    val currentPrice = currentCandle.close
-    val actualPnl = ((currentPrice - buyPrice) / buyPrice) * 100f
-    val maxHigh = candles
-        .filter { candle -> candle.date >= buyDate && candle.date <= observationDate }
-        .maxOfOrNull { it.high }
-        ?: currentCandle.high
-    val maxPnl = ((maxHigh - buyPrice) / buyPrice) * 100f
+/**
+ * 流转边 → Canvas 标签。盈亏数值来自云端：
+ * 持有边 = 目标日当日涨跌；买入边 = 入场日开盘→收盘；卖出边 = 规则口径已实现收益 + 离场原因。
+ */
+internal fun StrategyTrackingEdge.toLabelData(): TrackingEdgeLabelData? {
+    val pnlText = pnlPct?.let(::formatPnlPercent)
+    val text = when (kind) {
+        StrategyTrackingEdgeKind.HOLD_CONTINUE -> pnlText
+        StrategyTrackingEdgeKind.ENTER_HOLDING -> pnlText?.let { "买入 $it" }
+        StrategyTrackingEdgeKind.EXIT_CLEAR -> {
+            val reason = exitReason?.label()
+            when {
+                reason != null && pnlText != null -> "$reason $pnlText"
+                pnlText != null -> "卖出 $pnlText"
+                else -> reason
+            }
+        }
+    } ?: return null
+    return TrackingEdgeLabelData(text = text, positive = pnlPct?.let { it >= 0f })
+}
 
-    return node.copy(
-        buyDate = buyDate.toString(),
-        buyPrice = buyPrice,
-        actualPnl = actualPnl,
-        maxPnl = maxPnl,
-    )
+/** 边的业务键：用于把布局结果（索引化的边）回连到云端边数据。 */
+internal fun StrategyTrackingEdge.lookupKey(): String =
+    "$fromDate|$fromSection|$fromSlotIndex|$toDate|$toSection|$toSlotIndex|$kind"
+
+internal fun formatPnlPercent(value: Float): String {
+    val rounded = kotlin.math.round(value * 100) / 100f
+    val sign = if (rounded >= 0) "+" else "-"
+    val absVal = kotlin.math.abs(rounded)
+    val intPart = absVal.toInt()
+    val decimal = kotlin.math.round((absVal - intPart) * 100).toInt()
+    val decimalStr = if (decimal < 10) "0$decimal" else "$decimal"
+    return "$sign$intPart.$decimalStr%"
 }

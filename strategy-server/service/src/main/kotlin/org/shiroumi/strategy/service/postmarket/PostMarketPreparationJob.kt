@@ -72,44 +72,15 @@ private data class IncrementalPreparedBars(
  */
 object PostMarketPreparationJob {
     private val profitPredictionSelector = ProfitPredictionModelSelector()
-    private val holdingStateMachine = HoldingStateMachine(loadExitRulesFromProperties())
 
-    /**
-     * 从系统属性装配持仓退出/入场规则；全部缺省时与 `ExitRules()` 默认值一致
-     * （v5 快线运营点：TP7%/H5/全档 2.5% 阶梯/每日入场 1，2026-06-12 实装为生产默认）。
-     *
-     * 回滚到 V3 运营点（TP5%/H15/无阶梯/全入场）的覆盖示例：
-     * -Dquant.strategy.holding.takeProfitPct=0.05
-     * -Dquant.strategy.holding.timeStopDays=15
-     * -Dquant.strategy.holding.profitProtectLadder=    （空值 = 关闭阶梯）
-     * -Dquant.strategy.holding.maxDailyEntries=0
-     */
-    private fun loadExitRulesFromProperties(): HoldingStateMachine.ExitRules {
-        val defaults = HoldingStateMachine.ExitRules()
-        val ladder = System.getProperty("quant.strategy.holding.profitProtectLadder")
-            ?.split(',')
-            ?.filter { it.isNotBlank() }
-            ?.associate { entry ->
-                val (day, level) = entry.split(':', limit = 2)
-                day.trim().toInt() to level.trim().toDouble()
+    // 规则装配统一走 ExitRules.fromSystemProperties()，与持仓跟踪展示链路共享同一规则口径
+    private val holdingStateMachine = HoldingStateMachine(
+        HoldingStateMachine.ExitRules.fromSystemProperties().also {
+            if (it != HoldingStateMachine.ExitRules()) {
+                logger.info("[策略预处理] 持仓规则非默认配置生效 | $it")
             }
-            ?: defaults.profitProtectLadder
-        return HoldingStateMachine.ExitRules(
-            takeProfitPct = System.getProperty("quant.strategy.holding.takeProfitPct")
-                ?.toDouble() ?: defaults.takeProfitPct,
-            timeStopDays = System.getProperty("quant.strategy.holding.timeStopDays")
-                ?.toInt() ?: defaults.timeStopDays,
-            priceStopEnabled = System.getProperty("quant.strategy.holding.priceStopEnabled")
-                ?.toBooleanStrictOrNull() ?: defaults.priceStopEnabled,
-            entryGapMaxPct = System.getProperty("quant.strategy.holding.entryGapMaxPct")
-                ?.toDouble() ?: defaults.entryGapMaxPct,
-            profitProtectLadder = ladder,
-            maxDailyEntries = System.getProperty("quant.strategy.holding.maxDailyEntries")
-                ?.toInt() ?: defaults.maxDailyEntries,
-        ).also {
-            if (it != defaults) logger.info("[策略预处理] 持仓规则非默认配置生效 | $it")
         }
-    }
+    )
 
     suspend fun run(
         tradeDate: LocalDate,

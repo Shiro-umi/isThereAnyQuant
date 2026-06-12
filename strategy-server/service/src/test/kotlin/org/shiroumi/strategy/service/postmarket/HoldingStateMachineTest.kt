@@ -387,4 +387,83 @@ class HoldingStateMachineTest {
         assertTrue(result.entered.isEmpty())
         assertEquals(d1, result.holdings.first().entryDate) // 保持原入场日
     }
+
+    // ===== evaluateExit 判决（原因 + 规则口径离场价），持仓跟踪展示链路共用 =====
+
+    private val holdingAt10 = DailyHoldingState(d1, "A.SZ", entryDate = d1, entryPrice = 10.0, signalDateLow = 9.0)
+
+    @Test
+    fun `判决_止盈触价_离场价为触发价`() {
+        // HIGH 10.8 触及 10.7 止盈价，开盘 10.1 未越过 → 按触发价 10.7 离场
+        val verdict = machine.evaluateExit(
+            holdingAt10, d2,
+            candle(open = 10.1f, high = 10.8f, low = 10.0f, close = 10.2f),
+            ::tradingDaysSince,
+        )
+        assertEquals(HoldingStateMachine.ExitReason.TAKE_PROFIT, verdict?.reason)
+        assertEquals(10.7, verdict!!.exitPrice, absoluteTolerance = 1e-6)
+    }
+
+    @Test
+    fun `判决_止盈高开穿越_离场价为开盘价`() {
+        // 开盘 11.0 已越过止盈价 10.7 → 实际按开盘价成交
+        val verdict = machine.evaluateExit(
+            holdingAt10, d2,
+            candle(open = 11.0f, high = 11.2f, low = 10.8f, close = 10.9f),
+            ::tradingDaysSince,
+        )
+        assertEquals(HoldingStateMachine.ExitReason.TAKE_PROFIT, verdict?.reason)
+        assertEquals(11.0, verdict!!.exitPrice, absoluteTolerance = 1e-5)
+    }
+
+    @Test
+    fun `判决_保盈阶梯触价`() {
+        // HIGH 10.3 触及 D1 档 10.25（未及止盈 10.7）→ 保盈离场，离场价 10.25
+        val verdict = machine.evaluateExit(
+            holdingAt10, d2,
+            candle(open = 10.0f, high = 10.3f, low = 9.9f, close = 10.0f),
+            ::tradingDaysSince,
+        )
+        assertEquals(HoldingStateMachine.ExitReason.PROFIT_PROTECT, verdict?.reason)
+        assertEquals(10.25, verdict!!.exitPrice, absoluteTolerance = 1e-6)
+    }
+
+    @Test
+    fun `判决_时间止损按收盘价`() {
+        // 第 5 个交易日（daysSinceEntry=4），全程未触阶梯/止盈 → 收盘强平
+        val d5 = openDates[4]
+        val verdict = machine.evaluateExit(
+            holdingAt10, d5,
+            candle(open = 9.8f, high = 10.1f, low = 9.6f, close = 9.7f),
+            ::tradingDaysSince,
+        )
+        assertEquals(HoldingStateMachine.ExitReason.TIME_STOP, verdict?.reason)
+        assertEquals(9.7, verdict!!.exitPrice, absoluteTolerance = 1e-5)
+    }
+
+    @Test
+    fun `判决_不满足任何退出条件返回null`() {
+        // HIGH 10.2 < 阶梯档 10.25，未到时间止损 → 留存
+        val verdict = machine.evaluateExit(
+            holdingAt10, d2,
+            candle(open = 10.0f, high = 10.2f, low = 9.9f, close = 10.1f),
+            ::tradingDaysSince,
+        )
+        assertEquals(null, verdict)
+    }
+
+    @Test
+    fun `判决_与advance离场结果一致`() {
+        // 同一根 bar 下 advance 判定离场 ⇔ evaluateExit 非 null
+        val bar = candle(open = 10.0f, high = 10.3f, low = 9.9f, close = 10.0f)
+        val result = machine.advance(
+            tradeDate = d2,
+            previousHoldings = listOf(holdingAt10),
+            newEntries = emptyList(),
+            tradingDaysSince = ::tradingDaysSince,
+            candleFor = { _, _ -> bar },
+        )
+        assertEquals(listOf("A.SZ"), result.exited)
+        assertTrue(machine.evaluateExit(holdingAt10, d2, bar, ::tradingDaysSince) != null)
+    }
 }
