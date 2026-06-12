@@ -47,6 +47,9 @@ class PostMarketOrchestratorTest {
     }
 
     @Test
+    @kotlin.test.Ignore
+    // 手动回填驱动器：直连生产数据库与推理服务端口，会重写窗口内策略表。
+    // 仅手动去掉 Ignore 后单独执行；常规测试套件不运行（端口被部署族占用时模型身份守卫会拒绝）。
     fun runActualBackfill() = runBlocking {
         org.shiroumi.config.ConfigManager.load()
         val start = kotlinx.datetime.LocalDate(2026, 5, 4)

@@ -121,6 +121,29 @@ case "$MODE_FAMILY" in
 esac
 export STRATEGY_SOCKET_PORT="$STRATEGY_SERVICE_PORT"
 
+# 盈利预测推理子进程端口族（与 start-strategy-service.sh 的派生规则一致）
+case "$MODE_FAMILY" in
+    release) PROFIT_PREDICTION_INFER_PORT=9875 ;;
+    *)       PROFIT_PREDICTION_INFER_PORT=9874 ;;
+esac
+
+kill_inference_port_leftover() {
+    # 推理子进程只靠 strategy-service JVM 的 shutdown hook 清理；kill -9 兜底或 JVM 异常退出
+    # 会留下孤儿进程占住端口。模型切换后身份守卫会拒绝旧模型孤儿、同端口重启必然失败，
+    # 导致盘后链路硬失败，因此停服后必须按端口兜底查杀。
+    local leftover_pids
+    leftover_pids=$(lsof -ti:"$PROFIT_PREDICTION_INFER_PORT" 2>/dev/null || true)
+    if [ -n "$leftover_pids" ]; then
+        echo "🛑 Killing leftover inference process on port $PROFIT_PREDICTION_INFER_PORT (PID: $leftover_pids)..."
+        kill $leftover_pids 2>/dev/null || true
+        sleep 2
+        if lsof -ti:"$PROFIT_PREDICTION_INFER_PORT" > /dev/null 2>&1; then
+            kill -9 $leftover_pids 2>/dev/null || true
+            sleep 1
+        fi
+    fi
+}
+
 echo "🚀 Deploying $(echo "$MODE" | tr '[:lower:]' '[:upper:]') mode (port $TARGET_PORT, strategy-service $STRATEGY_SERVICE_PORT)..."
 
 DEPLOY_DIR="$SCRIPT_DIR/ktor-server/build/deploy.${MODE_FAMILY}"
@@ -148,6 +171,7 @@ ensure_strategy_deploy_layout() {
 stop_strategy_service_if_running() {
     if [ -x "$STRATEGY_START_SCRIPT" ]; then
         "$STRATEGY_START_SCRIPT" stop || true
+        kill_inference_port_leftover
         return
     fi
     if [ -f "$STRATEGY_PID_FILE" ]; then
@@ -158,6 +182,7 @@ stop_strategy_service_if_running() {
         fi
         rm -f "$STRATEGY_PID_FILE"
     fi
+    kill_inference_port_leftover
 }
 
 deploy_strategy_service_only() {
@@ -287,6 +312,8 @@ if [ -n "$STRATEGY_REMAINING_PID" ]; then
         sleep 1
     fi
 fi
+
+kill_inference_port_leftover
 
 REMAINING_PID=$(lsof -ti:"$TARGET_PORT" 2>/dev/null || true)
 if [ -n "$REMAINING_PID" ]; then

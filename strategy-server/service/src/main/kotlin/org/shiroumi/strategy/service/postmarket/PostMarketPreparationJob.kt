@@ -75,13 +75,14 @@ object PostMarketPreparationJob {
     private val holdingStateMachine = HoldingStateMachine(loadExitRulesFromProperties())
 
     /**
-     * 从系统属性装配持仓退出/入场规则；全部缺省时与 `ExitRules()` 默认值一致（V3 现行为）。
+     * 从系统属性装配持仓退出/入场规则；全部缺省时与 `ExitRules()` 默认值一致
+     * （v5 快线运营点：TP7%/H5/全档 2.5% 阶梯/每日入场 1，2026-06-12 实装为生产默认）。
      *
-     * v5 快线体系（TP7%/H5，验证: 生产池+688 76.7%@239笔/年）开启示例：
-     * -Dquant.strategy.holding.takeProfitPct=0.07
-     * -Dquant.strategy.holding.timeStopDays=5
-     * -Dquant.strategy.holding.profitProtectLadder=1:0.025,2:0.025,3:0.025,4:0.025
-     * -Dquant.strategy.holding.maxDailyEntries=1
+     * 回滚到 V3 运营点（TP5%/H15/无阶梯/全入场）的覆盖示例：
+     * -Dquant.strategy.holding.takeProfitPct=0.05
+     * -Dquant.strategy.holding.timeStopDays=15
+     * -Dquant.strategy.holding.profitProtectLadder=    （空值 = 关闭阶梯）
+     * -Dquant.strategy.holding.maxDailyEntries=0
      */
     private fun loadExitRulesFromProperties(): HoldingStateMachine.ExitRules {
         val defaults = HoldingStateMachine.ExitRules()

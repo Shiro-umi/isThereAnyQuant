@@ -26,8 +26,11 @@ class HoldingStateMachineTest {
     private val d3 = openDates[2]
     private val d4 = openDates[3]
 
-    /** V3 默认规则：止盈 5% / 时间止损 15 交易日 / 价格止损关 / 入场跳空过滤 3%。 */
+    /** 生产默认规则 = v5 快线：止盈 7% / 时间止损 5 交易日 / 保盈阶梯全档 2.5% / 每日入场上限 1。 */
     private val machine = HoldingStateMachine()
+
+    /** V3 运营点（回滚通道）：止盈 5% / 时间止损 15 交易日 / 无阶梯 / 全入场。 */
+    private val v3Machine = HoldingStateMachine(HoldingStateMachine.ExitRules.V3_OPERATING_POINT)
 
     /** 旧版（V2 frame）规则：止盈 7% / 时间止损 3 交易日 / 价格止损开 / 无跳空过滤。 */
     private val legacyMachine = HoldingStateMachine(
@@ -36,6 +39,8 @@ class HoldingStateMachineTest {
             timeStopDays = 3,
             priceStopEnabled = true,
             entryGapMaxPct = 0.0,
+            profitProtectLadder = emptyMap(),
+            maxDailyEntries = 0,
         )
     )
 
@@ -50,6 +55,17 @@ class HoldingStateMachineTest {
             adj = 1f, volume = 100f, turnoverReal = 0f, pe = 0f, peTtm = 0f,
             pb = 0f, ps = 0f, psTtm = 0f, mvTotal = 0f, mvCirc = 0f,
         )
+
+    @Test
+    fun `生产默认运营点_v5快线参数`() {
+        val rules = HoldingStateMachine.ExitRules()
+        assertEquals(0.07, rules.takeProfitPct)
+        assertEquals(5, rules.timeStopDays)
+        assertEquals(false, rules.priceStopEnabled)
+        assertEquals(0.03, rules.entryGapMaxPct)
+        assertEquals(mapOf(1 to 0.025, 2 to 0.025, 3 to 0.025, 4 to 0.025), rules.profitProtectLadder)
+        assertEquals(1, rules.maxDailyEntries)
+    }
 
     @Test
     fun `T+1 禁售_入场当日不离场`() {
@@ -70,11 +86,11 @@ class HoldingStateMachineTest {
     }
 
     @Test
-    fun `止盈_入场次日HIGH触及5pct离场`() {
-        // A 于 d2 入场价 10；d3 HIGH 10.5 触及 +5%（V3 默认） → 离场
+    fun `止盈_V3规则入场次日HIGH触及5pct离场`() {
+        // A 于 d2 入场价 10；d3 HIGH 10.5 触及 +5%（V3 运营点） → 离场
         val prior = listOf(DailyHoldingState(d2, "A.SZ", entryDate = d2, entryPrice = 10.0, signalDateLow = 9.0))
         val bars = mapOf("A.SZ" to candle(open = 10.2f, high = 10.5f, low = 10.1f, close = 10.4f))
-        val result = machine.advance(
+        val result = v3Machine.advance(
             tradeDate = d3,
             previousHoldings = prior,
             newEntries = emptyList(),
@@ -86,12 +102,27 @@ class HoldingStateMachineTest {
     }
 
     @Test
-    fun `时间止损_V3默认第15个交易日收盘强制离场`() {
+    fun `止盈_快线默认入场次日HIGH触及7pct离场`() {
+        // A 于 d2 入场价 10；d3 HIGH 10.7 触及 +7%（快线止盈，优先级高于 2.5% 阶梯，结果同为离场）
+        val prior = listOf(DailyHoldingState(d2, "A.SZ", entryDate = d2, entryPrice = 10.0, signalDateLow = 9.0))
+        val bars = mapOf("A.SZ" to candle(open = 10.2f, high = 10.7f, low = 10.1f, close = 10.6f))
+        val result = machine.advance(
+            tradeDate = d3,
+            previousHoldings = prior,
+            newEntries = emptyList(),
+            tradingDaysSince = ::tradingDaysSince,
+            candleFor = { code, _ -> bars[code] },
+        )
+        assertEquals(listOf("A.SZ"), result.exited)
+    }
+
+    @Test
+    fun `时间止损_V3规则第15个交易日收盘强制离场`() {
         // B 于 d2 入场；第 14 个交易日（daysSinceEntry==13）未触发，第 15 个（==14）强制离场
         val bars = mapOf("B.SZ" to candle(open = 20.2f, high = 20.5f, low = 20.0f, close = 20.3f))
         val d15 = openDates[14] // daysSinceEntry = 13 → 不离场
         val d16 = openDates[15] // daysSinceEntry = 14 → 时间止损
-        val holdAt15 = machine.advance(
+        val holdAt15 = v3Machine.advance(
             tradeDate = d15,
             previousHoldings = listOf(DailyHoldingState(openDates[13], "B.SZ", entryDate = d2, entryPrice = 20.0, signalDateLow = 18.0)),
             newEntries = emptyList(),
@@ -99,7 +130,7 @@ class HoldingStateMachineTest {
             candleFor = { code, _ -> bars[code] },
         )
         assertTrue(holdAt15.exited.isEmpty())
-        val exitAt16 = machine.advance(
+        val exitAt16 = v3Machine.advance(
             tradeDate = d16,
             previousHoldings = holdAt15.holdings,
             newEntries = emptyList(),
@@ -141,8 +172,8 @@ class HoldingStateMachineTest {
     }
 
     @Test
-    fun `价格止损_V3默认关闭_跌破信号日最低不离场`() {
-        // V3 验证结论：收盘价止损拦不住跳空深亏，反而消灭深蹲后反弹触达 → 默认关闭
+    fun `价格止损_默认关闭_跌破信号日最低不离场`() {
+        // 验证结论：收盘价止损拦不住跳空深亏，反而消灭深蹲后反弹触达 → V3/快线默认均关闭
         val prior = listOf(DailyHoldingState(d2, "C.SZ", entryDate = d2, entryPrice = 30.0, signalDateLow = 29.0))
         val bars = mapOf("C.SZ" to candle(open = 29.5f, high = 29.8f, low = 28.0f, close = 28.5f))
         val result = machine.advance(
@@ -202,10 +233,10 @@ class HoldingStateMachineTest {
 
     @Test
     fun `多日持有_留存与新入场并存`() {
-        // d2：B 留存（入场 d1，未触发退出）；同日 A 新入场
+        // d2：B 留存（入场 d1，HIGH 未触 2.5% 阶梯档）；同日 A 新入场
         val prior = listOf(DailyHoldingState(d1, "B.SZ", entryDate = d1, entryPrice = 20.0, signalDateLow = 18.0))
         val bars = mapOf(
-            "B.SZ" to candle(open = 20.2f, high = 20.5f, low = 20.0f, close = 20.3f), // 未触发退出
+            "B.SZ" to candle(open = 20.2f, high = 20.3f, low = 20.0f, close = 20.25f), // HIGH 20.3 < 20.5 阶梯档
             "A.SZ" to candle(open = 10f, high = 10.3f, low = 9.9f, close = 10.1f),     // 当日入场
         )
         val result = machine.advance(
@@ -224,22 +255,12 @@ class HoldingStateMachineTest {
         assertEquals(d2, b.tradeDate)
     }
 
-    /** v5 快线规则：止盈 7% / 时间止损 5 交易日 / 保盈阶梯全档 2.5% / 每日入场上限 1。 */
-    private val fastLaneMachine = HoldingStateMachine(
-        HoldingStateMachine.ExitRules(
-            takeProfitPct = 0.07,
-            timeStopDays = 5,
-            profitProtectLadder = mapOf(1 to 0.025, 2 to 0.025, 3 to 0.025, 4 to 0.025),
-            maxDailyEntries = 1,
-        )
-    )
-
     @Test
     fun `保盈阶梯_HIGH触及档位离场_未触及不离场`() {
         // A 于 d2 入场价 10；d3（daysSinceEntry=1）HIGH 10.20 < 10.25 → 不离场；d4 HIGH 10.26 ≥ +2.5% → 离场
         val prior = listOf(DailyHoldingState(d2, "A.SZ", entryDate = d2, entryPrice = 10.0, signalDateLow = 9.0))
         val holdBars = mapOf("A.SZ" to candle(open = 10.0f, high = 10.20f, low = 9.9f, close = 10.0f))
-        val held = fastLaneMachine.advance(
+        val held = machine.advance(
             tradeDate = d3,
             previousHoldings = prior,
             newEntries = emptyList(),
@@ -248,7 +269,7 @@ class HoldingStateMachineTest {
         )
         assertTrue(held.exited.isEmpty())
         val exitBars = mapOf("A.SZ" to candle(open = 10.0f, high = 10.26f, low = 9.9f, close = 10.1f))
-        val exited = fastLaneMachine.advance(
+        val exited = machine.advance(
             tradeDate = d4,
             previousHoldings = held.holdings,
             newEntries = emptyList(),
@@ -259,11 +280,11 @@ class HoldingStateMachineTest {
     }
 
     @Test
-    fun `保盈阶梯_无档位日不触发_默认配置不受影响`() {
-        // 默认 machine（阶梯关闭）：HIGH +2.6% 不触发任何离场
+    fun `保盈阶梯_V3规则阶梯关闭_HIGH2点6pct不离场`() {
+        // V3 运营点（阶梯关闭）：HIGH +2.6% 不触发任何离场
         val prior = listOf(DailyHoldingState(d2, "A.SZ", entryDate = d2, entryPrice = 10.0, signalDateLow = 9.0))
         val bars = mapOf("A.SZ" to candle(open = 10.0f, high = 10.26f, low = 9.9f, close = 10.1f))
-        val result = machine.advance(
+        val result = v3Machine.advance(
             tradeDate = d3,
             previousHoldings = prior,
             newEntries = emptyList(),
@@ -278,7 +299,7 @@ class HoldingStateMachineTest {
         // 入场 d2；第 5 个交易日（daysSinceEntry=4）即便 HIGH 平淡也强制离场
         val prior = listOf(DailyHoldingState(openDates[4], "A.SZ", entryDate = d2, entryPrice = 10.0, signalDateLow = 9.0))
         val bars = mapOf("A.SZ" to candle(open = 9.8f, high = 9.9f, low = 9.7f, close = 9.8f))
-        val result = fastLaneMachine.advance(
+        val result = machine.advance(
             tradeDate = openDates[5], // daysSinceEntry = 4 = timeStopDays-1
             previousHoldings = prior,
             newEntries = emptyList(),
@@ -296,7 +317,7 @@ class HoldingStateMachineTest {
             "B.SZ" to candle(open = 20f, high = 20.1f, low = 19.9f, close = 20f),
             "C.SZ" to candle(open = 30f, high = 30.1f, low = 29.9f, close = 30f),
         )
-        val result = fastLaneMachine.advance(
+        val result = machine.advance(
             tradeDate = d2,
             previousHoldings = emptyList(),
             newEntries = listOf(
@@ -318,7 +339,7 @@ class HoldingStateMachineTest {
             "A.SZ" to candle(open = 10f, high = 10.1f, low = 9.9f, close = 10f),
             "B.SZ" to candle(open = 20.8f, high = 21f, low = 20.7f, close = 20.9f), // 信号收盘20 → 跳空+4%
         )
-        val result = fastLaneMachine.advance(
+        val result = machine.advance(
             tradeDate = d2,
             previousHoldings = emptyList(),
             newEntries = listOf(
@@ -332,12 +353,12 @@ class HoldingStateMachineTest {
     }
 
     @Test
-    fun `每日入场上限_默认关闭时全部入场`() {
+    fun `每日入场上限_V3规则关闭时全部入场`() {
         val bars = mapOf(
             "A.SZ" to candle(open = 10f, high = 10.1f, low = 9.9f, close = 10f),
             "B.SZ" to candle(open = 20f, high = 20.1f, low = 19.9f, close = 20f),
         )
-        val result = machine.advance(
+        val result = v3Machine.advance(
             tradeDate = d2,
             previousHoldings = emptyList(),
             newEntries = listOf(
@@ -353,7 +374,8 @@ class HoldingStateMachineTest {
     @Test
     fun `已持有票不重复入场`() {
         val prior = listOf(DailyHoldingState(d1, "A.SZ", entryDate = d1, entryPrice = 10.0, signalDateLow = 9.0))
-        val bars = mapOf("A.SZ" to candle(open = 10.2f, high = 10.3f, low = 10.0f, close = 10.1f))
+        // HIGH 10.2 < 10.25 阶梯档 → 留存；A 同时出现在候选中也不重复入场
+        val bars = mapOf("A.SZ" to candle(open = 10.1f, high = 10.2f, low = 10.0f, close = 10.1f))
         val result = machine.advance(
             tradeDate = d2,
             previousHoldings = prior,

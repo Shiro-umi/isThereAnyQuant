@@ -7,19 +7,23 @@ import org.shiroumi.database.strategy.daily.repository.DailyHoldingState
 /**
  * 生产侧持仓状态机——多日持有 + 止盈止损。
  *
- * 业务主权在 strategy-server。规则数值对齐 V3 正式版模型在 2020-06~2026-05 全样本外验证的最优运营点
- * （研究文档 `private/research-docs/v3-honest-model-paper.html`）：
- * - 止盈：当日 HIGH 触及入场价 ×(1 + 5%) → 离场
- * - 时间止损：入场后第 15 个交易日收盘强制离场
+ * 业务主权在 strategy-server。默认规则 = v5 快线运营点（TP7%/H5/全档 2.5% 保盈阶梯/每日入场 1），
+ * 2026-06-12 部署前在生产池（主板+创业板）复验：lw+bce 集成口径（生产包 = 双 loss × 双 seed 四成员）
+ * 调参段 76.4%/EV+0.78%、验证段 77.3%/EV+0.89%、240 笔/年、分年全正
+ * （研究文档 `private/research-docs/tp7-h5-feasibility-20260611.html`，复验脚本归档于
+ * `private/research-docs/tp7-h5/train_v5b_bce_production.py` 头注）：
+ * - 止盈：当日 HIGH 触及入场价 ×(1 + 7%) → 离场
+ * - 保盈阶梯：入场后第 1~4 个可卖日，当日 HIGH 触及入场价 ×(1 + 2.5%) → 离场
+ * - 时间止损：入场后第 5 个交易日收盘强制离场
+ * - 每日入场上限 1：Top5 仅入场 [EntryCandidate.entryPriority]（20 日波动率）最高的一只
  * - 价格止损：默认关闭（验证结论：收盘价止损拦不住跳空深亏，反而消灭深蹲后反弹触达的盈利交易）
  * - 入场跳空过滤：开盘较信号日收盘跳空 > 3% 不入场（跳空利润属于昨日持有者，追入为负期望）
  * - T+1 禁售：入场当日不离场
  *
  * 退出优先级：止盈 > 保盈阶梯 > 时间止损 > 价格止损。
  *
- * v5 快线体系（TP7%/H5，研究文档 `private/research-docs/tp7-h5-feasibility-20260611.html`）通过
- * [ExitRules.profitProtectLadder]（每日保盈档）与 [ExitRules.maxDailyEntries]（每日选5入1，按
- * [EntryCandidate.entryPriority] 波动率优先）开启；两者默认关闭，保持 V3 现行为。
+ * V3 运营点（TP5%/H15，`private/research-docs/v3-honest-model-paper.html`）为回滚通道，
+ * 通过 [ExitRules.V3_OPERATING_POINT] 或系统属性显式覆盖。
  *
  * 状态机只关心「某只票还持不持」，不引入账户、现金、持仓数量、撮合、缩放。
  * 行情以日 K（前复权优先）判定，由调用方注入，便于单测。
@@ -30,25 +34,35 @@ class HoldingStateMachine(
     /** 每日入场上限是否开启（调用方据此决定是否计算 [EntryCandidate.entryPriority]）。 */
     val entryCapEnabled: Boolean get() = config.maxDailyEntries > 0
 
-    /** 止盈止损与入场规则配置，数值默认对齐 V3 模型全样本外验证最优运营点。 */
+    /** 止盈止损与入场规则配置，数值默认对齐 v5 快线生产运营点（2026-06-12 实装）。 */
     data class ExitRules(
-        val takeProfitPct: Double = 0.05,
-        val timeStopDays: Int = 15,
+        val takeProfitPct: Double = 0.07,
+        val timeStopDays: Int = 5,
         val priceStopEnabled: Boolean = false,
         /** 入场跳空上限：开盘价较信号日收盘价的涨幅超过该值时放弃入场。非正数表示关闭过滤。 */
         val entryGapMaxPct: Double = 0.03,
         /**
          * 保盈阶梯：key = 入场后第 N 个可交易日（daysSinceEntry，1 = 入场次日即首个可卖日），
-         * value = 当日 HIGH 触及 入场价 ×(1+value) 即离场的保盈档位。空表示关闭（现行为）。
-         * v5 验证最优 H6 档（TP7%/H5 体系）= {1:0.025, 2:0.025, 3:0.025, 4:0.025}。
+         * value = 当日 HIGH 触及 入场价 ×(1+value) 即离场的保盈档位。空表示关闭。
+         * 默认 = v5 快线全档 2.5%（H5 周期内 1~4 日，第 5 日为时间止损日）。
          */
-        val profitProtectLadder: Map<Int, Double> = emptyMap(),
+        val profitProtectLadder: Map<Int, Double> = mapOf(1 to 0.025, 2 to 0.025, 3 to 0.025, 4 to 0.025),
         /**
-         * 每日新入场上限：0 表示不限（现行为，目标组合全入场）；
-         * v5 验证语义为 1（每日 Top5 仅入场 entryPriority 最高的一只，Top5 全入场实测稀释 4pp 胜率）。
+         * 每日新入场上限：默认 1（每日 Top5 仅入场 entryPriority 最高的一只，
+         * Top5 全入场实测稀释 4pp 胜率）；0 表示不限（V3 行为，目标组合全入场）。
          */
-        val maxDailyEntries: Int = 0,
+        val maxDailyEntries: Int = 1,
     ) {
+        companion object {
+            /** V3 正式版运营点（TP5%/H15/无阶梯/全入场）——回滚通道。 */
+            val V3_OPERATING_POINT = ExitRules(
+                takeProfitPct = 0.05,
+                timeStopDays = 15,
+                profitProtectLadder = emptyMap(),
+                maxDailyEntries = 0,
+            )
+        }
+
         init {
             require(takeProfitPct > 0.0) { "止盈比例必须为正，当前: $takeProfitPct" }
             require(timeStopDays >= 2) { "时间止损天数至少为 2，当前: $timeStopDays" }

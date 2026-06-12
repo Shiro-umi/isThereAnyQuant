@@ -35,9 +35,10 @@ internal class ProfitPredictionModelSelector(
     private val projectRoot: File = resolveProjectRoot(
         System.getProperty("quant.projectRoot") ?: System.getProperty("quant.project.root")
     ),
+    // 默认 = v5 快线双模型集成包（lw+bce, 2026-06-12 实装）; 回滚 V3 时覆盖为 v3-honest-20260611
     private val modelDir: String = System.getProperty(
         "quant.profitPrediction.modelDir",
-        "research/profit-prediction-v2/models/v3-honest-20260611"
+        "research/profit-prediction-v2/models/v5-ens-fast-20260612"
     ),
     private val pythonWorkDir: String = System.getProperty(
         "quant.profitPrediction.pythonWorkDir",
