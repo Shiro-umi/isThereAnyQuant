@@ -48,6 +48,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -58,6 +59,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -113,6 +115,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.datetime.Clock
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.todayIn
 import model.candle.StrategyPositionTrackingDay
 import model.candle.StrategyTrackingEdgeKind
 import model.candle.StrategyTrackingSection
@@ -185,15 +191,6 @@ fun StrategyPositionTrackingScreen(
     val displayLoading = activeCalibration?.isLoading ?: isLoading
     val displayError = activeCalibration?.error ?: error
     var calibrationPickerVisible by remember { mutableStateOf(false) }
-    // 可校准日期 = 模型流中最近 20 个已确认交易日（排除盘中实时投影日），新日期在前
-    val calibrationOptions = remember(timeline) {
-        timeline?.let { t ->
-            t.days.map { it.tradeDate }
-                .filter { it != t.realtimeTradeDate }
-                .takeLast(20)
-                .asReversed()
-        }.orEmpty()
-    }
     val config = rememberAdaptiveLayoutConfig()
     val pagePadding = when {
         config.isExpanded || config.isLarge || config.isXLarge -> PaddingValues(40.dp)
@@ -470,16 +467,16 @@ fun StrategyPositionTrackingScreen(
                 }
                 if (useBottomSheet) {
                     CalibrationPickerBottomSheet(
-                        options = calibrationOptions,
                         activeDate = activeCalibration?.followStartDate,
+                        timeline = timeline,
                         onPick = onPick,
                         onClearCalibration = onClearCalibration,
                         onDismiss = { calibrationPickerVisible = false },
                     )
                 } else {
                     CalibrationPickerDialog(
-                        options = calibrationOptions,
                         activeDate = activeCalibration?.followStartDate,
+                        timeline = timeline,
                         onPick = onPick,
                         onClearCalibration = onClearCalibration,
                         onDismiss = { calibrationPickerVisible = false },
@@ -722,16 +719,24 @@ private const val CalibrationPickerHint =
         "校准视图仅包含已确认交易日，不含盘中实时列。"
 
 @Composable
-private fun CalibrationDateList(
-    options: List<String>,
+private fun CalibrationDateInput(
     activeDate: String?,
+    timeline: StrategyPositionTrackingTimeline?,
     onPick: (String) -> Unit,
     onClearCalibration: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var text by remember(activeDate) { mutableStateOf(activeDate ?: "") }
+    var error by remember { mutableStateOf<String?>(null) }
+    val minDate = LocalDate(2026, 5, 18)
+    val maxDate = remember(timeline) {
+        timeline?.days?.lastOrNull()?.tradeDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+            ?: Clock.System.todayIn(TimeZone.currentSystemDefault())
+    }
+
     Column(
         modifier = modifier.verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+        verticalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.md),
     ) {
         Text(
             text = CalibrationPickerHint,
@@ -745,13 +750,30 @@ private fun CalibrationDateList(
             selected = activeDate == null,
             onClick = onClearCalibration,
         )
-        options.forEach { date ->
-            CalibrationDateRow(
-                label = date,
-                description = null,
-                selected = date == activeDate,
-                onClick = { onPick(date) },
-            )
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it; error = null },
+            label = { Text("校准起始日 (yyyy-MM-dd)") },
+            singleLine = true,
+            isError = error != null,
+            supportingText = error?.let { { Text(it) } },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Button(
+            onClick = {
+                val parsed = runCatching { LocalDate.parse(text.trim()) }.getOrNull()
+                if (parsed == null || parsed < minDate) {
+                    error = "请选择 ${minDate} 及之后的有效日期"
+                } else if (parsed > maxDate) {
+                    error = "该日期暂无已确认交易数据"
+                } else {
+                    error = null
+                    onPick(text.trim())
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("确认校准")
         }
     }
 }
@@ -806,8 +828,8 @@ private fun CalibrationDateRow(
 
 @Composable
 private fun CalibrationPickerDialog(
-    options: List<String>,
     activeDate: String?,
+    timeline: StrategyPositionTrackingTimeline?,
     onPick: (String) -> Unit,
     onClearCalibration: () -> Unit,
     onDismiss: () -> Unit,
@@ -822,9 +844,9 @@ private fun CalibrationPickerDialog(
             )
         },
         text = {
-            CalibrationDateList(
-                options = options,
+            CalibrationDateInput(
                 activeDate = activeDate,
+                timeline = timeline,
                 onPick = onPick,
                 onClearCalibration = onClearCalibration,
                 modifier = Modifier.heightIn(max = 380.dp),
@@ -842,8 +864,8 @@ private fun CalibrationPickerDialog(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CalibrationPickerBottomSheet(
-    options: List<String>,
     activeDate: String?,
+    timeline: StrategyPositionTrackingTimeline?,
     onPick: (String) -> Unit,
     onClearCalibration: () -> Unit,
     onDismiss: () -> Unit,
@@ -882,9 +904,9 @@ private fun CalibrationPickerBottomSheet(
             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
             thickness = 0.5.dp,
         )
-        CalibrationDateList(
-            options = options,
+        CalibrationDateInput(
             activeDate = activeDate,
+            timeline = timeline,
             onPick = onPick,
             onClearCalibration = onClearCalibration,
             modifier = Modifier
