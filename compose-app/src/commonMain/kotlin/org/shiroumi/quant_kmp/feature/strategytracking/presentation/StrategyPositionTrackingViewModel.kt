@@ -21,7 +21,6 @@ import model.candle.StockInfo
 import model.candle.StrategyTrackingSection
 import model.candle.StrategyTrackingStockNode
 import org.shiroumi.quant_kmp.feature.candle.domain.repository.CandleRepository
-import org.shiroumi.quant_kmp.feature.strategytracking.data.TrackingCalibrationStore
 import org.shiroumi.quant_kmp.service.GlobalWebSocketClient
 import kotlin.uuid.ExperimentalUuidApi
 
@@ -106,7 +105,6 @@ class StrategyPositionTrackingViewModel(
 
     init {
         observeStrategyPositionTracking()
-        restorePersistedCalibration()
     }
 
     fun refresh() {
@@ -118,33 +116,18 @@ class StrategyPositionTrackingViewModel(
         _listObservedDate.value = tradeDate
     }
 
-    /** 激活最早跟随日校准：以 [followStartDate] 为第一笔跟随买入日拉取重放视图，并持久化用户声明。 */
+    /** 激活最早跟随日校准：以 [followStartDate] 为第一笔跟随买入日拉取重放视图，并通过 WS 同步到服务端。 */
     fun calibrateFollowStart(followStartDate: String) {
         _calibration.value = TrackingCalibration(followStartDate = followStartDate)
         _listObservedDate.value = null
-        persistCalibration(followStartDate)
+        GlobalWebSocketClient.setTrackingFollowStartDate(followStartDate)
     }
 
-    /** 清除校准，回到模型自身持仓流，并清除持久化声明。 */
+    /** 清除校准，回到模型自身持仓流，并通过 WS 清空服务端设置。 */
     fun clearCalibration() {
         _calibration.value = null
         _listObservedDate.value = null
-        persistCalibration(null)
-    }
-
-    /** 启动时恢复持久化的跟随起始日声明；空串/未设置则保持跟随全程。 */
-    private fun restorePersistedCalibration() {
-        viewModelScope.launch {
-            val persisted = TrackingCalibrationStore.load()?.takeIf { it.isNotBlank() } ?: return@launch
-            // 仅当尚未有活跃校准（避免覆盖会话内用户新选择）时恢复
-            if (_calibration.value == null) {
-                _calibration.value = TrackingCalibration(followStartDate = persisted)
-            }
-        }
-    }
-
-    private fun persistCalibration(followStartDate: String?) {
-        viewModelScope.launch { TrackingCalibrationStore.save(followStartDate) }
+        GlobalWebSocketClient.setTrackingFollowStartDate("")
     }
 
     fun dismissDetail() {
@@ -189,6 +172,20 @@ class StrategyPositionTrackingViewModel(
                 val timeline = response.toTimeline()
                 hydrateStockInfo(timeline)
                 _timeline.value = timeline
+
+                // 模型流更新时，根据服务端下发的 followStartDate 同步校准状态
+                val wsFollowStartDate = response.followStartDate
+                if (wsFollowStartDate != null) {
+                    _calibration.value = TrackingCalibration(
+                        followStartDate = wsFollowStartDate,
+                        timeline = timeline,
+                        isLoading = false,
+                        error = null,
+                    )
+                } else {
+                    _calibration.value = null
+                }
+
                 rebuildSelectedDetail()
             }
         }
