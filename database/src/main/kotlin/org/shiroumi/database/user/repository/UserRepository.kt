@@ -30,7 +30,7 @@ class UserRepository(private val db: Database) {
      * 确保 sys_user 表已创建（幂等）
      */
     suspend fun ensureSchema() = newSuspendedTransaction(Dispatchers.IO, db) {
-        SchemaUtils.create(UserTable)
+        SchemaUtils.createMissingTablesAndColumns(UserTable)
     }
 
     /**

@@ -23,7 +23,7 @@ object SystemStatusRepository {
      */
     fun ensureSchema() {
         commonDb.transaction(SystemStatusTable) {
-            SchemaUtils.create(SystemStatusTable)
+            SchemaUtils.createMissingTablesAndColumns(SystemStatusTable)
         }
     }
     
