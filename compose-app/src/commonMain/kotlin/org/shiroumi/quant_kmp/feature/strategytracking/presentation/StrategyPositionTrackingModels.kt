@@ -11,6 +11,12 @@ internal const val TrackingSlotCount = 5
 internal const val TrackingRealtimeDayLabel = "今天"
 
 /**
+ * 最早可校准跟随起始日的下界（业务硬约束，与后端一致）。
+ * tradeDate 为 ISO `yyyy-MM-dd`，字典序等于日期序，可直接字符串比较。
+ */
+internal const val CalibrationMinTradeDate = "2026-05-18"
+
+/**
  * 持仓跟踪时间线。节点盈亏、离场判决与流转边盈亏全部由 strategy-service 云端计算
  * （`StrategyPositionTrackingRuntime`），前端只做槽位裁剪与渲染。
  * [followStartDate] 非空表示最早跟随日校准视图：持仓/清仓列为该日空仓起步的重放结果。
@@ -50,6 +56,19 @@ private fun StrategyPositionTrackingDay.limitSlots(): StrategyPositionTrackingDa
 
 internal fun StrategyPositionTrackingTimeline.isRealtimeDay(day: StrategyPositionTrackingDay): Boolean =
     realtimeTradeDate != null && day.tradeDate == realtimeTradeDate
+
+/**
+ * 校准可选交易日：完整审计窗口去掉盘中实时投影日与早于下界的日子，最新在上。
+ *
+ * 审计窗口的 [days] 集合不随校准激活收缩，是稳定数据源；盘中实时投影日不在后端
+ * 已确认交易日窗口内（校准会被拒），必须排除；早于 [CalibrationMinTradeDate] 的日子
+ * 同样不可校准。倒序使最新交易日置顶，贴合用户多选近几日的习惯。
+ */
+internal fun StrategyPositionTrackingTimeline.calibratableTradeDates(): List<String> =
+    days.filterNot { isRealtimeDay(it) }
+        .map { it.tradeDate }
+        .filter { it >= CalibrationMinTradeDate }
+        .asReversed()
 
 /** 离场原因展示文案。 */
 internal fun StrategyTrackingExitReason.label(): String = when (this) {

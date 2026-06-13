@@ -40,7 +40,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -48,7 +50,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -59,7 +60,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedCard
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -115,10 +115,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import kotlinx.datetime.Clock
-import kotlinx.datetime.LocalDate
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.todayIn
 import model.candle.StrategyPositionTrackingDay
 import model.candle.StrategyTrackingEdgeKind
 import model.candle.StrategyTrackingSection
@@ -456,32 +452,18 @@ fun StrategyPositionTrackingScreen(
             }
 
             if (calibrationPickerVisible) {
-                val useBottomSheet = config.isCompact || config.isMedium
-                val onPick: (String) -> Unit = { date ->
-                    viewModel.calibrateFollowStart(date)
-                    calibrationPickerVisible = false
-                }
-                val onClearCalibration: () -> Unit = {
-                    viewModel.clearCalibration()
-                    calibrationPickerVisible = false
-                }
-                if (useBottomSheet) {
-                    CalibrationPickerBottomSheet(
-                        activeDate = activeCalibration?.followStartDate,
-                        timeline = timeline,
-                        onPick = onPick,
-                        onClearCalibration = onClearCalibration,
-                        onDismiss = { calibrationPickerVisible = false },
-                    )
-                } else {
-                    CalibrationPickerDialog(
-                        activeDate = activeCalibration?.followStartDate,
-                        timeline = timeline,
-                        onPick = onPick,
-                        onClearCalibration = onClearCalibration,
-                        onDismiss = { calibrationPickerVisible = false },
-                    )
-                }
+                // 全尺寸统一底部抽屉：校准是轻量单选，抽屉「滑入点选即收」最贴合；
+                // ModalBottomSheet 在宽屏自动居中限宽，桌面观感同窄面板，无需 Dialog 分形态。
+                // 可选日期取模型自身流 timeline（集合不随校准收缩），而非校准视图。
+                // 三条收起路径（点交易日 / 点跟随全程 / 点关闭）都由抽屉内部统一先播放
+                // hide() 下滑动画再回调，故这里只传纯业务动作与关闭信号，不各自置 visible。
+                CalibrationPickerBottomSheet(
+                    selectedDate = activeCalibration?.followStartDate,
+                    timeline = timeline,
+                    onPick = viewModel::calibrateFollowStart,
+                    onClearCalibration = viewModel::clearCalibration,
+                    onDismiss = { calibrationPickerVisible = false },
+                )
             }
         }
     }
@@ -718,61 +700,45 @@ private const val CalibrationPickerHint =
         "排除模型在你跟随之前已有持仓的影响，使跟踪流与你的真实持仓对齐。" +
         "校准视图仅包含已确认交易日，不含盘中实时列。"
 
+/**
+ * 校准日期选择列表。顶部固定说明，其下「跟随全程」与全部可校准交易日同款行渲染，
+ * 点击即终态（外层负责落库并收起抽屉），无确认按钮、无文本校验——列表只枚举合法项。
+ */
 @Composable
-private fun CalibrationDateInput(
-    activeDate: String?,
-    timeline: StrategyPositionTrackingTimeline?,
+private fun CalibrationDateList(
+    selectedDate: String?,
+    tradeDates: List<String>,
     onPick: (String) -> Unit,
     onClearCalibration: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var text by remember(activeDate) { mutableStateOf(activeDate ?: "") }
-    var error by remember { mutableStateOf<String?>(null) }
-    val minDate = LocalDate(2026, 5, 18)
-    val maxDate = remember(timeline) {
-        timeline?.days?.lastOrNull()?.tradeDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
-            ?: Clock.System.todayIn(TimeZone.currentSystemDefault())
-    }
-
-    Column(
-        modifier = modifier.verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.md),
+    LazyColumn(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.xs),
     ) {
-        Text(
-            text = CalibrationPickerHint,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        CalibrationDateRow(
-            label = "跟随全程",
-            description = "模型完整持仓流",
-            selected = activeDate == null,
-            onClick = onClearCalibration,
-        )
-        OutlinedTextField(
-            value = text,
-            onValueChange = { text = it; error = null },
-            label = { Text("校准起始日 (yyyy-MM-dd)") },
-            singleLine = true,
-            isError = error != null,
-            supportingText = error?.let { { Text(it) } },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Button(
-            onClick = {
-                val parsed = runCatching { LocalDate.parse(text.trim()) }.getOrNull()
-                if (parsed == null || parsed < minDate) {
-                    error = "请选择 ${minDate} 及之后的有效日期"
-                } else if (parsed > maxDate) {
-                    error = "该日期暂无已确认交易数据"
-                } else {
-                    error = null
-                    onPick(text.trim())
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("确认校准")
+        item(key = "calibration-hint") {
+            Text(
+                text = CalibrationPickerHint,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = AgentTheme.Spacing.sm),
+            )
+        }
+        item(key = "calibration-follow-all") {
+            CalibrationDateRow(
+                label = "跟随全程",
+                description = "模型完整持仓流",
+                selected = selectedDate == null,
+                onClick = onClearCalibration,
+            )
+        }
+        items(items = tradeDates, key = { it }) { date ->
+            CalibrationDateRow(
+                label = date,
+                description = null,
+                selected = date == selectedDate,
+                onClick = { onPick(date) },
+            )
         }
     }
 }
@@ -796,7 +762,7 @@ private fun CalibrationDateRow(
                 }
             )
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = AgentTheme.Spacing.md, vertical = AgentTheme.Spacing.sm),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -825,57 +791,55 @@ private fun CalibrationDateRow(
     }
 }
 
-@Composable
-private fun CalibrationPickerDialog(
-    activeDate: String?,
-    timeline: StrategyPositionTrackingTimeline?,
-    onPick: (String) -> Unit,
-    onClearCalibration: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = "跟随校准",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-            )
-        },
-        text = {
-            CalibrationDateInput(
-                activeDate = activeDate,
-                timeline = timeline,
-                onPick = onPick,
-                onClearCalibration = onClearCalibration,
-                modifier = Modifier.heightIn(max = 380.dp),
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("关闭")
-            }
-        },
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-    )
-}
-
+/**
+ * 跟随校准底部抽屉。全尺寸统一形态，复用 [DisclaimerBottomSheet] 的 canonical 样式
+ * （自定义 dragHandle + hide() 协程 dismiss + 标题行 + 分隔线），内容区为 [CalibrationDateList]。
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CalibrationPickerBottomSheet(
-    activeDate: String?,
+    selectedDate: String?,
     timeline: StrategyPositionTrackingTimeline?,
     onPick: (String) -> Unit,
     onClearCalibration: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState()
+    val scope = rememberCoroutineScope()
+    // 统一收起：先播放 hide() 下滑动画，再执行业务动作并通知外层关闭。
+    // 点交易日、点跟随全程、点关闭三条路径共用，保证动画一致。
+    val dismissWith: (() -> Unit) -> Unit = { action ->
+        scope.launch {
+            sheetState.hide()
+            action()
+            onDismiss()
+        }
+    }
+    val tradeDates = remember(timeline) {
+        timeline?.calibratableTradeDates().orEmpty()
+    }
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { dismissWith {} },
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surface,
         tonalElevation = 4.dp,
         shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(36.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f))
+                )
+            }
+        },
     ) {
         Row(
             modifier = Modifier
@@ -890,7 +854,7 @@ private fun CalibrationPickerBottomSheet(
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
             )
-            IconButton(onClick = onDismiss) {
+            IconButton(onClick = { dismissWith {} }) {
                 Icon(
                     imageVector = Icons.Outlined.KeyboardArrowDown,
                     contentDescription = "关闭",
@@ -903,11 +867,11 @@ private fun CalibrationPickerBottomSheet(
             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
             thickness = 0.5.dp,
         )
-        CalibrationDateInput(
-            activeDate = activeDate,
-            timeline = timeline,
-            onPick = onPick,
-            onClearCalibration = onClearCalibration,
+        CalibrationDateList(
+            selectedDate = selectedDate,
+            tradeDates = tradeDates,
+            onPick = { date -> dismissWith { onPick(date) } },
+            onClearCalibration = { dismissWith(onClearCalibration) },
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(max = 480.dp)

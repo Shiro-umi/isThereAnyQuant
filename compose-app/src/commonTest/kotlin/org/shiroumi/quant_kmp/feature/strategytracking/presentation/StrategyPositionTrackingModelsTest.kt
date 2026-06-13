@@ -109,6 +109,35 @@ class StrategyPositionTrackingModelsTest {
         assertEquals(null, label)
     }
 
+    @Test
+    fun calibratableTradeDatesExcludesRealtimeAndBelowFloorThenReversed() {
+        val timeline = StrategyPositionTrackingResponse(
+            days = listOf(
+                day(tradeDate = "2026-05-15"), // 早于下界，剔除
+                day(tradeDate = "2026-05-18"), // 下界当日，保留
+                day(tradeDate = "2026-05-19"),
+                day(tradeDate = "2026-05-20"), // 末日为盘中实时投影日，剔除
+            ),
+            realtimeTradeDate = "2026-05-20",
+        ).toTimeline()
+
+        // 已确认且不早于下界的交易日，最新在上
+        assertEquals(listOf("2026-05-19", "2026-05-18"), timeline.calibratableTradeDates())
+    }
+
+    @Test
+    fun calibratableTradeDatesKeepsAllConfirmedDaysWhenNoRealtime() {
+        val timeline = StrategyPositionTrackingResponse(
+            days = listOf(
+                day(tradeDate = "2026-05-18"),
+                day(tradeDate = "2026-05-19"),
+                day(tradeDate = "2026-05-20"),
+            ),
+        ).toTimeline()
+
+        assertEquals(listOf("2026-05-20", "2026-05-19", "2026-05-18"), timeline.calibratableTradeDates())
+    }
+
     private fun day(
         tradeDate: String,
         selection: List<StrategyTrackingStockNode> = emptyList(),
