@@ -1,5 +1,10 @@
 package org.shiroumi.quant_kmp.feature.strategytracking.presentation
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -7,14 +12,21 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -22,12 +34,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import model.candle.StrategyPositionTrackingDay
+import model.candle.StrategyTrackingNextExit
 import model.candle.StrategyTrackingSection
 import model.candle.StrategyTrackingStockNode
 import org.shiroumi.quant_kmp.ui.agent.theme.AgentTheme
@@ -39,10 +53,13 @@ private const val ClearedHistoryLimit = 8
 /**
  * 持仓跟踪总览列表（左栏 / 移动端默认形态）。
  *
- * 展示最新交易日（或盘中实时日）的持有 / 选股 / 清仓三组列表。
- * 全部盈亏与价格由云端计算下发：持有行 = 成本→现价 + 浮动/最高收益 + 持有天数；
+ * 展示选定观察日（默认最新交易日 / 盘中实时日）的持有 / 选股 / 清仓三组列表，
+ * 顶部日期导航条可在窗口内确认交易日之间翻页。
+ * 全部盈亏与价格由云端计算下发：持有行 = 成本→现价 + 浮动/最高收益 + 持有天数 + 下一卖点；
  * 选股行 = 模型分 + 现价与当日涨跌；清仓行 = 离场原因 + 规则口径已实现收益。
  *
+ * @param observedDate 当前浏览的观察日（yyyy-MM-dd）；null = 跟随最新日。
+ * @param onObservedDateChange 翻页回调；传 null 回到最新日。
  * @param bottomContentPadding 列表底部占位高度——移动端底部常驻全景图按钮悬浮于列表之上，
  *   通过该占位保证末行内容可完整滚出按钮覆盖区。
  */
@@ -53,6 +70,8 @@ internal fun TrackingOverviewListPanel(
     error: String?,
     onRefresh: () -> Unit,
     onStockClick: (StrategyTrackingStockNode, StrategyTrackingSection, String) -> Unit,
+    observedDate: String?,
+    onObservedDateChange: (String?) -> Unit,
     modifier: Modifier = Modifier,
     bottomContentPadding: Dp = 0.dp,
 ) {
@@ -96,6 +115,8 @@ internal fun TrackingOverviewListPanel(
         else -> {
             TrackingOverviewListContent(
                 timeline = timeline,
+                observedDate = observedDate,
+                onObservedDateChange = onObservedDateChange,
                 onStockClick = onStockClick,
                 bottomContentPadding = bottomContentPadding,
                 modifier = modifier,
@@ -107,105 +128,212 @@ internal fun TrackingOverviewListPanel(
 @Composable
 private fun TrackingOverviewListContent(
     timeline: StrategyPositionTrackingTimeline,
+    observedDate: String?,
+    onObservedDateChange: (String?) -> Unit,
     onStockClick: (StrategyTrackingStockNode, StrategyTrackingSection, String) -> Unit,
     bottomContentPadding: Dp,
     modifier: Modifier = Modifier,
 ) {
-    val latestDay = timeline.days.last()
-    val isRealtime = timeline.isRealtimeDay(latestDay)
-    val dateLabel = if (isRealtime) "$TrackingRealtimeDayLabel · 盘中实时" else "${latestDay.tradeDate} · 最新交易日"
-    val dayIndexByDate = timeline.days
-        .mapIndexed { index, day -> day.tradeDate to index }
-        .toMap()
-    val lastDayIndex = timeline.days.lastIndex
-    // 近端清仓记录：从最新日往回收集（含清仓发生日）
-    val recentCleared = timeline.days.asReversed()
+    val days = timeline.days
+    val latestIndex = days.lastIndex
+    // 观察日落点：未指定或越界时回退最新日
+    val observedIndex = observedDate
+        ?.let { date -> days.indexOfLast { it.tradeDate == date }.takeIf { it >= 0 } }
+        ?: latestIndex
+    val observedDay = days[observedIndex]
+    val isRealtime = timeline.isRealtimeDay(observedDay)
+    val isLatest = observedIndex == latestIndex
+
+    // 近端清仓记录：从观察日往回收集（含清仓发生日）
+    val recentCleared = days.take(observedIndex + 1).asReversed()
         .flatMap { day -> day.cleared.map { day.tradeDate to it } }
         .take(ClearedHistoryLimit)
 
-    LazyColumn(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.xs),
-        contentPadding = PaddingValues(bottom = bottomContentPadding),
-    ) {
-        item(key = "overview-date") {
-            Text(
-                text = dateLabel,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(bottom = AgentTheme.Spacing.xs),
-            )
-        }
+    Column(modifier = modifier) {
+        TrackingDateNavigator(
+            label = when {
+                isRealtime -> "$TrackingRealtimeDayLabel · 盘中实时"
+                isLatest -> "${observedDay.tradeDate} · 最新"
+                else -> observedDay.tradeDate
+            },
+            canGoPrev = observedIndex > 0,
+            canGoNext = observedIndex < latestIndex,
+            isLatest = isLatest,
+            onPrev = { onObservedDateChange(days[(observedIndex - 1).coerceAtLeast(0)].tradeDate) },
+            onNext = {
+                val nextIndex = (observedIndex + 1).coerceAtMost(latestIndex)
+                onObservedDateChange(if (nextIndex == latestIndex) null else days[nextIndex].tradeDate)
+            },
+            onJumpLatest = { onObservedDateChange(null) },
+        )
 
-        item(key = "overview-holdings-header") {
-            TrackingListSectionHeader(
-                title = "持有股票",
-                tint = MaterialTheme.colorScheme.primary,
-            )
-        }
-        if (latestDay.holdings.isEmpty()) {
-            item(key = "overview-holdings-empty") { TrackingListEmptyRow("当前空仓") }
-        } else {
-            latestDay.holdings.forEach { node ->
-                item(key = "overview-holding-${node.stockCode}") {
-                    TrackingHoldingListRow(
-                        node = node,
-                        heldTradingDayOrdinal = node.buyDate
-                            ?.let { dayIndexByDate[it] }
-                            ?.let { lastDayIndex - it + 1 },
-                        onClick = { onStockClick(node, StrategyTrackingSection.HOLDINGS, latestDay.tradeDate) },
+        AnimatedContent(
+            targetState = observedDay.tradeDate,
+            transitionSpec = {
+                fadeIn(tween(AgentTheme.Durations.normal)) togetherWith
+                    fadeOut(tween(AgentTheme.Durations.fast))
+            },
+            label = "tracking_list_day",
+        ) { _ ->
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.xs),
+                contentPadding = PaddingValues(
+                    top = AgentTheme.Spacing.sm,
+                    bottom = bottomContentPadding,
+                ),
+            ) {
+                item(key = "holdings-header") {
+                    TrackingListSectionHeader(
+                        title = "持有股票",
+                        tint = MaterialTheme.colorScheme.primary,
                     )
                 }
-            }
-        }
+                if (observedDay.holdings.isEmpty()) {
+                    item(key = "holdings-empty") { TrackingListEmptyRow("当前空仓") }
+                } else {
+                    observedDay.holdings.forEach { node ->
+                        item(key = "holding-${node.stockCode}") {
+                            TrackingHoldingListRow(
+                                node = node,
+                                onClick = { onStockClick(node, StrategyTrackingSection.HOLDINGS, observedDay.tradeDate) },
+                            )
+                        }
+                    }
+                }
 
-        item(key = "overview-selection-header") {
-            TrackingListSectionHeader(
-                title = "选股结果",
-                tint = MaterialTheme.colorScheme.secondary,
-                caption = "次日按波动率优先入场 1 只",
-            )
-        }
-        if (latestDay.selection.isEmpty()) {
-            item(key = "overview-selection-empty") { TrackingListEmptyRow("暂无选股") }
-        } else {
-            latestDay.selection.forEach { node ->
-                item(key = "overview-selection-${node.stockCode}") {
-                    TrackingSelectionListRow(
-                        node = node,
-                        onClick = { onStockClick(node, StrategyTrackingSection.SELECTION, latestDay.tradeDate) },
+                item(key = "selection-header") {
+                    TrackingListSectionHeader(
+                        title = "选股结果",
+                        tint = MaterialTheme.colorScheme.secondary,
+                        caption = "次日按波动率优先入场 1 只",
                     )
                 }
-            }
-        }
+                if (observedDay.selection.isEmpty()) {
+                    item(key = "selection-empty") { TrackingListEmptyRow("暂无选股") }
+                } else {
+                    observedDay.selection.forEach { node ->
+                        item(key = "selection-${node.stockCode}") {
+                            TrackingSelectionListRow(
+                                node = node,
+                                onClick = { onStockClick(node, StrategyTrackingSection.SELECTION, observedDay.tradeDate) },
+                            )
+                        }
+                    }
+                }
 
-        item(key = "overview-cleared-header") {
-            TrackingListSectionHeader(
-                title = "清仓记录",
-                tint = MaterialTheme.colorScheme.tertiary,
-            )
-        }
-        if (recentCleared.isEmpty()) {
-            item(key = "overview-cleared-empty") { TrackingListEmptyRow("窗口内暂无清仓") }
-        } else {
-            recentCleared.forEach { (tradeDate, node) ->
-                item(key = "overview-cleared-$tradeDate-${node.stockCode}") {
-                    TrackingClearedListRow(
-                        node = node,
-                        clearedDate = tradeDate,
-                        onClick = { onStockClick(node, StrategyTrackingSection.CLEARED, tradeDate) },
+                item(key = "cleared-header") {
+                    TrackingListSectionHeader(
+                        title = "清仓记录",
+                        tint = MaterialTheme.colorScheme.tertiary,
                     )
+                }
+                if (recentCleared.isEmpty()) {
+                    item(key = "cleared-empty") { TrackingListEmptyRow("窗口内暂无清仓") }
+                } else {
+                    recentCleared.forEach { (tradeDate, node) ->
+                        item(key = "cleared-$tradeDate-${node.stockCode}") {
+                            TrackingClearedListRow(
+                                node = node,
+                                clearedDate = tradeDate,
+                                onClick = { onStockClick(node, StrategyTrackingSection.CLEARED, tradeDate) },
+                            )
+                        }
+                    }
                 }
             }
         }
     }
 }
 
+/** 日期翻页导航条：‹ 日期 ›，非最新日时附「回到最新」。 */
+@Composable
+private fun TrackingDateNavigator(
+    label: String,
+    canGoPrev: Boolean,
+    canGoNext: Boolean,
+    isLatest: Boolean,
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
+    onJumpLatest: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = AgentTheme.Spacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.sm),
+    ) {
+        NavArrow(
+            icon = Icons.AutoMirrored.Outlined.KeyboardArrowLeft,
+            contentDescription = "前一交易日",
+            enabled = canGoPrev,
+            onClick = onPrev,
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (!isLatest) {
+            Surface(
+                shape = RoundedCornerShape(percent = 50),
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                modifier = Modifier.clip(RoundedCornerShape(percent = 50)).clickable(onClick = onJumpLatest),
+            ) {
+                Text(
+                    text = "回到最新",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                )
+            }
+        }
+        NavArrow(
+            icon = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+            contentDescription = "后一交易日",
+            enabled = canGoNext,
+            onClick = onNext,
+        )
+    }
+}
+
+@Composable
+private fun NavArrow(
+    icon: ImageVector,
+    contentDescription: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val tint = if (enabled) {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+    }
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = tint,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
 @Composable
 private fun TrackingListSectionHeader(
     title: String,
-    tint: androidx.compose.ui.graphics.Color,
+    tint: Color,
     caption: String? = null,
 ) {
     Row(
@@ -244,7 +372,7 @@ private fun TrackingListEmptyRow(text: String) {
         text = text,
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-        modifier = Modifier.padding(horizontal = AgentTheme.Spacing.sm, vertical = AgentTheme.Spacing.xs),
+        modifier = Modifier.padding(horizontal = AgentTheme.Spacing.sm, vertical = AgentTheme.Spacing.sm),
     )
 }
 
@@ -253,71 +381,145 @@ private fun TrackingListRowContainer(
     onClick: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(MaterialTheme.shapes.small)
-            .background(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                shape = MaterialTheme.shapes.small,
-            )
-            .clickable(onClick = onClick)
-            .padding(horizontal = AgentTheme.Spacing.sm, vertical = AgentTheme.Spacing.sm),
+    Surface(
+        onClick = onClick,
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        content()
+        Box(
+            modifier = Modifier.padding(
+                horizontal = AgentTheme.Spacing.md,
+                vertical = AgentTheme.Spacing.md,
+            ),
+        ) {
+            content()
+        }
     }
 }
 
-/** 持有行：名称/代码 + 成本→现价 + 持有天数；右侧浮动收益与持有期最高收益。 */
+/** 持有行：名称/代码 + 成本→现价 + 持有天数；右侧浮动收益与最高收益；底部下一卖点提示。 */
 @Composable
 private fun TrackingHoldingListRow(
     node: StrategyTrackingStockNode,
-    heldTradingDayOrdinal: Int?,
     onClick: () -> Unit,
 ) {
     val pnlRise = MaterialTheme.colorScheme.primary
     val pnlFall = MaterialTheme.colorScheme.tertiary
     TrackingListRowContainer(onClick = onClick) {
+        Column(verticalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.sm)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    TrackingListRowTitle(node = node)
+                    val costToCurrent = buildList {
+                        node.buyPrice?.let { add("成本 ${formatListPrice(it)}") }
+                        node.currentPrice?.let { add("现价 ${formatListPrice(it)}") }
+                    }.joinToString(" · ")
+                    if (costToCurrent.isNotEmpty()) {
+                        Text(
+                            text = costToCurrent,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    node.actualPnl?.let {
+                        Text(
+                            text = formatPnlPercent(it),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = if (it >= 0) pnlRise else pnlFall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    node.maxPnl?.let {
+                        Text(
+                            text = "最高 ${formatPnlPercent(it)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = (if (it >= 0) pnlRise else pnlFall).copy(alpha = 0.65f),
+                        )
+                    }
+                }
+            }
+            node.nextExit?.let { NextExitStrip(it) }
+        }
+    }
+}
+
+/** 下一卖点提示条：止盈价 / 保盈价 / 到期日，弱化容器内呈现。 */
+@Composable
+private fun NextExitStrip(nextExit: StrategyTrackingNextExit) {
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.padding(horizontal = AgentTheme.Spacing.sm, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.md),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                TrackingListRowTitle(node = node)
-                val costToCurrent = buildList {
-                    node.buyPrice?.let { add("成本 ${formatListPrice(it)}") }
-                    node.currentPrice?.let { add("现价 ${formatListPrice(it)}") }
-                    heldTradingDayOrdinal?.let { add("持有第${it}日") }
-                }.joinToString(" · ")
-                if (costToCurrent.isNotEmpty()) {
-                    Text(
-                        text = costToCurrent,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+            NextExitItem(
+                icon = Icons.Outlined.Bolt,
+                label = "止盈",
+                value = formatListPrice(nextExit.takeProfitPrice),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            nextExit.profitProtectPrice?.let {
+                NextExitItem(
+                    icon = Icons.Outlined.Shield,
+                    label = "保盈",
+                    value = formatListPrice(it),
+                    tint = MaterialTheme.colorScheme.secondary,
+                )
             }
-            Column(horizontalAlignment = Alignment.End) {
-                node.actualPnl?.let {
-                    Text(
-                        text = formatPnlPercent(it),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = if (it >= 0) pnlRise else pnlFall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                node.maxPnl?.let {
-                    Text(
-                        text = "最高 ${formatPnlPercent(it)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = (if (it >= 0) pnlRise else pnlFall).copy(alpha = 0.65f),
-                    )
-                }
+            nextExit.timeStopDate?.let { date ->
+                val remaining = nextExit.timeStopInTradingDays
+                NextExitItem(
+                    icon = Icons.Outlined.Schedule,
+                    label = "到期",
+                    value = if (remaining != null && remaining <= 0) "明日" else date.takeLast(5),
+                    tint = MaterialTheme.colorScheme.tertiary,
+                )
             }
         }
+    }
+}
+
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.NextExitItem(
+    icon: ImageVector,
+    label: String,
+    value: String,
+    tint: Color,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = tint,
+            modifier = Modifier.size(13.dp),
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
     }
 }
 
@@ -333,21 +535,21 @@ private fun TrackingSelectionListRow(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 TrackingListRowTitle(node = node)
                 node.modelScore?.let {
                     Text(
                         text = "模型分 ${formatModelScore(it)}",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
-            Column(horizontalAlignment = Alignment.End) {
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 node.currentPrice?.let {
                     Text(
                         text = formatListPrice(it),
-                        style = MaterialTheme.typography.titleSmall,
+                        style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -355,7 +557,7 @@ private fun TrackingSelectionListRow(
                 node.dayChangePct?.let {
                     Text(
                         text = formatPnlPercent(it),
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelMedium,
                         color = when {
                             it > 0f -> MaterialTheme.quantColors.bullish
                             it < 0f -> MaterialTheme.quantColors.bearish
@@ -383,20 +585,20 @@ private fun TrackingClearedListRow(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 TrackingListRowTitle(node = node)
                 Text(
                     text = "清仓 $clearedDate",
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Column(horizontalAlignment = Alignment.End) {
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 val realizedPnl = node.exitPnl ?: node.actualPnl
                 realizedPnl?.let {
                     Text(
                         text = formatPnlPercent(it),
-                        style = MaterialTheme.typography.titleSmall,
+                        style = MaterialTheme.typography.titleMedium,
                         color = if (it >= 0) pnlRise else pnlFall,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -422,7 +624,7 @@ private fun TrackingListRowTitle(node: StrategyTrackingStockNode) {
     ) {
         Text(
             text = node.stockName,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodyLarge,
             fontWeight = FontWeight.Medium,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,

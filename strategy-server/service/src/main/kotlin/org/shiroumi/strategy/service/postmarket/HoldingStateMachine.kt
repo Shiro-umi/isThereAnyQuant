@@ -34,6 +34,9 @@ class HoldingStateMachine(
     /** 每日入场上限是否开启（调用方据此决定是否计算 [EntryCandidate.entryPriority]）。 */
     val entryCapEnabled: Boolean get() = config.maxDailyEntries > 0
 
+    /** 当前生效的止盈止损规则（只读视图），供展示链路推导「下一个可执行卖点」。 */
+    val rules: ExitRules get() = config
+
     /**
      * 止盈止损与入场规则配置，数值默认对齐 tp8/u25/H3 生产运营点（2026-06-13 实装）。
      * 选点依据：exit-policy 研究终局（私有仓 exit-policy-paper-20260613.html）——

@@ -132,6 +132,16 @@ class StrategyPositionTrackingRuntimeTest {
         assertEquals(StrategyTrackingSection.HOLDINGS, holdEdge.fromSection)
         assertEquals(2.0f, assertNotNull(holdEdge.pnlPct), absoluteTolerance = 0.01f)
 
+        // 下一卖点（最新观察日持仓）：000005.SZ 成本=day1 开盘 49，TP7% → 止盈价 52.43；
+        // V5 预设含 1~4 档 2.5% 阶梯，daysSinceEntry=1 命中保盈价 49×1.025=50.225；
+        // 时间止损剩余 = timeStopDays(5) - 1 - daysSinceEntry(1) = 3 个交易日
+        val holdingNext = assertNotNull(
+            payload.days.last().holdings.singleOrNull { it.stockCode == "000005.SZ" }?.nextExit
+        )
+        assertEquals(52.43f, holdingNext.takeProfitPrice, absoluteTolerance = 0.01f)
+        assertEquals(50.225f, assertNotNull(holdingNext.profitProtectPrice), absoluteTolerance = 0.01f)
+        assertEquals(3, holdingNext.timeStopInTradingDays)
+
         runtime.publishFromPositions(
             StrategyPositionSnapshot(
                 tradeDate = day2.toString(),
@@ -342,6 +352,12 @@ private class FakeTrackingDataSource(
 
     override fun tradingDaysSince(entryDate: LocalDate, date: LocalDate): Int =
         tradeDates.count { it > entryDate && it <= date }
+
+    override fun tradingDayAfter(date: LocalDate, tradingDays: Int): LocalDate? {
+        if (tradingDays <= 0) return date
+        val ordered = tradeDates.filter { it >= date }.sorted()
+        return ordered.getOrNull(tradingDays)
+    }
 
     override fun loadSelectionsByTargetDate(targetDate: LocalDate): List<ProfitPredictionSelection> =
         selectionsByTradeDate.values.flatten().filter { it.targetDate == targetDate }

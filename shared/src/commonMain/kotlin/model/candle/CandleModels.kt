@@ -187,6 +187,30 @@ data class StrategyTrackingStockNode(
     val exitReason: StrategyTrackingExitReason? = null,
     /** 清仓节点：规则口径已实现收益 %（止盈/保盈按触价、到期按收盘）。 */
     val exitPnl: Float? = null,
+    /** 持有节点：下一个可执行卖点提示，服务端按当前持仓规则推导。 */
+    val nextExit: StrategyTrackingNextExit? = null,
+)
+
+/**
+ * 持有节点的「下一个可执行卖点」提示，由 strategy-service 按生产持仓规则
+ * （[StrategyTrackingExitReason] 同源优先级）推导。前端只负责展示。
+ *
+ * 业务语义：站在观察日收盘，告诉用户次个交易日这只持仓会在哪些价位 / 哪一天触发离场。
+ * - 止盈：[takeProfitPrice] 永远存在（持仓期内任一日 HIGH 触达即止盈）。
+ * - 保盈阶梯：[profitProtectPrice] 仅当次个可卖日命中阶梯档位时存在。
+ * - 时间止损：[timeStopDate] 为强制收盘离场的交易日；[timeStopInTradingDays] 为距该日的交易日数
+ *   （0 = 次个交易日即强平）。
+ */
+@Serializable
+data class StrategyTrackingNextExit(
+    /** 止盈触发价（入场价 ×(1+止盈比例)）。 */
+    val takeProfitPrice: Float,
+    /** 次个可卖日的保盈阶梯触发价；无阶梯档位时为 null。 */
+    val profitProtectPrice: Float? = null,
+    /** 时间止损强平日（yyyy-MM-dd）；超出已知交易日历时为 null。 */
+    val timeStopDate: String? = null,
+    /** 距时间止损强平日的交易日数（0 = 次个交易日强平）。 */
+    val timeStopInTradingDays: Int? = null,
 )
 
 /** 流转边类型：跨日持有主干 / 选股→次日买入 / 持有→清仓。 */

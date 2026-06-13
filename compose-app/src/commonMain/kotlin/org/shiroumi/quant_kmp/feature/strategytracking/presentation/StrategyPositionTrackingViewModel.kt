@@ -22,6 +22,7 @@ import model.candle.StrategyTrackingSection
 import model.candle.StrategyTrackingStockNode
 import org.shiroumi.quant_kmp.feature.candle.domain.repository.CandleRepository
 import org.shiroumi.quant_kmp.feature.strategytracking.data.StrategyTrackingRepository
+import org.shiroumi.quant_kmp.feature.strategytracking.data.TrackingCalibrationStore
 import org.shiroumi.quant_kmp.service.GlobalWebSocketClient
 import kotlin.uuid.ExperimentalUuidApi
 
@@ -95,12 +96,20 @@ class StrategyPositionTrackingViewModel(
     private val _calibration = MutableStateFlow<TrackingCalibration?>(null)
     val calibration: StateFlow<TrackingCalibration?> = _calibration.asStateFlow()
 
+    /**
+     * 列表浏览的观察日（yyyy-MM-dd）。null = 跟随最新日（默认）。
+     * 列表面板据此翻页展示窗口内任意确认交易日的持有/选股/清仓三列；全景流转图不受影响。
+     */
+    private val _listObservedDate = MutableStateFlow<String?>(null)
+    val listObservedDate: StateFlow<String?> = _listObservedDate.asStateFlow()
+
     private var detailLoadJob: Job? = null
     private var calibrationLoadJob: Job? = null
     private val stockInfoCache = linkedMapOf<String, StockInfo>()
 
     init {
         observeStrategyPositionTracking()
+        restorePersistedCalibration()
     }
 
     fun refresh() {
@@ -108,16 +117,41 @@ class StrategyPositionTrackingViewModel(
         _calibration.value?.let { loadCalibration(it.followStartDate, keepCurrentTimeline = true) }
     }
 
-    /** 激活最早跟随日校准：以 [followStartDate] 为第一笔跟随买入日拉取重放视图。 */
+    /** 切换列表浏览观察日；传 null 回到最新日。校准/模型流共用，仅影响列表面板。 */
+    fun selectListObservedDate(tradeDate: String?) {
+        _listObservedDate.value = tradeDate
+    }
+
+    /** 激活最早跟随日校准：以 [followStartDate] 为第一笔跟随买入日拉取重放视图，并持久化用户声明。 */
     fun calibrateFollowStart(followStartDate: String) {
         _calibration.value = TrackingCalibration(followStartDate = followStartDate)
+        _listObservedDate.value = null
+        persistCalibration(followStartDate)
         loadCalibration(followStartDate, keepCurrentTimeline = false)
     }
 
-    /** 清除校准，回到模型自身持仓流。 */
+    /** 清除校准，回到模型自身持仓流，并清除持久化声明。 */
     fun clearCalibration() {
         calibrationLoadJob?.cancel()
         _calibration.value = null
+        _listObservedDate.value = null
+        persistCalibration(null)
+    }
+
+    /** 启动时恢复持久化的跟随起始日声明；空串/未设置则保持跟随全程。 */
+    private fun restorePersistedCalibration() {
+        viewModelScope.launch {
+            val persisted = TrackingCalibrationStore.load()?.takeIf { it.isNotBlank() } ?: return@launch
+            // 仅当尚未有活跃校准（避免覆盖会话内用户新选择）时恢复
+            if (_calibration.value == null) {
+                _calibration.value = TrackingCalibration(followStartDate = persisted)
+                loadCalibration(persisted, keepCurrentTimeline = false)
+            }
+        }
+    }
+
+    private fun persistCalibration(followStartDate: String?) {
+        viewModelScope.launch { TrackingCalibrationStore.save(followStartDate) }
     }
 
     private fun loadCalibration(followStartDate: String, keepCurrentTimeline: Boolean) {

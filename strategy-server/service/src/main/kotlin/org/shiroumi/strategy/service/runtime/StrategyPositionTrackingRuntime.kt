@@ -1,6 +1,8 @@
 package org.shiroumi.strategy.service.runtime
 
+import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.plus
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.decodeFromJsonElement
@@ -11,6 +13,7 @@ import model.candle.StrategyPositionTrackingResponse
 import model.candle.StrategyTrackingEdge
 import model.candle.StrategyTrackingEdgeKind
 import model.candle.StrategyTrackingExitReason
+import model.candle.StrategyTrackingNextExit
 import model.candle.StrategyTrackingSection
 import model.candle.StrategyTrackingStockNode
 import model.ws.PositionSource
@@ -379,7 +382,9 @@ class StrategyPositionTrackingRuntime(
                     fillSelectionQuote(node, observationDate, previousDate, candles)
                 },
                 holdings = day.holdings.map { node ->
-                    fillPnl(node, node.buyDate?.let(LocalDate::parse), observationDate, candles)
+                    val filled = fillPnl(node, node.buyDate?.let(LocalDate::parse), observationDate, candles)
+                    // 仅对最新观察日的在手持仓推导「下一个可执行卖点」（历史日持仓已成既往，不需提示）
+                    if (index == days.lastIndex) fillNextExit(filled, observationDate) else filled
                 },
                 cleared = day.cleared.map { node ->
                     val filled = fillPnl(node, node.buyDate?.let(LocalDate::parse), observationDate, candles)
@@ -433,6 +438,43 @@ class StrategyPositionTrackingRuntime(
     @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
     private fun Candle.asRawBar(): Candle =
         copy(openQfq = 0f, highQfq = 0f, lowQfq = 0f, closeQfq = 0f)
+
+    /**
+     * 持有节点：按当前生效的持仓规则推导「下一个可执行卖点」。
+     *
+     * 站在观察日收盘视角，次个可卖日 = daysSinceEntry + 1：
+     * - 止盈价恒存在（持仓期内任一日 HIGH 触达即止盈）；
+     * - 保盈价仅当次个可卖日命中阶梯档位时存在；
+     * - 时间止损日 = 入场后第 timeStopDays 个交易日，由交易日历前推得到。
+     *
+     * 价格基准与持有节点展示口径一致：入场价取信号窗内入场日开盘（QFQ 优先，[fillPnl] 同源），
+     * 触发价为入场价乘以规则比例。
+     */
+    private fun fillNextExit(
+        node: StrategyTrackingStockNode,
+        observationDate: LocalDate,
+    ): StrategyTrackingStockNode {
+        val buyDate = node.buyDate?.let(LocalDate::parse) ?: return node
+        val entryPrice = node.buyPrice?.takeIf { it > 0f } ?: return node
+        val rules = holdingStateMachine.rules
+        val daysSinceEntry = dataSource.tradingDaysSince(buyDate, observationDate)
+        // 次个可卖日距入场的交易日序号（1 = 入场次日首个可卖日）
+        val nextSellOrdinal = (daysSinceEntry + 1).coerceAtLeast(1)
+        val takeProfitPrice = entryPrice * (1.0 + rules.takeProfitPct).toFloat()
+        val profitProtectPrice = rules.profitProtectLadder[nextSellOrdinal]
+            ?.let { lv -> entryPrice * (1.0 + lv).toFloat() }
+        // 时间止损：入场后第 timeStopDays 个交易日收盘强平；距今交易日数 = timeStopDays - 1 - daysSinceEntry
+        val timeStopRemaining = (rules.timeStopDays - 1 - daysSinceEntry).coerceAtLeast(0)
+        val timeStopDate = dataSource.tradingDayAfter(observationDate, timeStopRemaining)
+        return node.copy(
+            nextExit = StrategyTrackingNextExit(
+                takeProfitPrice = takeProfitPrice,
+                profitProtectPrice = profitProtectPrice,
+                timeStopDate = timeStopDate?.toString(),
+                timeStopInTradingDays = timeStopRemaining,
+            )
+        )
+    }
 
     /** 选股节点：观察日价格与当日涨跌幅（盘中实时日即实时价/实时涨跌）。 */
     private fun fillSelectionQuote(
@@ -553,6 +595,8 @@ interface StrategyPositionTrackingDataSource {
     fun loadCandles(tsCodes: List<String>, startDate: LocalDate, endDate: LocalDate): Map<String, Map<LocalDate, Candle>>
     /** 交易日间隔（不含 start，含 end），口径必须与生产状态机推进一致。 */
     fun tradingDaysSince(entryDate: LocalDate, date: LocalDate): Int
+    /** 从 [date] 向后第 [tradingDays] 个交易日（0 = [date] 当日）；超出已知日历返回 null。 */
+    fun tradingDayAfter(date: LocalDate, tradingDays: Int): LocalDate?
     /** 校准重放入场候选：target_date = [targetDate] 的 selected 票（与盘后状态机推进同一来源），行自带信号日 tradeDate。 */
     fun loadSelectionsByTargetDate(targetDate: LocalDate): List<ProfitPredictionSelection>
     /** 入场优先级（信号日 20 日对数收益波动率），口径必须与盘后状态机推进一致。 */
@@ -586,6 +630,13 @@ object DefaultStrategyPositionTrackingDataSource : StrategyPositionTrackingDataS
     override fun tradingDaysSince(entryDate: LocalDate, date: LocalDate): Int =
         if (date <= entryDate) 0
         else (TradingCalendarRepository.findOpenDates(entryDate, date).size - 1).coerceAtLeast(0)
+
+    override fun tradingDayAfter(date: LocalDate, tradingDays: Int): LocalDate? {
+        if (tradingDays <= 0) return date
+        // 含自然日缓冲（周末 + 法定假期）足够覆盖 tradingDays 个交易日
+        val upper = date.plus(DatePeriod(days = tradingDays * 2 + 14))
+        return TradingCalendarRepository.findOpenDates(date, upper).getOrNull(tradingDays)
+    }
 
     override fun loadSelectionsByTargetDate(targetDate: LocalDate): List<ProfitPredictionSelection> =
         DailyProfitPredictionSelectionRepository.findSelectionsByTargetDate(targetDate)

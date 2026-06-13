@@ -183,6 +183,7 @@ fun StrategyPositionTrackingScreen(
     val selectedStock by viewModel.selectedStock.collectAsState()
     val selectedDetail by viewModel.selectedDetail.collectAsState()
     val calibration by viewModel.calibration.collectAsState()
+    val listObservedDate by viewModel.listObservedDate.collectAsState()
     // 校准激活时渲染跟随者视角重放流，模型自身流仍在后台随 WS 更新
     val activeCalibration = calibration
     val displayTimeline = if (activeCalibration != null) activeCalibration.timeline else timeline
@@ -326,6 +327,8 @@ fun StrategyPositionTrackingScreen(
                                             error = displayError,
                                             onRefresh = viewModel::refresh,
                                             onStockClick = onStockClick,
+                                            observedDate = listObservedDate,
+                                            onObservedDateChange = viewModel::selectListObservedDate,
                                             modifier = Modifier
                                                 .width(AgentTheme.Sizing.sidePanelWidthMax)
                                                 .fillMaxHeight(),
@@ -391,6 +394,8 @@ fun StrategyPositionTrackingScreen(
                                                     error = displayError,
                                                     onRefresh = viewModel::refresh,
                                                     onStockClick = onStockClick,
+                                                    observedDate = listObservedDate,
+                                                    onObservedDateChange = viewModel::selectListObservedDate,
                                                     // 列表底部为全景图按钮预留占位空间，避免末行被常驻按钮遮挡
                                                     bottomContentPadding = TrackingPanoramaButtonReserve,
                                                     modifier = Modifier
