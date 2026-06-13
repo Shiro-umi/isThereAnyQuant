@@ -34,7 +34,8 @@ class StrategyPositionTrackingRuntimeTest {
         val runtime = StrategyPositionTrackingRuntime(
             snapshotHub = hub,
             json = json,
-            exitRules = org.shiroumi.strategy.service.postmarket.HoldingStateMachine.ExitRules(),
+            // 钉住 v5 快线旧运营点预设：本测试验证“服务端按规则重建判决”的机制，断言围绕 TP7%/H5 语义编写
+            exitRules = org.shiroumi.strategy.service.postmarket.HoldingStateMachine.ExitRules.V5_FAST_TP7_H5,
             dataSource = FakeTrackingDataSource(
                 audits = listOf(
                     audit(day2, currentPositions = listOf("000002.SZ")),

@@ -26,8 +26,11 @@ class HoldingStateMachineTest {
     private val d3 = openDates[2]
     private val d4 = openDates[3]
 
-    /** 生产默认规则 = v5 快线：止盈 7% / 时间止损 5 交易日 / 保盈阶梯全档 2.5% / 每日入场上限 1。 */
-    private val machine = HoldingStateMachine()
+    /** v5 快线旧运营点（影子/回滚预设）：止盈 7% / 时间止损 5 交易日 / 阶梯 1~4 日 2.5% / 每日入场上限 1。 */
+    private val machine = HoldingStateMachine(HoldingStateMachine.ExitRules.V5_FAST_TP7_H5)
+
+    /** 现行生产默认 = tp8/u25/H3：止盈 8% / 时间止损 3 交易日 / 阶梯 1~2 日 2.5% / 每日入场上限 1。 */
+    private val prodMachine = HoldingStateMachine()
 
     /** V3 运营点（回滚通道）：止盈 5% / 时间止损 15 交易日 / 无阶梯 / 全入场。 */
     private val v3Machine = HoldingStateMachine(HoldingStateMachine.ExitRules.V3_OPERATING_POINT)
@@ -57,14 +60,54 @@ class HoldingStateMachineTest {
         )
 
     @Test
-    fun `生产默认运营点_v5快线参数`() {
+    fun `生产默认运营点_tp8_u25_H3参数`() {
         val rules = HoldingStateMachine.ExitRules()
-        assertEquals(0.07, rules.takeProfitPct)
-        assertEquals(5, rules.timeStopDays)
+        assertEquals(0.08, rules.takeProfitPct)
+        assertEquals(3, rules.timeStopDays)
         assertEquals(false, rules.priceStopEnabled)
         assertEquals(0.03, rules.entryGapMaxPct)
+        assertEquals(mapOf(1 to 0.025, 2 to 0.025), rules.profitProtectLadder)
+        assertEquals(1, rules.maxDailyEntries)
+    }
+
+    @Test
+    fun `影子预设_v5快线旧运营点参数`() {
+        val rules = HoldingStateMachine.ExitRules.V5_FAST_TP7_H5
+        assertEquals(0.07, rules.takeProfitPct)
+        assertEquals(5, rules.timeStopDays)
         assertEquals(mapOf(1 to 0.025, 2 to 0.025, 3 to 0.025, 4 to 0.025), rules.profitProtectLadder)
         assertEquals(1, rules.maxDailyEntries)
+    }
+
+    @Test
+    fun `止盈_tp8默认入场次日HIGH触及8pct离场_7pct不触发止盈但触发阶梯`() {
+        // A 于 d2 入场价 10；d3 HIGH 10.8 触及 +8% → TAKE_PROFIT（max(开盘,10.8)=10.8）
+        val prior = listOf(DailyHoldingState(d2, "A.SZ", entryDate = d2, entryPrice = 10.0, signalDateLow = 9.0))
+        val tpBar = mapOf("A.SZ" to candle(open = 10.2f, high = 10.8f, low = 10.1f, close = 10.6f))
+        val verdict = prodMachine.evaluateExit(prior.first(), d3, tpBar.getValue("A.SZ"), ::tradingDaysSince)
+        assertEquals(HoldingStateMachine.ExitReason.TAKE_PROFIT, verdict?.reason)
+        assertEquals(10.8, verdict!!.exitPrice, 1e-6)
+        // HIGH 10.7 未及 +8% → 落入 2.5% 阶梯（PROFIT_PROTECT @10.25）
+        val ladderBar = candle(open = 10.1f, high = 10.7f, low = 10.0f, close = 10.5f)
+        val verdict2 = prodMachine.evaluateExit(prior.first(), d3, ladderBar, ::tradingDaysSince)
+        assertEquals(HoldingStateMachine.ExitReason.PROFIT_PROTECT, verdict2?.reason)
+        assertEquals(10.25, verdict2!!.exitPrice, 1e-6)
+    }
+
+    @Test
+    fun `时间止损_tp8默认第3个交易日收盘强平`() {
+        // B 于 d2 入场；d4（daysSinceEntry=2 = timeStopDays-1）收盘强平
+        val prior = listOf(DailyHoldingState(d3, "B.SZ", entryDate = d2, entryPrice = 20.0, signalDateLow = 18.0))
+        val bar = candle(open = 19.8f, high = 20.0f, low = 19.5f, close = 19.7f)
+        val verdict = prodMachine.evaluateExit(prior.first(), d4, bar, ::tradingDaysSince)
+        assertEquals(HoldingStateMachine.ExitReason.TIME_STOP, verdict?.reason)
+        assertEquals(19.7, verdict!!.exitPrice, 1e-4)
+        // d3（daysSinceEntry=1）同样平淡的 K 线不触发时间止损
+        val verdictEarly = prodMachine.evaluateExit(
+            DailyHoldingState(d2, "B.SZ", entryDate = d2, entryPrice = 20.0, signalDateLow = 18.0),
+            d3, bar, ::tradingDaysSince,
+        )
+        assertEquals(null, verdictEarly)
     }
 
     @Test

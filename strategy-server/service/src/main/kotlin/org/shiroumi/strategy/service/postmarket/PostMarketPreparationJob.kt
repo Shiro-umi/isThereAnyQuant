@@ -82,6 +82,10 @@ object PostMarketPreparationJob {
         }
     )
 
+    // 影子对照：旧运营点 tp7/u25/H5 同步推演（只比对记录，不落库、不影响生产持仓）。
+    // 目的：验证 tp8/u25/H3 切换（2026-06-13）的回测增益在实盘逐日复现；改善衰减过半即回滚。
+    private val shadowStateMachine = HoldingStateMachine(HoldingStateMachine.ExitRules.V5_FAST_TP7_H5)
+
     suspend fun run(
         tradeDate: LocalDate,
         startDate: LocalDate,
@@ -493,18 +497,54 @@ object PostMarketPreparationJob {
                 )
             }
 
-        return holdingStateMachine.advance(
+        val tradingDaysSince: (LocalDate, LocalDate) -> Int = { entryDate, date ->
+            if (date <= entryDate) 0
+            else (TradingCalendarRepository.findOpenDates(entryDate, date).size - 1).coerceAtLeast(0)
+        }
+        val candleFor: (String, LocalDate) -> model.Candle? = { tsCode, date ->
+            if (date == tradeDate) todayCandles[tsCode] else null
+        }
+        val result = holdingStateMachine.advance(
             tradeDate = tradeDate,
             previousHoldings = previousHoldings,
             newEntries = newEntries,
-            tradingDaysSince = { entryDate, date ->
-                if (date <= entryDate) 0
-                else (TradingCalendarRepository.findOpenDates(entryDate, date).size - 1).coerceAtLeast(0)
-            },
-            candleFor = { tsCode, date ->
-                if (date == tradeDate) todayCandles[tsCode] else null
-            },
+            tradingDaysSince = tradingDaysSince,
+            candleFor = candleFor,
         )
+        logShadowDivergence(tradeDate, previousHoldings, newEntries, tradingDaysSince, candleFor, result)
+        return result
+    }
+
+    /**
+     * 影子对照（tp8/u25/H3 现行 vs tp7/u25/H5 旧运营点）：对同一份生产持仓做单日双判决并记录分歧。
+     * 仅日志不落库；完整反事实收益对照由研究侧离线重放（同一入场流可随时从
+     * `daily_profit_prediction_selection` + 日线全量重建），在线影子只负责逐日分歧可见性。
+     */
+    private fun logShadowDivergence(
+        tradeDate: LocalDate,
+        previousHoldings: List<DailyHoldingState>,
+        newEntries: List<HoldingStateMachine.EntryCandidate>,
+        tradingDaysSince: (LocalDate, LocalDate) -> Int,
+        candleFor: (String, LocalDate) -> model.Candle?,
+        prodResult: HoldingStateMachine.DayResult,
+    ) {
+        runCatching {
+            val shadow = shadowStateMachine.advance(
+                tradeDate = tradeDate,
+                previousHoldings = previousHoldings,
+                newEntries = newEntries,
+                tradingDaysSince = tradingDaysSince,
+                candleFor = candleFor,
+            )
+            val prodExits = prodResult.exited.toSet()
+            val shadowExits = shadow.exited.toSet()
+            val onlyProd = prodExits - shadowExits
+            val onlyShadow = shadowExits - prodExits
+            logger.info(
+                "[影子对照] tradeDate=$tradeDate 生产tp8H3离场=${prodExits.size} 影子tp7H5离场=${shadowExits.size}" +
+                    " 仅生产离场=${onlyProd.ifEmpty { setOf("无") }} 仅影子离场=${onlyShadow.ifEmpty { setOf("无") }}"
+            )
+        }.onFailure { logger.warning("[影子对照] 推演失败（不影响生产链路）| ${it.message}") }
     }
 
     /**

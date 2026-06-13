@@ -34,19 +34,24 @@ class HoldingStateMachine(
     /** 每日入场上限是否开启（调用方据此决定是否计算 [EntryCandidate.entryPriority]）。 */
     val entryCapEnabled: Boolean get() = config.maxDailyEntries > 0
 
-    /** 止盈止损与入场规则配置，数值默认对齐 v5 快线生产运营点（2026-06-12 实装）。 */
+    /**
+     * 止盈止损与入场规则配置，数值默认对齐 tp8/u25/H3 生产运营点（2026-06-13 实装）。
+     * 选点依据：exit-policy 研究终局（私有仓 exit-policy-paper-20260613.html）——
+     * 生产语义重放下对 tp7/u25/H5 旧运营点 EV +0.12pp、巨亏 -43%（分年全降）、
+     * 对 tp7/u25/H3 分年 7/7 全升且分板块双升；止盈档位只动赢家上行，尾部由阶梯+H3 持有。
+     */
     data class ExitRules(
-        val takeProfitPct: Double = 0.07,
-        val timeStopDays: Int = 5,
+        val takeProfitPct: Double = 0.08,
+        val timeStopDays: Int = 3,
         val priceStopEnabled: Boolean = false,
         /** 入场跳空上限：开盘价较信号日收盘价的涨幅超过该值时放弃入场。非正数表示关闭过滤。 */
         val entryGapMaxPct: Double = 0.03,
         /**
          * 保盈阶梯：key = 入场后第 N 个可交易日（daysSinceEntry，1 = 入场次日即首个可卖日），
          * value = 当日 HIGH 触及 入场价 ×(1+value) 即离场的保盈档位。空表示关闭。
-         * 默认 = v5 快线全档 2.5%（H5 周期内 1~4 日，第 5 日为时间止损日）。
+         * 默认 = 全档 2.5%（H3 周期内 1~2 日，第 3 日为时间止损日）。
          */
-        val profitProtectLadder: Map<Int, Double> = mapOf(1 to 0.025, 2 to 0.025, 3 to 0.025, 4 to 0.025),
+        val profitProtectLadder: Map<Int, Double> = mapOf(1 to 0.025, 2 to 0.025),
         /**
          * 每日新入场上限：默认 1（每日 Top5 仅入场 entryPriority 最高的一只，
          * Top5 全入场实测稀释 4pp 胜率）；0 表示不限（V3 行为，目标组合全入场）。
@@ -54,7 +59,7 @@ class HoldingStateMachine(
         val maxDailyEntries: Int = 1,
     ) {
         companion object {
-            /** V3 正式版运营点（TP5%/H15/无阶梯/全入场）——回滚通道。 */
+            /** V3 正式版运营点（TP5%/H15/无阶梯/全入场）——历史回滚通道。 */
             val V3_OPERATING_POINT = ExitRules(
                 takeProfitPct = 0.05,
                 timeStopDays = 15,
@@ -63,15 +68,24 @@ class HoldingStateMachine(
             )
 
             /**
+             * v5 快线旧运营点（TP7%/H5/全档 2.5% 阶梯/每日入场 1，2026-06-12~13 生产默认）。
+             * 用途：①回滚通道；②盘后影子对照基准（与现行 tp8/H3 双判决对比，验证切换增益在实盘复现）。
+             */
+            val V5_FAST_TP7_H5 = ExitRules(
+                takeProfitPct = 0.07,
+                timeStopDays = 5,
+                profitProtectLadder = mapOf(1 to 0.025, 2 to 0.025, 3 to 0.025, 4 to 0.025),
+            )
+
+            /**
              * 从系统属性装配持仓规则；全部缺省时与 `ExitRules()` 默认值一致
-             * （v5 快线运营点：TP7%/H5/全档 2.5% 阶梯/每日入场 1，2026-06-12 实装为生产默认）。
+             * （tp8/u25/H3 运营点：TP8%/H3/1~2 日 2.5% 阶梯/每日入场 1，2026-06-13 实装为生产默认）。
              * 盘后状态机推进与持仓跟踪展示链路共用同一装配入口，保证两侧规则口径一致。
              *
-             * 回滚到 [V3_OPERATING_POINT] 的覆盖示例：
-             * -Dquant.strategy.holding.takeProfitPct=0.05
-             * -Dquant.strategy.holding.timeStopDays=15
-             * -Dquant.strategy.holding.profitProtectLadder=    （空值 = 关闭阶梯）
-             * -Dquant.strategy.holding.maxDailyEntries=0
+             * 回滚到 [V5_FAST_TP7_H5] 的覆盖示例：
+             * -Dquant.strategy.holding.takeProfitPct=0.07
+             * -Dquant.strategy.holding.timeStopDays=5
+             * -Dquant.strategy.holding.profitProtectLadder=1:0.025,2:0.025,3:0.025,4:0.025
              */
             fun fromSystemProperties(): ExitRules {
                 val defaults = ExitRules()
