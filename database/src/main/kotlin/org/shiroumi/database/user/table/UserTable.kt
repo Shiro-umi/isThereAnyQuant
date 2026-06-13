@@ -31,6 +31,9 @@ object UserTable : UUIDTable("sys_user") {
     /** 账户锁定截止时间，null 表示未锁定 */
     val lockedUntil = datetime("locked_until").nullable()
 
+    /** 持仓跟踪最早跟随日校准（yyyy-MM-dd），null 表示跟随模型完整持仓流 */
+    val trackingFollowStartDate = varchar("tracking_follow_start_date", 10).nullable()
+
     /** 记录创建时间 */
     val createdAt = datetime("created_at").defaultExpression(CurrentDateTime)
 

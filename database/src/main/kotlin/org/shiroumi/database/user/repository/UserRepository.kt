@@ -151,6 +151,36 @@ class UserRepository(private val db: Database) {
             }
         }
 
+    /**
+     * 获取持仓跟踪最早跟随日校准（yyyy-MM-dd）
+     *
+     * @param userId 用户 UUID
+     * @return 最早跟随日，null 表示跟随模型完整持仓流
+     */
+    suspend fun getTrackingFollowStartDate(userId: UUID): String? =
+        newSuspendedTransaction(Dispatchers.IO, db) {
+            UserTable.selectAll()
+                .where { UserTable.id eq userId }
+                .firstOrNull()
+                ?.get(UserTable.trackingFollowStartDate)
+        }
+
+    /**
+     * 设置持仓跟踪最早跟随日校准（yyyy-MM-dd）
+     *
+     * @param userId 用户 UUID
+     * @param followStartDate 最早跟随日，null 表示跟随模型完整持仓流
+     */
+    suspend fun setTrackingFollowStartDate(userId: UUID, followStartDate: String?) {
+        newSuspendedTransaction(Dispatchers.IO, db) {
+            val now = kotlin.time.Clock.System.now().toLocalDateTime(TimeZone.UTC)
+            UserTable.update({ UserTable.id eq userId }) {
+                it[trackingFollowStartDate] = followStartDate
+                it[updatedAt] = now
+            }
+        }
+    }
+
     // ==================== 私有扩展函数 ====================
 
     private fun ResultRow.toUserModel(): UserModel = UserModel(
@@ -161,6 +191,7 @@ class UserRepository(private val db: Database) {
         isActive = this[UserTable.isActive],
         failedLoginAttempts = this[UserTable.failedLoginAttempts],
         lockedUntil = this[UserTable.lockedUntil],
+        trackingFollowStartDate = this[UserTable.trackingFollowStartDate],
         createdAt = this[UserTable.createdAt],
         updatedAt = this[UserTable.updatedAt],
     )

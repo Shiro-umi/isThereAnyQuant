@@ -15,6 +15,7 @@ import java.util.UUID
  * @property isActive 账户是否处于激活状态
  * @property failedLoginAttempts 连续登录失败次数
  * @property lockedUntil 账户锁定截止时间，null 表示未锁定
+ * @property trackingFollowStartDate 持仓跟踪最早跟随日校准（yyyy-MM-dd），null 表示跟随模型完整持仓流
  * @property createdAt 记录创建时间
  * @property updatedAt 记录最后更新时间
  */
@@ -26,6 +27,7 @@ data class UserModel(
     val isActive: Boolean,
     val failedLoginAttempts: Int,
     val lockedUntil: LocalDateTime?,
+    val trackingFollowStartDate: String? = null,
     val createdAt: LocalDateTime,
     val updatedAt: LocalDateTime,
 )
