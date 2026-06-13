@@ -64,9 +64,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ViewList
 import androidx.compose.material.icons.outlined.AccountTree
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.EditCalendar
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -115,6 +119,7 @@ import model.candle.StrategyTrackingSection
 import model.candle.StrategyTrackingStockNode
 import org.shiroumi.quant_kmp.di.HttpClientProvider
 import org.shiroumi.quant_kmp.feature.candle.data.repository.CandleRepositoryImpl
+import org.shiroumi.quant_kmp.feature.strategytracking.data.StrategyTrackingRepository
 import org.shiroumi.quant_kmp.ui.agent.theme.AgentTheme
 import org.shiroumi.quant_kmp.ui.animation.AnimationDurations
 import org.shiroumi.quant_kmp.ui.core.adaptive.m3.rememberAdaptiveLayoutConfig
@@ -160,11 +165,16 @@ private class TrackingTimelineOverlayState {
 @Composable
 fun StrategyPositionTrackingScreen(
     viewModel: StrategyPositionTrackingViewModel = viewModel {
-        val repository = CandleRepositoryImpl(
-            httpClient = HttpClientProvider.apiClient,
-            baseUrl = org.shiroumi.config.AppConfig.apiBaseUrl
+        StrategyPositionTrackingViewModel(
+            repository = CandleRepositoryImpl(
+                httpClient = HttpClientProvider.apiClient,
+                baseUrl = org.shiroumi.config.AppConfig.apiBaseUrl
+            ),
+            trackingRepository = StrategyTrackingRepository(
+                httpClient = HttpClientProvider.apiClient,
+                baseUrl = org.shiroumi.config.AppConfig.apiBaseUrl
+            ),
         )
-        StrategyPositionTrackingViewModel(repository)
     }
 ) {
     val timeline by viewModel.timeline.collectAsState()
@@ -172,6 +182,22 @@ fun StrategyPositionTrackingScreen(
     val error by viewModel.error.collectAsState()
     val selectedStock by viewModel.selectedStock.collectAsState()
     val selectedDetail by viewModel.selectedDetail.collectAsState()
+    val calibration by viewModel.calibration.collectAsState()
+    // 校准激活时渲染跟随者视角重放流，模型自身流仍在后台随 WS 更新
+    val activeCalibration = calibration
+    val displayTimeline = if (activeCalibration != null) activeCalibration.timeline else timeline
+    val displayLoading = activeCalibration?.isLoading ?: isLoading
+    val displayError = activeCalibration?.error ?: error
+    var calibrationPickerVisible by remember { mutableStateOf(false) }
+    // 可校准日期 = 模型流中最近 20 个已确认交易日（排除盘中实时投影日），新日期在前
+    val calibrationOptions = remember(timeline) {
+        timeline?.let { t ->
+            t.days.map { it.tradeDate }
+                .filter { it != t.realtimeTradeDate }
+                .takeLast(20)
+                .asReversed()
+        }.orEmpty()
+    }
     val config = rememberAdaptiveLayoutConfig()
     val pagePadding = when {
         config.isExpanded || config.isLarge || config.isXLarge -> PaddingValues(40.dp)
@@ -187,6 +213,17 @@ fun StrategyPositionTrackingScreen(
         ProvideMobileTitleBar(
             title = "策略持仓跟踪",
             actions = {
+                IconButton(onClick = { calibrationPickerVisible = true }) {
+                    Icon(
+                        imageVector = Icons.Outlined.EditCalendar,
+                        contentDescription = "跟随校准",
+                        tint = if (activeCalibration != null) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
                 DisclaimerIcon(
                     expanded = disclaimerVisible,
                     onClick = { disclaimerVisible = true },
@@ -275,15 +312,18 @@ fun StrategyPositionTrackingScreen(
                                     TrackingPageHeader(
                                         disclaimerExpanded = disclaimerVisible,
                                         onDisclaimerToggle = { disclaimerVisible = !disclaimerVisible },
+                                        calibration = activeCalibration,
+                                        onOpenCalibrationPicker = { calibrationPickerVisible = true },
+                                        onClearCalibration = viewModel::clearCalibration,
                                     )
                                     Row(
                                         modifier = Modifier.weight(1f),
                                         horizontalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.lg),
                                     ) {
                                         TrackingOverviewListPanel(
-                                            timeline = timeline,
-                                            isLoading = isLoading,
-                                            error = error,
+                                            timeline = displayTimeline,
+                                            isLoading = displayLoading,
+                                            error = displayError,
                                             onRefresh = viewModel::refresh,
                                             onStockClick = onStockClick,
                                             modifier = Modifier
@@ -291,9 +331,9 @@ fun StrategyPositionTrackingScreen(
                                                 .fillMaxHeight(),
                                         )
                                         TrackingTimelineScaffold(
-                                            timeline = timeline,
-                                            isLoading = isLoading,
-                                            error = error,
+                                            timeline = displayTimeline,
+                                            isLoading = displayLoading,
+                                            error = displayError,
                                             onRefresh = viewModel::refresh,
                                             sharedTransitionScope = this@SharedTransitionLayout,
                                             animatedVisibilityScope = timelineAnimatedScope,
@@ -304,45 +344,61 @@ fun StrategyPositionTrackingScreen(
                                     }
                                 }
                             } else {
-                                AnimatedContent(
-                                    targetState = panoramaOpen,
-                                    transitionSpec = {
-                                        fadeIn(tween(AnimationDurations.NORMAL, easing = LinearOutSlowInEasing)) togetherWith
-                                            fadeOut(tween(AnimationDurations.FAST, easing = LinearOutSlowInEasing))
-                                    },
-                                    modifier = Modifier.fillMaxSize(),
-                                    label = "tracking_compact_mode",
-                                ) { showPanorama ->
-                                    if (showPanorama) {
-                                        TrackingTimelineScaffold(
-                                            timeline = timeline,
-                                            isLoading = isLoading,
-                                            error = error,
-                                            onRefresh = viewModel::refresh,
-                                            sharedTransitionScope = this@SharedTransitionLayout,
-                                            animatedVisibilityScope = timelineAnimatedScope,
-                                            overlayState = timelineOverlayState,
-                                            onStockClick = onStockClick,
-                                            // 与列表形态同款底部预留：矮窗口垂直滚动到底时不被常驻按钮压住清仓区
+                                Column(modifier = Modifier.fillMaxSize()) {
+                                    activeCalibration?.let {
+                                        Box(
                                             modifier = Modifier
-                                                .fillMaxSize()
-                                                .padding(bottom = TrackingPanoramaButtonReserve),
-                                        )
-                                    } else {
-                                        Box(modifier = Modifier.fillMaxSize()) {
-                                            TrackingOverviewListPanel(
-                                                timeline = timeline,
-                                                isLoading = isLoading,
-                                                error = error,
-                                                onRefresh = viewModel::refresh,
-                                                onStockClick = onStockClick,
-                                                // 列表底部为全景图按钮预留占位空间，避免末行被常驻按钮遮挡
-                                                bottomContentPadding = TrackingPanoramaButtonReserve,
-                                                modifier = Modifier
-                                                    .fillMaxHeight()
-                                                    .widthIn(max = TrackingCompactListMaxWidth)
-                                                    .align(Alignment.TopCenter),
+                                                .fillMaxWidth()
+                                                .padding(top = AgentTheme.Spacing.sm, bottom = AgentTheme.Spacing.sm),
+                                            contentAlignment = Alignment.CenterStart,
+                                        ) {
+                                            TrackingCalibrationControl(
+                                                calibration = it,
+                                                onOpenPicker = { calibrationPickerVisible = true },
+                                                onClear = viewModel::clearCalibration,
                                             )
+                                        }
+                                    }
+                                    AnimatedContent(
+                                        targetState = panoramaOpen,
+                                        transitionSpec = {
+                                            fadeIn(tween(AnimationDurations.NORMAL, easing = LinearOutSlowInEasing)) togetherWith
+                                                fadeOut(tween(AnimationDurations.FAST, easing = LinearOutSlowInEasing))
+                                        },
+                                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                                        label = "tracking_compact_mode",
+                                    ) { showPanorama ->
+                                        if (showPanorama) {
+                                            TrackingTimelineScaffold(
+                                                timeline = displayTimeline,
+                                                isLoading = displayLoading,
+                                                error = displayError,
+                                                onRefresh = viewModel::refresh,
+                                                sharedTransitionScope = this@SharedTransitionLayout,
+                                                animatedVisibilityScope = timelineAnimatedScope,
+                                                overlayState = timelineOverlayState,
+                                                onStockClick = onStockClick,
+                                                // 与列表形态同款底部预留：矮窗口垂直滚动到底时不被常驻按钮压住清仓区
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .padding(bottom = TrackingPanoramaButtonReserve),
+                                            )
+                                        } else {
+                                            Box(modifier = Modifier.fillMaxSize()) {
+                                                TrackingOverviewListPanel(
+                                                    timeline = displayTimeline,
+                                                    isLoading = displayLoading,
+                                                    error = displayError,
+                                                    onRefresh = viewModel::refresh,
+                                                    onStockClick = onStockClick,
+                                                    // 列表底部为全景图按钮预留占位空间，避免末行被常驻按钮遮挡
+                                                    bottomContentPadding = TrackingPanoramaButtonReserve,
+                                                    modifier = Modifier
+                                                        .fillMaxHeight()
+                                                        .widthIn(max = TrackingCompactListMaxWidth)
+                                                        .align(Alignment.TopCenter),
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -399,6 +455,35 @@ fun StrategyPositionTrackingScreen(
                     DisclaimerBottomSheet(onDismiss = { disclaimerVisible = false })
                 } else {
                     DisclaimerDialog(onDismiss = { disclaimerVisible = false })
+                }
+            }
+
+            if (calibrationPickerVisible) {
+                val useBottomSheet = config.isCompact || config.isMedium
+                val onPick: (String) -> Unit = { date ->
+                    viewModel.calibrateFollowStart(date)
+                    calibrationPickerVisible = false
+                }
+                val onClearCalibration: () -> Unit = {
+                    viewModel.clearCalibration()
+                    calibrationPickerVisible = false
+                }
+                if (useBottomSheet) {
+                    CalibrationPickerBottomSheet(
+                        options = calibrationOptions,
+                        activeDate = activeCalibration?.followStartDate,
+                        onPick = onPick,
+                        onClearCalibration = onClearCalibration,
+                        onDismiss = { calibrationPickerVisible = false },
+                    )
+                } else {
+                    CalibrationPickerDialog(
+                        options = calibrationOptions,
+                        activeDate = activeCalibration?.followStartDate,
+                        onPick = onPick,
+                        onClearCalibration = onClearCalibration,
+                        onDismiss = { calibrationPickerVisible = false },
+                    )
                 }
             }
         }
@@ -527,6 +612,9 @@ private fun TrackingTimelineScaffold(
 private fun TrackingPageHeader(
     disclaimerExpanded: Boolean,
     onDisclaimerToggle: () -> Unit,
+    calibration: TrackingCalibration? = null,
+    onOpenCalibrationPicker: () -> Unit = {},
+    onClearCalibration: () -> Unit = {},
 ) {
     val config = rememberAdaptiveLayoutConfig()
     val titleStyle = when {
@@ -535,6 +623,7 @@ private fun TrackingPageHeader(
         else -> MaterialTheme.typography.headlineMedium
     }
     Row(
+        modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -548,6 +637,262 @@ private fun TrackingPageHeader(
             expanded = disclaimerExpanded,
             onClick = onDisclaimerToggle,
         )
+        Spacer(modifier = Modifier.weight(1f))
+        TrackingCalibrationControl(
+            calibration = calibration,
+            onOpenPicker = onOpenCalibrationPicker,
+            onClear = onClearCalibration,
+        )
+    }
+}
+
+/**
+ * 最早跟随日校准控件。未激活时为入口按钮；激活时为状态胶囊
+ * （点胶囊主体重新选日期，点尾部关闭图标回到模型完整持仓流）。
+ */
+@Composable
+private fun TrackingCalibrationControl(
+    calibration: TrackingCalibration?,
+    onOpenPicker: () -> Unit,
+    onClear: () -> Unit,
+) {
+    if (calibration == null) {
+        FilledTonalButton(onClick = onOpenPicker) {
+            Icon(
+                imageVector = Icons.Outlined.EditCalendar,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("跟随校准")
+        }
+        return
+    }
+    Surface(
+        shape = RoundedCornerShape(percent = 50),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+    ) {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(percent = 50))
+                .clickable(onClick = onOpenPicker)
+                .padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.EditCalendar,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            Text(
+                text = "从 ${calibration.followStartDate} 起跟随",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            if (calibration.isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(14.dp),
+                    strokeWidth = 1.5.dp,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onClear),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Close,
+                    contentDescription = "清除跟随校准",
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
+        }
+    }
+}
+
+private const val CalibrationPickerHint =
+    "选择你第一笔跟随买入发生的交易日。系统以该日空仓起步，按生产持仓规则重放之后的买入与卖出，" +
+        "排除模型在你跟随之前已有持仓的影响，使跟踪流与你的真实持仓对齐。" +
+        "校准视图仅包含已确认交易日，不含盘中实时列。"
+
+@Composable
+private fun CalibrationDateList(
+    options: List<String>,
+    activeDate: String?,
+    onPick: (String) -> Unit,
+    onClearCalibration: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            text = CalibrationPickerHint,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 10.dp),
+        )
+        CalibrationDateRow(
+            label = "跟随全程",
+            description = "模型完整持仓流",
+            selected = activeDate == null,
+            onClick = onClearCalibration,
+        )
+        options.forEach { date ->
+            CalibrationDateRow(
+                label = date,
+                description = null,
+                selected = date == activeDate,
+                onClick = { onPick(date) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun CalibrationDateRow(
+    label: String,
+    description: String?,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .background(
+                if (selected) {
+                    MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
+                } else {
+                    Color.Transparent
+                }
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            description?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (selected) {
+            Icon(
+                imageVector = Icons.Outlined.Check,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CalibrationPickerDialog(
+    options: List<String>,
+    activeDate: String?,
+    onPick: (String) -> Unit,
+    onClearCalibration: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "跟随校准",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+        },
+        text = {
+            CalibrationDateList(
+                options = options,
+                activeDate = activeDate,
+                onPick = onPick,
+                onClearCalibration = onClearCalibration,
+                modifier = Modifier.heightIn(max = 380.dp),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("关闭")
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CalibrationPickerBottomSheet(
+    options: List<String>,
+    activeDate: String?,
+    onPick: (String) -> Unit,
+    onClearCalibration: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState()
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+        tonalElevation = 4.dp,
+        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "跟随校准",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            IconButton(onClick = onDismiss) {
+                Icon(
+                    imageVector = Icons.Outlined.KeyboardArrowDown,
+                    contentDescription = "关闭",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        HorizontalDivider(
+            modifier = Modifier.padding(horizontal = 20.dp),
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+            thickness = 0.5.dp,
+        )
+        CalibrationDateList(
+            options = options,
+            activeDate = activeDate,
+            onPick = onPick,
+            onClearCalibration = onClearCalibration,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 480.dp)
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+        )
+        Spacer(modifier = Modifier.height(8.dp))
     }
 }
 
@@ -887,6 +1232,7 @@ private fun TrackingTimelineContent(
                                 revealStartDayIndex = revealStartDayIndex,
                                 isLatest = index == timeline.days.lastIndex,
                                 isRealtime = timeline.isRealtimeDay(day),
+                                isFollowStart = day.tradeDate == timeline.followStartDate,
                                 geometry = geometry,
                                 sharedTransitionScope = sharedTransitionScope,
                                 animatedVisibilityScope = animatedVisibilityScope,
@@ -934,6 +1280,7 @@ private fun TrackingTimelineContent(
                             revealStartDayIndex = revealStartDayIndex,
                             isLatest = index == timeline.days.lastIndex,
                             isRealtime = timeline.isRealtimeDay(day),
+                            isFollowStart = day.tradeDate == timeline.followStartDate,
                             geometry = geometry,
                             sharedTransitionScope = sharedTransitionScope,
                             animatedVisibilityScope = animatedVisibilityScope,
@@ -1186,6 +1533,7 @@ private fun TrackingDayCard(
     revealStartDayIndex: Int,
     isLatest: Boolean,
     isRealtime: Boolean,
+    isFollowStart: Boolean,
     geometry: TimelineGeometry,
     sharedTransitionScope: SharedTransitionScope,
     animatedVisibilityScope: AnimatedVisibilityScope,
@@ -1255,6 +1603,7 @@ private fun TrackingDayCard(
                 Text(
                     text = when {
                         isRealtime -> "盘中实时"
+                        isFollowStart -> "跟随起点"
                         isLatest -> "最新交易日"
                         else -> "历史交易日"
                     },
@@ -1263,7 +1612,11 @@ private fun TrackingDayCard(
                         TrackingTextScale.REGULAR -> MaterialTheme.typography.titleMedium
                         TrackingTextScale.LARGE -> MaterialTheme.typography.titleLarge
                     },
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = if (isFollowStart && !isRealtime) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
                 )
             }
 

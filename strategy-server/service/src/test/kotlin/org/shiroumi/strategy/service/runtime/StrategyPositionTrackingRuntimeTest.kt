@@ -178,6 +178,92 @@ class StrategyPositionTrackingRuntimeTest {
         volCap = 1.0
     )
 
+    @Test
+    fun `最早跟随日校准_空仓起步重放生产入场规则_模型已有持仓不影响跟随者买入`() = runTest {
+        val hub = LocalStrategySnapshotHub<kotlinx.serialization.json.JsonElement>("test-service")
+        val runtime = StrategyPositionTrackingRuntime(
+            snapshotHub = hub,
+            json = json,
+            exitRules = org.shiroumi.strategy.service.postmarket.HoldingStateMachine.ExitRules.V5_FAST_TP7_H5,
+            dataSource = FakeTrackingDataSource(
+                audits = listOf(
+                    audit(day2, currentPositions = listOf("000010.SZ")),
+                    audit(day1, currentPositions = listOf("000010.SZ"))
+                ),
+                // 信号日 day1 选出三只、target_date=day2：
+                // 000012 优先级最高但跳空 5% 超限（不占名额）；000011 次之正常入场；
+                // 000013 合法但被每日入场上限 1 挡住
+                selectionsByTradeDate = mapOf(
+                    day1 to listOf(
+                        selection(day1, "000011.SZ", 0.9, targetDate = day2),
+                        selection(day1, "000012.SZ", 0.8, targetDate = day2),
+                        selection(day1, "000013.SZ", 0.7, targetDate = day2),
+                    )
+                ),
+                // 模型自身书本：000010 持仓贯穿两日（跟随者书本为空，不应出现在校准流中）
+                holdingsByTradeDate = mapOf(
+                    day1 to listOf(holding(day1, "000010.SZ", entryDate = day1)),
+                    day2 to listOf(holding(day2, "000010.SZ", entryDate = day1)),
+                ),
+                names = mapOf(
+                    "000010.SZ" to "模",
+                    "000011.SZ" to "甲",
+                    "000012.SZ" to "乙",
+                    "000013.SZ" to "丙"
+                ),
+                candles = mapOf(
+                    "000011.SZ" to mapOf(
+                        day1 to candle("000011.SZ", day1, open = 9.8f, close = 10f),
+                        day2 to candle("000011.SZ", day2, open = 10.2f, close = 10.4f)
+                    ),
+                    "000012.SZ" to mapOf(
+                        day1 to candle("000012.SZ", day1, open = 19.5f, close = 20f),
+                        day2 to candle("000012.SZ", day2, open = 21f, close = 21.5f)
+                    ),
+                    "000013.SZ" to mapOf(
+                        day1 to candle("000013.SZ", day1, open = 29.5f, close = 30f),
+                        day2 to candle("000013.SZ", day2, open = 30.3f, close = 30.9f)
+                    ),
+                ),
+                tradeDates = listOf(day1, day2),
+                entryPriorities = mapOf("000012.SZ" to 0.95, "000011.SZ" to 0.9, "000013.SZ" to 0.3),
+            )
+        )
+
+        val calibrated = assertNotNull(runtime.buildCalibratedSnapshot(day2))
+        assertEquals("2026-04-30", calibrated.followStartDate)
+        assertEquals(listOf("2026-04-29", "2026-04-30"), calibrated.days.map { it.tradeDate })
+
+        // 跟随起点前书本为空；选股列仍展示模型选股（公共信息）
+        assertEquals(emptyList(), calibrated.days.first().holdings)
+        assertEquals(
+            setOf("000011.SZ", "000012.SZ", "000013.SZ"),
+            calibrated.days.first().selection.map { it.stockCode }.toSet()
+        )
+
+        // 跟随日入场：跳空超限候选不占名额，按优先级入场 000011，每日上限 1 挡住 000013；
+        // 模型自身持仓 000010 不出现在跟随者书本
+        val followDayHoldings = calibrated.days.last().holdings
+        assertEquals(listOf("000011.SZ"), followDayHoldings.map { it.stockCode })
+        val entered = followDayHoldings.single()
+        assertEquals("2026-04-30", entered.buyDate)
+        assertEquals(10.2f, assertNotNull(entered.buyPrice), absoluteTolerance = 0.001f)
+        // 入场日盈亏 = 开盘 10.2 → 收盘 10.4
+        assertEquals(1.96f, assertNotNull(entered.actualPnl), absoluteTolerance = 0.01f)
+        assertEquals(emptyList(), calibrated.days.last().cleared)
+
+        // 入场支路：前一交易日选股节点 → 跟随日新进持仓
+        val enterEdge = assertNotNull(
+            calibrated.edges.singleOrNull { it.kind == StrategyTrackingEdgeKind.ENTER_HOLDING }
+        )
+        assertEquals("000011.SZ", enterEdge.toStockCode)
+        assertEquals(StrategyTrackingSection.SELECTION, enterEdge.fromSection)
+        assertEquals(1.96f, assertNotNull(enterEdge.pnlPct), absoluteTolerance = 0.01f)
+
+        // 非窗口内交易日 → 拒绝校准
+        assertEquals(null, runtime.buildCalibratedSnapshot(LocalDate(2026, 5, 6)))
+    }
+
     private fun holding(tradeDate: LocalDate, tsCode: String, entryDate: LocalDate) =
         DailyHoldingState(
             tradeDate = tradeDate,
@@ -187,10 +273,15 @@ class StrategyPositionTrackingRuntimeTest {
             signalDateLow = 9.0,
         )
 
-    private fun selection(tradeDate: LocalDate, tsCode: String, modelScore: Double) =
+    private fun selection(
+        tradeDate: LocalDate,
+        tsCode: String,
+        modelScore: Double,
+        targetDate: LocalDate = tradeDate,
+    ) =
         ProfitPredictionSelection(
             tradeDate = tradeDate,
-            targetDate = tradeDate,
+            targetDate = targetDate,
             tsCode = tsCode,
             modelScore = modelScore,
             selected = true,
@@ -229,6 +320,7 @@ private class FakeTrackingDataSource(
     private val names: Map<String, String>,
     private val candles: Map<String, Map<LocalDate, Candle>>,
     private val tradeDates: List<LocalDate> = emptyList(),
+    private val entryPriorities: Map<String, Double> = emptyMap(),
 ) : StrategyPositionTrackingDataSource {
     override fun loadAuditSummaries(limit: Int): List<StrategyAuditSummary> = audits.take(limit)
 
@@ -250,4 +342,10 @@ private class FakeTrackingDataSource(
 
     override fun tradingDaysSince(entryDate: LocalDate, date: LocalDate): Int =
         tradeDates.count { it > entryDate && it <= date }
+
+    override fun loadSelectionsByTargetDate(targetDate: LocalDate): List<ProfitPredictionSelection> =
+        selectionsByTradeDate.values.flatten().filter { it.targetDate == targetDate }
+
+    override fun entryPriority(tsCode: String, signalDate: LocalDate): Double =
+        entryPriorities[tsCode] ?: 0.0
 }

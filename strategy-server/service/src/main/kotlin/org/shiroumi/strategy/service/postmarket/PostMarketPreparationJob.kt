@@ -490,7 +490,7 @@ object PostMarketPreparationJob {
                     signalDateLow = signalBar?.getLow()?.toDouble() ?: 0.0,
                     signalDateClose = signalBar?.getPrice()?.toDouble() ?: 0.0,
                     entryPriority = if (entryCapEnabled && previousTradeDate != null) {
-                        signalDayVolatility20(selection.tsCode, previousTradeDate)
+                        EntryPriority.signalDayVolatility20(selection.tsCode, previousTradeDate)
                     } else {
                         0.0
                     },
@@ -545,21 +545,6 @@ object PostMarketPreparationJob {
                     " 仅生产离场=${onlyProd.ifEmpty { setOf("无") }} 仅影子离场=${onlyShadow.ifEmpty { setOf("无") }}"
             )
         }.onFailure { logger.warning("[影子对照] 推演失败（不影响生产链路）| ${it.message}") }
-    }
-
-    /**
-     * 信号日 20 日对数收益波动率（前复权收盘），作为每日入场上限开启时的入场优先级。
-     * 数据不足 10 根有效收益时返回 0.0（排序中自然落后）。
-     */
-    private fun signalDayVolatility20(tsCode: String, signalDate: LocalDate): Double {
-        val closes = StockDailyCandleRepository
-            .findRecent(tsCode = tsCode, limit = 21, endDateInclusive = signalDate)
-            .map { it.getPrice(useAdjusted = true).toDouble() }
-            .filter { it > 0.0 }
-        if (closes.size < 11) return 0.0
-        val logReturns = closes.zipWithNext { prev, cur -> kotlin.math.ln(cur / prev) }
-        val mean = logReturns.average()
-        return kotlin.math.sqrt(logReturns.sumOf { (it - mean) * (it - mean) } / logReturns.size)
     }
 
     private fun persistNextTradeDateSentimentSeed(

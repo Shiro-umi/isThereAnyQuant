@@ -84,6 +84,11 @@ class LocalStrategySnapshotHub<T>(
                 message = "local strategy runtime cannot read ktor candle snapshots",
                 sourceInstanceId = sourceInstanceId
             )
+            is StrategyCommand.BuildCalibratedTracking -> StrategyCommandAck(
+                accepted = false,
+                message = "local strategy runtime does not own calibrated tracking replay",
+                sourceInstanceId = sourceInstanceId
+            )
         }
     }
 

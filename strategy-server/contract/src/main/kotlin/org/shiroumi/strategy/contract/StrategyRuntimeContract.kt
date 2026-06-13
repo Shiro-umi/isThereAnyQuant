@@ -101,6 +101,17 @@ sealed interface StrategyCommand {
         val tsCodes: List<String>,
         val tradeDate: String
     ) : StrategyCommand
+
+    /**
+     * 最早跟随日校准：以 [followStartDate]（ISO yyyy-MM-dd）为第一笔跟随买入日、
+     * 空仓起步重放生产持仓规则，ack payload 返回跟随者视角的持仓跟踪快照
+     * （`StrategyPositionTrackingResponse`）。
+     */
+    @Serializable
+    @SerialName("build-calibrated-tracking")
+    data class BuildCalibratedTracking(
+        val followStartDate: String
+    ) : StrategyCommand
 }
 
 @Serializable

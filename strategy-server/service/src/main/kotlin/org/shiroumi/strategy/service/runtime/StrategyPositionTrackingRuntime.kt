@@ -26,6 +26,7 @@ import org.shiroumi.strategy.client.LocalStrategySnapshotHub
 import org.shiroumi.strategy.contract.StrategySnapshotEnvelope
 import org.shiroumi.strategy.contract.StrategyTopic
 import org.shiroumi.strategy.core.audit.StrategyAuditSummary
+import org.shiroumi.strategy.service.postmarket.EntryPriority
 import org.shiroumi.strategy.service.postmarket.HoldingStateMachine
 import utils.logger
 
@@ -105,8 +106,93 @@ class StrategyPositionTrackingRuntime(
         if (records.isEmpty()) return null
 
         val tradeDates = records.map { it.tradeDate }
-        val selectionsByTradeDate = dataSource.loadSelectionsByTradeDate(tradeDates)
-        val holdingsByTradeDate = dataSource.loadHoldingsByTradeDate(tradeDates)
+        val days = buildDays(
+            records = records,
+            selectionsByTradeDate = dataSource.loadSelectionsByTradeDate(tradeDates),
+            holdingsByTradeDate = dataSource.loadHoldingsByTradeDate(tradeDates),
+        )
+        return enrich(days, realtimeCandles = emptyMap(), realtimeTradeDate = null)
+    }
+
+    /**
+     * 最早跟随日校准：以 [followStartDate] 为第一笔跟随买入日、空仓起步重放生产持仓规则，
+     * 生成跟随者视角的持仓跟踪流（命令通道按需计算，不发布到 snapshot hub）。
+     *
+     * 模型自身持仓流中「已持有不重复入场」与每日入场上限都以模型书本判定；中途开始跟随的
+     * 用户书本为空，模型因已有持仓而当日无新入场的日子，用户应照常买入。校准重放使用同一
+     * [HoldingStateMachine]、同一入场候选来源（前一交易日选股 target_date=当日的 selected 票，
+     * 行自带信号日）、同一入场优先级与跳空过滤，仅把书本起点换成 followStartDate 空仓逐日推进。
+     *
+     * 行情口径与生产推进一致：推进判定与入场跳空过滤取 raw 基准（[asRawBar]，各自当日锚）；
+     * 展示盈亏仍由 [enrich] 按前复权口径计算。重放仅覆盖已确认交易日，不含盘中实时投影。
+     *
+     * @return null = 无审计窗口或 followStartDate 不在窗口交易日内。
+     */
+    fun buildCalibratedSnapshot(followStartDate: LocalDate): StrategyPositionTrackingResponse? {
+        val records = dataSource.loadAuditSummaries(trackingLimit).reversed()
+        if (records.isEmpty()) return null
+        val tradeDates = records.map { it.tradeDate }
+        if (followStartDate !in tradeDates) return null
+
+        // 候选行自带信号日（selection.tradeDate），行情窗口起点向前扩到最早信号日
+        val candidatesByDate = tradeDates
+            .filter { it >= followStartDate }
+            .associateWith { date -> dataSource.loadSelectionsByTargetDate(date) }
+        val candidateCodes = candidatesByDate.values.flatten().map { it.tsCode }.distinct()
+        val replayStart = candidatesByDate.values.flatten()
+            .minOfOrNull { it.tradeDate }
+            ?.let { minOf(it, followStartDate) }
+            ?: followStartDate
+        val replayCandles = dataSource.loadCandles(candidateCodes, replayStart, tradeDates.last())
+        fun rawBar(tsCode: String, date: LocalDate): Candle? =
+            replayCandles[tsCode]?.get(date)?.asRawBar()
+
+        var book = emptyList<DailyHoldingState>()
+        val replayedHoldings = mutableMapOf<LocalDate, List<DailyHoldingState>>()
+        for (date in tradeDates) {
+            if (date < followStartDate) {
+                replayedHoldings[date] = emptyList()
+                continue
+            }
+            val newEntries = candidatesByDate[date].orEmpty().map { selection ->
+                val signalBar = rawBar(selection.tsCode, selection.tradeDate)
+                HoldingStateMachine.EntryCandidate(
+                    tsCode = selection.tsCode,
+                    signalDateLow = signalBar?.getLow()?.toDouble() ?: 0.0,
+                    signalDateClose = signalBar?.getPrice()?.toDouble() ?: 0.0,
+                    entryPriority = if (holdingStateMachine.entryCapEnabled) {
+                        dataSource.entryPriority(selection.tsCode, selection.tradeDate)
+                    } else {
+                        0.0
+                    },
+                )
+            }
+            val result = holdingStateMachine.advance(
+                tradeDate = date,
+                previousHoldings = book,
+                newEntries = newEntries,
+                tradingDaysSince = dataSource::tradingDaysSince,
+                candleFor = ::rawBar,
+            )
+            book = result.holdings
+            replayedHoldings[date] = result.holdings
+        }
+
+        val days = buildDays(
+            records = records,
+            selectionsByTradeDate = dataSource.loadSelectionsByTradeDate(tradeDates),
+            holdingsByTradeDate = replayedHoldings,
+        )
+        return enrich(days, realtimeCandles = emptyMap(), realtimeTradeDate = null)
+            .copy(followStartDate = followStartDate.toString())
+    }
+
+    /** 由审计窗口 + 选股 + 持仓快照构建逐日三列节点（选股/持仓/清仓），模型流与校准流共用。 */
+    private fun buildDays(
+        records: List<StrategyAuditSummary>,
+        selectionsByTradeDate: Map<LocalDate, List<ProfitPredictionSelection>>,
+        holdingsByTradeDate: Map<LocalDate, List<DailyHoldingState>>,
+    ): List<StrategyPositionTrackingDay> {
         val allCodes = records.flatMap { summary ->
             val selections = selectionsByTradeDate[summary.tradeDate].orEmpty().map { it.tsCode }
             val holdings = holdingsByTradeDate[summary.tradeDate].orEmpty().map { it.tsCode }
@@ -114,7 +200,7 @@ class StrategyPositionTrackingRuntime(
         }.distinct()
         val stockNames = dataSource.loadStockNames(allCodes)
 
-        val days = records.mapIndexed { index, summary ->
+        return records.mapIndexed { index, summary ->
             val currentHoldings = holdingsByTradeDate[summary.tradeDate].orEmpty()
             val currentPositionCodes = currentHoldings.mapTo(mutableSetOf()) { it.tsCode }
             // 选股列：当日选出（target_date=次日）的 selected 票
@@ -167,8 +253,6 @@ class StrategyPositionTrackingRuntime(
                 cleared = cleared
             )
         }
-
-        return enrich(days, realtimeCandles = emptyMap(), realtimeTradeDate = null)
     }
 
     private fun updateRealtimeDay(
@@ -469,6 +553,10 @@ interface StrategyPositionTrackingDataSource {
     fun loadCandles(tsCodes: List<String>, startDate: LocalDate, endDate: LocalDate): Map<String, Map<LocalDate, Candle>>
     /** 交易日间隔（不含 start，含 end），口径必须与生产状态机推进一致。 */
     fun tradingDaysSince(entryDate: LocalDate, date: LocalDate): Int
+    /** 校准重放入场候选：target_date = [targetDate] 的 selected 票（与盘后状态机推进同一来源），行自带信号日 tradeDate。 */
+    fun loadSelectionsByTargetDate(targetDate: LocalDate): List<ProfitPredictionSelection>
+    /** 入场优先级（信号日 20 日对数收益波动率），口径必须与盘后状态机推进一致。 */
+    fun entryPriority(tsCode: String, signalDate: LocalDate): Double
 }
 
 object DefaultStrategyPositionTrackingDataSource : StrategyPositionTrackingDataSource {
@@ -498,6 +586,12 @@ object DefaultStrategyPositionTrackingDataSource : StrategyPositionTrackingDataS
     override fun tradingDaysSince(entryDate: LocalDate, date: LocalDate): Int =
         if (date <= entryDate) 0
         else (TradingCalendarRepository.findOpenDates(entryDate, date).size - 1).coerceAtLeast(0)
+
+    override fun loadSelectionsByTargetDate(targetDate: LocalDate): List<ProfitPredictionSelection> =
+        DailyProfitPredictionSelectionRepository.findSelectionsByTargetDate(targetDate)
+
+    override fun entryPriority(tsCode: String, signalDate: LocalDate): Double =
+        EntryPriority.signalDayVolatility20(tsCode, signalDate)
 }
 
 private fun fillPnl(

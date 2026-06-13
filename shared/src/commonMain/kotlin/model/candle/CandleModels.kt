@@ -232,6 +232,11 @@ data class StrategyPositionTrackingResponse(
     val edges: List<StrategyTrackingEdge> = emptyList(),
     /** 最后一日为盘中实时投影时的交易日；null 表示全部为确认交易日。 */
     val realtimeTradeDate: String? = null,
+    /**
+     * 最早跟随日校准视图的跟随起始交易日（第一笔跟随买入发生的交易日）；
+     * null 表示模型自身持仓流。校准视图由服务端以该日空仓起步重放生产持仓规则生成。
+     */
+    val followStartDate: String? = null,
 )
 
 /**

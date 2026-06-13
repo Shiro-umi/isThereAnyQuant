@@ -64,6 +64,22 @@ object StrategyRuntimeBridge {
                 sourceInstanceId = "ktor-server"
             )
 
+    /**
+     * 最早跟随日校准：请求 strategy-service 以 [followStartDate] 空仓起步重放生产持仓规则，
+     * 返回跟随者视角的持仓跟踪快照。失败时携带 service 侧的拒绝原因。
+     */
+    suspend fun buildCalibratedTracking(followStartDate: LocalDate): Result<StrategyPositionTrackingResponse> {
+        val ack = sendCommand(StrategyCommand.BuildCalibratedTracking(followStartDate.toString()))
+        if (!ack.accepted) {
+            return Result.failure(IllegalStateException(ack.message ?: "strategy-service 校准重放请求被拒绝"))
+        }
+        val payload = ack.payload
+            ?: return Result.failure(IllegalStateException("strategy-service 校准重放 ack 缺少 payload"))
+        return runCatching {
+            json.decodeFromJsonElement(StrategyPositionTrackingResponse.serializer(), payload)
+        }
+    }
+
     suspend fun rebuildPostMarketDate(tradeDate: kotlinx.datetime.LocalDate, reason: String): StrategyCommandAck =
         sendCommand(
             StrategyCommand.RebuildDate(

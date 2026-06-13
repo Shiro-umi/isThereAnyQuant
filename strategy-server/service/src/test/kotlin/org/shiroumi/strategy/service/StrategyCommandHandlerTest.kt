@@ -20,6 +20,8 @@ import org.shiroumi.strategy.service.runtime.IntradayRefreshResult
 import org.shiroumi.strategy.service.runtime.IntradayRuntime
 import org.shiroumi.strategy.service.runtime.PostMarketRebuildResult
 import org.shiroumi.strategy.service.runtime.PostMarketRuntime
+import org.shiroumi.strategy.service.runtime.StrategyPositionTrackingDataSource
+import org.shiroumi.strategy.service.runtime.StrategyPositionTrackingRuntime
 
 class StrategyCommandHandlerTest {
 
@@ -181,9 +183,50 @@ class StrategyCommandHandlerTest {
         serviceInstanceId = serviceInstanceId,
         intradayRuntime = intradayRuntime,
         postMarketRuntime = postMarketRuntime,
+        positionTrackingRuntime = StrategyPositionTrackingRuntime(
+            snapshotHub = hub,
+            json = json,
+            dataSource = EmptyTrackingDataSource,
+        ),
         snapshotHub = hub,
         json = json,
     )
+
+    @Test
+    fun `calibrated tracking with empty audit window returns rejected ack`() = runTest {
+        val handler = createHandler()
+
+        val ack = handler.handle(StrategyCommand.BuildCalibratedTracking("2026-04-30"))
+
+        assertFalse(ack.accepted)
+        assertTrue(ack.message!!.contains("跟随起始日"))
+    }
+
+    @Test
+    fun `calibrated tracking with invalid date returns rejected ack`() = runTest {
+        val handler = createHandler()
+
+        val ack = handler.handle(StrategyCommand.BuildCalibratedTracking("not-a-date"))
+
+        assertFalse(ack.accepted)
+        assertTrue(ack.message!!.contains("invalid BuildCalibratedTracking"))
+    }
+}
+
+/** 空数据源：命令处理器装配用，校准重放在空审计窗口下返回 null。 */
+private object EmptyTrackingDataSource : StrategyPositionTrackingDataSource {
+    override fun loadAuditSummaries(limit: Int) = emptyList<org.shiroumi.strategy.core.audit.StrategyAuditSummary>()
+    override fun loadSelectionsByTradeDate(tradeDates: List<LocalDate>) =
+        emptyMap<LocalDate, List<org.shiroumi.database.strategy.daily.repository.ProfitPredictionSelection>>()
+    override fun loadHoldingsByTradeDate(tradeDates: List<LocalDate>) =
+        emptyMap<LocalDate, List<org.shiroumi.database.strategy.daily.repository.DailyHoldingState>>()
+    override fun loadStockNames(tsCodes: Collection<String>) = emptyMap<String, String>()
+    override fun loadCandles(tsCodes: List<String>, startDate: LocalDate, endDate: LocalDate) =
+        emptyMap<String, Map<LocalDate, model.Candle>>()
+    override fun tradingDaysSince(entryDate: LocalDate, date: LocalDate) = 0
+    override fun loadSelectionsByTargetDate(targetDate: LocalDate) =
+        emptyList<org.shiroumi.database.strategy.daily.repository.ProfitPredictionSelection>()
+    override fun entryPriority(tsCode: String, signalDate: LocalDate) = 0.0
 }
 
 private class FakeIntradayRuntime(

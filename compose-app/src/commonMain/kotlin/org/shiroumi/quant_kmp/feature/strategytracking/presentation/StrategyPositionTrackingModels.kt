@@ -13,11 +13,13 @@ internal const val TrackingRealtimeDayLabel = "今天"
 /**
  * 持仓跟踪时间线。节点盈亏、离场判决与流转边盈亏全部由 strategy-service 云端计算
  * （`StrategyPositionTrackingRuntime`），前端只做槽位裁剪与渲染。
+ * [followStartDate] 非空表示最早跟随日校准视图：持仓/清仓列为该日空仓起步的重放结果。
  */
 data class StrategyPositionTrackingTimeline(
     val days: List<StrategyPositionTrackingDay>,
     val edges: List<StrategyTrackingEdge>,
     val realtimeTradeDate: String? = null,
+    val followStartDate: String? = null,
 )
 
 internal fun trackingCardKey(
@@ -36,6 +38,7 @@ fun StrategyPositionTrackingResponse.toTimeline(): StrategyPositionTrackingTimel
         days = normalizedDays,
         edges = edges.filter { it.fromSlotIndex < TrackingSlotCount && it.toSlotIndex < TrackingSlotCount },
         realtimeTradeDate = realtimeTradeDate,
+        followStartDate = followStartDate,
     )
 }
 

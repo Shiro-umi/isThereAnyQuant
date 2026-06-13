@@ -113,6 +113,7 @@ private class StrategySocketService(
         serviceInstanceId = serviceInstanceId,
         intradayRuntime = intradayRuntime,
         postMarketRuntime = postMarketRuntime,
+        positionTrackingRuntime = positionTrackingRuntime,
         snapshotHub = snapshotHub,
         json = json
     )

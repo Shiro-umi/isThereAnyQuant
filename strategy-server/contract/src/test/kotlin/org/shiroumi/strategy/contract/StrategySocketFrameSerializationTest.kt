@@ -131,6 +131,7 @@ class StrategySocketFrameSerializationTest {
             StrategyCommand.RebuildDate("2026-04-30") to "rebuild-date",
             StrategyCommand.RebuildRange("2026-04-01", "2026-04-30") to "rebuild-range",
             StrategyCommand.LoadRealtimeDailyCandles(listOf("000001.SZ"), "2026-04-30") to "load-realtime-daily-candles",
+            StrategyCommand.BuildCalibratedTracking("2026-04-30") to "build-calibrated-tracking",
         )
 
         // 注意：StrategySocketFrame 和 StrategyCommand 都使用 classDiscriminator = "type"

@@ -9,8 +9,10 @@ import org.shiroumi.strategy.contract.STRATEGY_CONTRACT_VERSION
 import org.shiroumi.strategy.contract.StrategyCommand
 import org.shiroumi.strategy.contract.StrategyCommandAck
 import org.shiroumi.strategy.contract.StrategyTopic
+import model.candle.StrategyPositionTrackingResponse
 import org.shiroumi.strategy.service.runtime.IntradayRuntime
 import org.shiroumi.strategy.service.runtime.PostMarketRuntime
+import org.shiroumi.strategy.service.runtime.StrategyPositionTrackingRuntime
 import utils.logger
 
 /**
@@ -23,6 +25,7 @@ class StrategyCommandHandler(
     private val serviceInstanceId: String,
     private val intradayRuntime: IntradayRuntime,
     private val postMarketRuntime: PostMarketRuntime,
+    private val positionTrackingRuntime: StrategyPositionTrackingRuntime,
     private val snapshotHub: LocalStrategySnapshotHub<JsonElement>,
     private val json: Json,
 ) {
@@ -112,6 +115,39 @@ class StrategyCommandHandler(
                 sourceInstanceId = serviceInstanceId,
                 contractVersion = STRATEGY_CONTRACT_VERSION,
             )
+
+            // 最早跟随日校准：按需重放、ack payload 直接携带快照，不发布到 snapshot hub
+            is StrategyCommand.BuildCalibratedTracking -> runCatching {
+                val followStartDate = kotlinx.datetime.LocalDate.parse(command.followStartDate)
+                val snapshot = positionTrackingRuntime.buildCalibratedSnapshot(followStartDate)
+                if (snapshot == null) {
+                    StrategyCommandAck(
+                        accepted = false,
+                        message = "跟随起始日不在可校准的已确认交易日窗口内: ${command.followStartDate}",
+                        sourceInstanceId = serviceInstanceId,
+                        contractVersion = STRATEGY_CONTRACT_VERSION,
+                    )
+                } else {
+                    StrategyCommandAck(
+                        accepted = true,
+                        message = "calibrated tracking built followStartDate=${command.followStartDate}",
+                        sourceInstanceId = serviceInstanceId,
+                        contractVersion = STRATEGY_CONTRACT_VERSION,
+                        payload = json.encodeToJsonElement(
+                            StrategyPositionTrackingResponse.serializer(),
+                            snapshot
+                        ),
+                    )
+                }
+            }.getOrElse { error ->
+                logger.warning("BuildCalibratedTracking failed followStartDate=${command.followStartDate}: ${error.message}")
+                StrategyCommandAck(
+                    accepted = false,
+                    message = "invalid BuildCalibratedTracking command: ${error.message}",
+                    sourceInstanceId = serviceInstanceId,
+                    contractVersion = STRATEGY_CONTRACT_VERSION,
+                )
+            }
         }
     }
 
