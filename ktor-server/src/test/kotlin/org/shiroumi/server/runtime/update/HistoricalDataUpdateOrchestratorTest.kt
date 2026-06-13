@@ -61,6 +61,7 @@ class HistoricalDataUpdateOrchestratorTest {
                 "更新股票基础信息" to 20,
                 "更新日线数据" to 40,
                 "更新涨跌停炸板数据" to 50,
+                "更新开盘5min数据" to 56,
                 "更新复权价格" to 62,
                 "预处理策略日频数据" to 76
             ),

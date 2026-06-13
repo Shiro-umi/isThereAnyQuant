@@ -742,7 +742,6 @@ private fun CalibrationDateInput(
             text = CalibrationPickerHint,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 10.dp),
         )
         CalibrationDateRow(
             label = "跟随全程",

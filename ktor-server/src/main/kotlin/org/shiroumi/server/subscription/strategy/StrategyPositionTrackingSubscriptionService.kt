@@ -27,6 +27,7 @@ import org.shiroumi.server.runtime.strategy.StrategySnapshotCursor
 import org.shiroumi.server.websocket.AppWebSocketConnectionManager
 import org.shiroumi.strategy.contract.StrategySnapshotEnvelope
 import utils.logger
+import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -43,7 +44,8 @@ class StrategyPositionTrackingSubscriptionService {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val subscriptionJobs = ConcurrentHashMap<DefaultWebSocketServerSession, Job>()
-    private val sessionFollowStartDates = ConcurrentHashMap<DefaultWebSocketServerSession, String?>()
+    private val sessionFollowStartDates: MutableMap<DefaultWebSocketServerSession, String?> =
+        Collections.synchronizedMap(mutableMapOf())
     private val userRepository: UserRepository by lazy { createUserRepository() }
 
     private val cacheMutex = Mutex()
@@ -234,7 +236,7 @@ class StrategyPositionTrackingSubscriptionService {
             CalibratedResult.Success(response)
         } catch (e: CancellationException) {
             throw e
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             logger.warning("[STRATEGY_POSITION_TRACKING] calibrated tracking failed for $followStartDate: ${e.message}")
             CalibratedResult.Failure(e.message ?: "CALIBRATION_FAILED")
         }

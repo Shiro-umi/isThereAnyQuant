@@ -531,3 +531,16 @@ tasks.withType<KotlinCompilationTask<*> >().configureEach {
     dependsOn("generateSkillPresets")
 }
 // ========== Skill Presets Code Generation Task End ==========
+
+// ========== WasmJS Task Ordering Workaround ==========
+// Kotlin/Wasm plugin 的 production/development webpack 与对应 sync 任务共用同一输出目录，
+// Gradle 在同 build 中同时触发 production 与 development 路径时报 implicit dependency 验证错误。
+// 通过 mustRunAfter 建立全序：production sync -> production webpack -> development sync -> development webpack，
+// 避免读写冲突。待上游插件修复后可移除。
+tasks.matching { it.name == "wasmJsDevelopmentExecutableCompileSync" }.configureEach {
+    mustRunAfter("wasmJsBrowserProductionWebpack")
+}
+tasks.matching { it.name == "wasmJsBrowserDevelopmentWebpack" }.configureEach {
+    mustRunAfter("wasmJsProductionExecutableCompileSync")
+}
+// ========== WasmJS Task Ordering Workaround End ==========
