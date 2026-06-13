@@ -1,0 +1,25 @@
+// Quant iOS 壳工程统一构建参数。
+//
+// 这里集中维护所有易变量：bundle id、版本号、最低系统版本、产品名。
+// 工程文件 project.pbxproj 只引用这些变量，避免散落硬编码、便于与
+// Android（applicationId / version.properties）保持单一事实来源对齐。
+
+// 应用展示名（桌面图标下方文字）。
+APP_NAME = Quant
+
+// bundle id：iOS 独立标识。去掉 _kmp 后缀——下划线会导致 Apple 自动注册 App ID
+// 命名校验失败（'name' is invalid）。iOS 与 Android 在各自商店本就是独立身份，
+// 此处与 Android applicationId(org.shiroumi.quant_kmp) 刻意脱钩。
+BUNDLE_ID = org.shiroumi.quant
+
+// 版本号：对齐 compose-app/version.properties。
+// MARKETING_VERSION 对应 versionName，CURRENT_PROJECT_VERSION 对应 versionCode。
+APP_VERSION = 0.0.1
+APP_BUILD = 34
+
+// 最低支持系统：iOS 14（Compose Multiplatform iOS 运行时下限）。
+MIN_IOS_VERSION = 14.0
+
+// Apple 开发者 Team ID（账号「正 周」/ zz670384114@gmail.com）。
+// Debug/Release 两个配置统一从此处取值，配合自动签名生成 provisioning profile。
+DEVELOPMENT_TEAM = 7ATCX9Q785

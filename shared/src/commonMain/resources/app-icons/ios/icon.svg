@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!--
+    iOS AppIcon 源。与 web/icon.svg 共用品牌符号（渐进柱状图 + 上行趋势箭头），
+    区别仅在于去掉圆角 rx 并铺满方形：iOS 由系统统一施加圆角遮罩，图标本身必须
+    满幅不透明，否则角部留白会被渲染成黑边并被 App Store 资源校验拒绝。
+  -->
+  <rect width="512" height="512" fill="#1A0F0E"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round" transform="translate(256 256) scale(1.55) translate(-256 -256)">
+    <path d="M190 332 V356 M242 294 V356 M294 256 V356" stroke="#8F766E" stroke-width="24"/>
+    <path d="M171 313 L228 256 L265 275 L341 199 M341 199 V265 M341 199 H275" stroke="#E4C8BF" stroke-width="24"/>
+  </g>
+</svg>

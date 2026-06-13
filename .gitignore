@@ -43,6 +43,21 @@ strategy-server/research/pytorch/.venv/
 __pycache__/
 *.py[cod]
 
+### iOS / Xcode ###
+# Xcode 个人级状态与构建产物，禁止入仓；仅放行工程结构、源码与资源。
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+DerivedData/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+# CocoaPods（本项目走 KMP embedAndSign 集成，不使用 Pods；若误生成则忽略）
+iosApp/Pods/
+
 ### Eclipse ###
 .apt_generated
 .classpath

@@ -201,6 +201,12 @@ kotlin {
         browser()
     }
     jvm()
+    // iOS：与 compose-app 的 iOS target 对齐，让前端 iOS app 能消费 shared 的 DTO、协议、
+    // 编译期 AppEnvironment 与可微算法工具。仅声明 target，不输出独立 framework——
+    // shared 作为 compose-app framework 的传递依赖随其一同被链接。
+    // 不含 iosX64：Kotlin 上游废弃 Apple x86_64，与 compose-app 保持同一 target 集合。
+    iosArm64()
+    iosSimulatorArm64()
     sourceSets {
         val commonMain by getting {
             kotlin.srcDir(layout.buildDirectory.dir("generated/sources/kotlin/main"))

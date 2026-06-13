@@ -70,6 +70,7 @@ kotlin-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.r
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlin-coroutines" }
 ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktor-version" }
 ktor-client-js = { module = "io.ktor:ktor-client-js", version.ref = "ktor-version" }
+ktor-client-darwin = { module = "io.ktor:ktor-client-darwin", version.ref = "ktor-version" }
 ktorfit-lib = { module = "de.jensklingenberg.ktorfit:ktorfit-lib", version.ref = "ktorfit-version" }
 ktorfit-ksp = { module = "de.jensklingenberg.ktorfit:ktorfit-ksp", version.ref = "ktorfit-version" }
 ktor-server-content-negotiation = { module = "io.ktor:ktor-server-content-negotiation", version.ref = "ktor-version" }

@@ -26,6 +26,22 @@ kotlin {
         binaries.executable()
     }
 
+    // iOS：covers 真机(arm64) 与 Apple Silicon 模拟器(simulatorArm64)。
+    // 不含 iosX64(Intel 模拟器)——Kotlin 上游已废弃 Apple x86_64，Compose Multiplatform 自
+    // 1.11 起从所有模块移除 iosX64 artifact（adaptive-navigation/navigation3 也不再发布该平台）。
+    // 按项目「只能向上对齐、禁止降级」原则，跟随上游现状仅保留两个有效 target，覆盖 M4 Max 全部使用场景。
+    // 各自输出名为 ComposeApp 的静态 framework，供 iosApp/ 下的 Xcode 壳工程链接。
+    // 静态 framework 让 Compose 资源与 Kotlin 运行时直接打入 app 二进制，避免动态库嵌入步骤。
+    listOf(
+        iosArm64(),
+        iosSimulatorArm64()
+    ).forEach { iosTarget ->
+        iosTarget.binaries.framework {
+            baseName = "ComposeApp"
+            isStatic = true
+        }
+    }
+
     sourceSets.all {
         languageSettings.optIn("androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi")
     }
@@ -94,6 +110,18 @@ kotlin {
             implementation(libs.squareup.okio)
             implementation(libs.squareup.okio.fakefilesystem)
             implementation(libs.androidx.activity.compose)
+        }
+        iosMain.dependencies {
+            // iOS 网络走 Ktor Darwin 引擎（基于 NSURLSession），与 Android CIO / Web Js 同走 configureCommon()。
+            implementation(libs.ktor.client.core)
+            implementation(libs.ktor.client.darwin)
+            implementation(libs.ktor.serialization.kotlinx.json)
+            implementation(libs.kamel.core)
+            implementation(libs.media.kamel.kamel.image)
+            implementation(libs.media.kamel.kamel.image.default)
+            implementation(libs.media.kamel.kamel.decoder.svg.std)
+            implementation(libs.media.kamel.kamel.decoder.image.bitmap)
+            implementation(libs.squareup.okio)
         }
     }
 }
@@ -306,6 +334,80 @@ tasks.matching {
 }
 
 // ========== Cross-platform SVG Assets Sync Task End ==========
+
+// ========== iOS Version Sync Task ==========
+//
+// iOS 与 Android 共用同一版本号事实来源 version.properties（经 resolvedAndroidVersion
+// 解析，含 release 构建自增逻辑）。本任务把当前 versionName / versionCode 写进
+// iosApp/Configuration/Config.xcconfig 的 APP_VERSION / APP_BUILD 两行，使 Xcode 构建
+// 时通过 $(APP_VERSION) / $(APP_BUILD) 注入 Info.plist 的 MARKETING_VERSION /
+// CURRENT_PROJECT_VERSION。只替换这两行，保留 xcconfig 其余注释与配置，避免整文件覆写。
+//
+val syncIosVersion = tasks.register("syncIosVersion") {
+    group = "build"
+    description = "Sync versionName/versionCode from version.properties into iosApp Config.xcconfig."
+
+    val xcconfigFile = rootProject.file("iosApp/Configuration/Config.xcconfig")
+    val versionName = resolvedAndroidVersion.name
+    val versionCode = resolvedAndroidVersion.code
+
+    inputs.file(androidVersionPropsFile).withPropertyName("versionProperties")
+    outputs.file(xcconfigFile).withPropertyName("iosXcconfig")
+
+    doLast {
+        require(xcconfigFile.isFile) {
+            "Missing iOS xcconfig: ${xcconfigFile.relativeTo(rootDir)}"
+        }
+        val updated = xcconfigFile.readLines().joinToString("\n") { line ->
+            when {
+                line.trimStart().startsWith("APP_VERSION") -> "APP_VERSION = $versionName"
+                line.trimStart().startsWith("APP_BUILD") -> "APP_BUILD = $versionCode"
+                else -> line
+            }
+        } + "\n"
+        xcconfigFile.writeText(updated)
+        logger.lifecycle("[versioning] iOS Config.xcconfig synced: APP_VERSION=$versionName APP_BUILD=$versionCode")
+    }
+}
+
+// Xcode 通过 embedAndSignAppleFrameworkForXcode 触发 Kotlin framework 构建；把版本同步
+// 挂在其之前，保证每次 Xcode 构建拿到的 xcconfig 版本号与 Android 完全一致。
+tasks.matching { it.name == "embedAndSignAppleFrameworkForXcode" }.configureEach {
+    dependsOn(syncIosVersion)
+}
+
+// ========== iOS Version Sync Task End ==========
+
+// ========== iOS AppIcon Rasterization Task ==========
+//
+// iOS AppIcon 必须是不透明位图：系统进程在安装时从编译后的 Assets.car 读取位图渲染
+// 桌面/设置/App Store 图标，运行时 SVG 渲染参与不到这一步；带 alpha 通道的图标会被
+// App Store 资源校验拒绝。因此把共享 SVG 源 app-icons/ios/icon.svg 栅格化为 1024
+// 无 alpha PNG 写入 AppIcon.appiconset。
+//
+// 该任务与跨平台文本复制（syncCrossPlatformSvgAssets）刻意分离：栅格化依赖 macOS
+// 专有工具 qlmanage，只能在 macOS 上执行，不纳入通用资源同步链路。产物 PNG 随
+// iosApp/ 一起入仓（低频图标资源，构建必需），CI/非 macOS 环境直接复用已入仓产物。
+//
+val syncIosAppIcon = tasks.register<Exec>("syncIosAppIcon") {
+    group = "build"
+    description = "Rasterize shared iOS app icon SVG into a non-alpha 1024 PNG for AppIcon.appiconset (macOS only)."
+
+    val iconSvg = rootProject.file("shared/src/commonMain/resources/app-icons/ios/icon.svg")
+    val rasterizeScript = rootProject.file("iosApp/scripts/rasterize-appicon.py")
+    val appIconPng = rootProject.file("iosApp/iosApp/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png")
+
+    inputs.file(iconSvg).withPropertyName("iosIconSvg")
+    inputs.file(rasterizeScript).withPropertyName("rasterizeScript")
+    outputs.file(appIconPng).withPropertyName("appIconPng")
+
+    onlyIf("仅 macOS 可执行栅格化") {
+        org.gradle.internal.os.OperatingSystem.current().isMacOsX
+    }
+    commandLine("/usr/bin/python3", rasterizeScript.absolutePath, iconSvg.absolutePath, appIconPng.absolutePath)
+}
+
+// ========== iOS AppIcon Rasterization Task End ==========
 
 // ========== Skill Presets Code Generation Task ==========
 
