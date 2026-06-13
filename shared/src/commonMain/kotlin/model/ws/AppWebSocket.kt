@@ -86,7 +86,8 @@ enum class CommandType {
     UNSUBSCRIBE_CANDLE,          // 取消订阅 K 线完整视图，targetId 为股票代码
     SET_STOCK_LIST_CONTEXT,      // 设置当前页面可见股票上下文，payload 为 tsCode 列表（如 "000001.SZ,600000.SH"）
     SUBSCRIBE,              // 通用 Topic 订阅，targetId 为 WsTopic 名称
-    UNSUBSCRIBE             // 通用 Topic 取消订阅，targetId 为 WsTopic 名称
+    UNSUBSCRIBE,            // 通用 Topic 取消订阅，targetId 为 WsTopic 名称
+    SET_TRACKING_FOLLOW_START_DATE, // 设置持仓跟踪最早跟随日校准日期；payload 为空/null/空字符串表示清除
 }
 
 

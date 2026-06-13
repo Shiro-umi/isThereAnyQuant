@@ -9,6 +9,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import kotlinx.datetime.LocalDate
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -17,6 +18,8 @@ import model.ws.CommandType
 import model.ws.WsCommand
 import model.ws.WsEvent
 import model.ws.WsTopic
+import org.shiroumi.database.user.createUserRepository
+import org.shiroumi.database.user.repository.UserRepository
 import org.shiroumi.server.data.trace.CandleTrace
 import org.shiroumi.server.dataprovider.bootstrap.DataProviderBootstrap
 import org.shiroumi.server.subscription.intraday.IntradaySnapshotSubscriptionService
@@ -91,6 +94,9 @@ object AppWebSocketConnectionManager {
 
     // JSON 序列化配置
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+
+    // 用户仓库，用于处理 SET_TRACKING_FOLLOW_START_DATE 等用户级设置命令
+    private val userRepository: UserRepository by lazy { createUserRepository() }
 
     /**
      * 添加新的客户端连接，绑定鉴权通过的 userId并初始化其空的订阅集合
@@ -479,6 +485,23 @@ object AppWebSocketConnectionManager {
                     }
                 }
             }
+            model.ws.CommandType.SET_TRACKING_FOLLOW_START_DATE -> {
+                if (sessionData.isStale(command)) return
+                val followStartDate = command.payload?.takeIf { it.isNotBlank() }
+                if (followStartDate != null) {
+                    val valid = runCatching {
+                        LocalDate.parse(followStartDate)
+                        true
+                    }.getOrDefault(false)
+                    if (!valid) {
+                        logger.warning("Invalid follow-start-date format: $followStartDate")
+                        return
+                    }
+                }
+                userRepository.setTrackingFollowStartDate(sessionData.userId, followStartDate)
+                DataProviderBootstrap.strategyPositionTrackingSubscriptionService.refresh(session)
+                logger.info("User ${sessionData.userId} set tracking follow-start-date to $followStartDate")
+            }
         }
     }
 
@@ -523,6 +546,7 @@ object AppWebSocketConnectionManager {
         CommandType.SUBSCRIBE_CANDLE,
         CommandType.UNSUBSCRIBE_CANDLE -> candleConvergenceKey()
         CommandType.SET_STOCK_LIST_CONTEXT -> "stock-list-context"
+        CommandType.SET_TRACKING_FOLLOW_START_DATE -> "tracking-follow-start-date"
         CommandType.SUBSCRIBE -> topicConvergenceKey("sub")
         CommandType.UNSUBSCRIBE -> topicConvergenceKey("unsub")
         else -> null
@@ -626,6 +650,13 @@ object AppWebSocketConnectionManager {
 
     fun isSessionActive(session: DefaultWebSocketServerSession): Boolean =
         connections[session]?.closing?.get() == false
+
+    /**
+     * 根据 session 获取用户 ID。
+     *
+     * 供策略持仓跟踪等需要在 session 外部获取用户上下文的模块使用。
+     */
+    internal fun getUserId(session: DefaultWebSocketServerSession): UUID? = connections[session]?.userId
 
     private fun startOutboundSender(
         session: DefaultWebSocketServerSession,
