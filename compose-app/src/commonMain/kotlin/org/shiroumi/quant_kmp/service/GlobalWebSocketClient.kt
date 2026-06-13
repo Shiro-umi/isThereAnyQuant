@@ -755,6 +755,14 @@ object GlobalWebSocketClient {
         println("[GlobalWebSocket] Strategy position tracking refresh requested by $owner")
     }
 
+    /** 设置策略持仓跟踪的起始跟随日期 */
+    fun setTrackingFollowStartDate(followStartDate: String) {
+        sendCommand(WsCommand(
+            CommandType.SET_TRACKING_FOLLOW_START_DATE,
+            payload = followStartDate
+        ))
+    }
+
     /**
      * 取消订阅策略持仓跟踪数据
      */
