@@ -21,7 +21,6 @@ import model.candle.StockInfo
 import model.candle.StrategyTrackingSection
 import model.candle.StrategyTrackingStockNode
 import org.shiroumi.quant_kmp.feature.candle.domain.repository.CandleRepository
-import org.shiroumi.quant_kmp.feature.strategytracking.data.StrategyTrackingRepository
 import org.shiroumi.quant_kmp.feature.strategytracking.data.TrackingCalibrationStore
 import org.shiroumi.quant_kmp.service.GlobalWebSocketClient
 import kotlin.uuid.ExperimentalUuidApi
@@ -72,7 +71,6 @@ data class TrackingCalibration(
 
 class StrategyPositionTrackingViewModel(
     private val repository: CandleRepository,
-    private val trackingRepository: StrategyTrackingRepository,
 ) : ViewModel() {
     private companion object {
         const val STRATEGY_TRACKING_OWNER = "tracking"
@@ -104,7 +102,6 @@ class StrategyPositionTrackingViewModel(
     val listObservedDate: StateFlow<String?> = _listObservedDate.asStateFlow()
 
     private var detailLoadJob: Job? = null
-    private var calibrationLoadJob: Job? = null
     private val stockInfoCache = linkedMapOf<String, StockInfo>()
 
     init {
@@ -114,7 +111,6 @@ class StrategyPositionTrackingViewModel(
 
     fun refresh() {
         GlobalWebSocketClient.refreshStrategyPositionTracking(STRATEGY_TRACKING_OWNER)
-        _calibration.value?.let { loadCalibration(it.followStartDate, keepCurrentTimeline = true) }
     }
 
     /** 切换列表浏览观察日；传 null 回到最新日。校准/模型流共用，仅影响列表面板。 */
@@ -127,12 +123,10 @@ class StrategyPositionTrackingViewModel(
         _calibration.value = TrackingCalibration(followStartDate = followStartDate)
         _listObservedDate.value = null
         persistCalibration(followStartDate)
-        loadCalibration(followStartDate, keepCurrentTimeline = false)
     }
 
     /** 清除校准，回到模型自身持仓流，并清除持久化声明。 */
     fun clearCalibration() {
-        calibrationLoadJob?.cancel()
         _calibration.value = null
         _listObservedDate.value = null
         persistCalibration(null)
@@ -145,45 +139,12 @@ class StrategyPositionTrackingViewModel(
             // 仅当尚未有活跃校准（避免覆盖会话内用户新选择）时恢复
             if (_calibration.value == null) {
                 _calibration.value = TrackingCalibration(followStartDate = persisted)
-                loadCalibration(persisted, keepCurrentTimeline = false)
             }
         }
     }
 
     private fun persistCalibration(followStartDate: String?) {
         viewModelScope.launch { TrackingCalibrationStore.save(followStartDate) }
-    }
-
-    private fun loadCalibration(followStartDate: String, keepCurrentTimeline: Boolean) {
-        calibrationLoadJob?.cancel()
-        calibrationLoadJob = viewModelScope.launch {
-            if (keepCurrentTimeline) {
-                _calibration.value = _calibration.value
-                    ?.takeIf { it.followStartDate == followStartDate }
-                    ?.copy(isLoading = true, error = null)
-                    ?: TrackingCalibration(followStartDate = followStartDate)
-            }
-            val result = trackingRepository.getCalibratedTracking(followStartDate)
-            val active = _calibration.value ?: return@launch
-            if (active.followStartDate != followStartDate) return@launch
-            result.fold(
-                onSuccess = { response ->
-                    val calibratedTimeline = response.toTimeline()
-                    hydrateStockInfo(calibratedTimeline)
-                    _calibration.value = active.copy(
-                        timeline = calibratedTimeline,
-                        isLoading = false,
-                        error = null,
-                    )
-                },
-                onFailure = { error ->
-                    _calibration.value = active.copy(
-                        isLoading = false,
-                        error = error.message ?: "跟随校准视图加载失败",
-                    )
-                }
-            )
-        }
     }
 
     fun dismissDetail() {
@@ -229,8 +190,6 @@ class StrategyPositionTrackingViewModel(
                 hydrateStockInfo(timeline)
                 _timeline.value = timeline
                 rebuildSelectedDetail()
-                // 模型流更新（如盘后新交易日落地）时，激活中的校准视图随之重放刷新
-                _calibration.value?.let { loadCalibration(it.followStartDate, keepCurrentTimeline = true) }
             }
         }
         GlobalWebSocketClient.subscribeStrategyPositionTracking(STRATEGY_TRACKING_OWNER)
@@ -354,7 +313,6 @@ class StrategyPositionTrackingViewModel(
     override fun onCleared() {
         super.onCleared()
         detailLoadJob?.cancel()
-        calibrationLoadJob?.cancel()
         GlobalWebSocketClient.unsubscribeStrategyPositionTracking(STRATEGY_TRACKING_OWNER)
     }
 }

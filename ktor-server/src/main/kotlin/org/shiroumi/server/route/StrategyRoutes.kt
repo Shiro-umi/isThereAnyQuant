@@ -5,12 +5,9 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.route
-import kotlinx.datetime.LocalDate
-import model.candle.StrategyPositionTrackingResponse
 import org.shiroumi.database.strategy.daily.repository.DailyProfitPredictionSelectionRepository
 import org.shiroumi.database.strategy.daily.repository.DailyStrategyAuditRepository
 import org.shiroumi.server.dto.ApiResponse
-import org.shiroumi.server.runtime.strategy.StrategyRuntimeBridge
 
 @kotlinx.serialization.Serializable
 data class StrategySentimentResponse(
@@ -82,35 +79,6 @@ fun Route.strategyRoutes() {
                     ApiResponse.error<List<StrategySentimentResponse>>("INTERNAL_ERROR", e.message ?: "服务器内部错误")
                 )
             }
-        }
-
-        // 最早跟随日校准：以 followStartDate 空仓起步重放生产持仓规则，
-        // 返回跟随者视角的持仓跟踪流（strategy-service 按需计算，主链路仍走 STRATEGY_POSITION_TRACKING WebSocket）
-        get("/tracking/calibrated") {
-            val raw = call.request.queryParameters["followStartDate"]
-            val followStartDate = raw?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
-            if (followStartDate == null) {
-                call.respond(
-                    HttpStatusCode.BadRequest,
-                    ApiResponse.error<StrategyPositionTrackingResponse>(
-                        "INVALID_PARAM",
-                        "followStartDate 必须为 yyyy-MM-dd 格式的交易日"
-                    )
-                )
-                return@get
-            }
-            StrategyRuntimeBridge.buildCalibratedTracking(followStartDate).fold(
-                onSuccess = { call.respond(ApiResponse.success(it)) },
-                onFailure = { error ->
-                    call.respond(
-                        HttpStatusCode.BadGateway,
-                        ApiResponse.error<StrategyPositionTrackingResponse>(
-                            "CALIBRATION_UNAVAILABLE",
-                            error.message ?: "策略持仓校准重放当前不可用"
-                        )
-                    )
-                }
-            )
         }
 
         // 获取最新一天的轻量策略状态。行情页主链路使用 STRATEGY_POSITIONS WebSocket。

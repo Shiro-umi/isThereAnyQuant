@@ -119,7 +119,6 @@ import model.candle.StrategyTrackingSection
 import model.candle.StrategyTrackingStockNode
 import org.shiroumi.quant_kmp.di.HttpClientProvider
 import org.shiroumi.quant_kmp.feature.candle.data.repository.CandleRepositoryImpl
-import org.shiroumi.quant_kmp.feature.strategytracking.data.StrategyTrackingRepository
 import org.shiroumi.quant_kmp.ui.agent.theme.AgentTheme
 import org.shiroumi.quant_kmp.ui.animation.AnimationDurations
 import org.shiroumi.quant_kmp.ui.core.adaptive.m3.rememberAdaptiveLayoutConfig
@@ -167,10 +166,6 @@ fun StrategyPositionTrackingScreen(
     viewModel: StrategyPositionTrackingViewModel = viewModel {
         StrategyPositionTrackingViewModel(
             repository = CandleRepositoryImpl(
-                httpClient = HttpClientProvider.apiClient,
-                baseUrl = org.shiroumi.config.AppConfig.apiBaseUrl
-            ),
-            trackingRepository = StrategyTrackingRepository(
                 httpClient = HttpClientProvider.apiClient,
                 baseUrl = org.shiroumi.config.AppConfig.apiBaseUrl
             ),
