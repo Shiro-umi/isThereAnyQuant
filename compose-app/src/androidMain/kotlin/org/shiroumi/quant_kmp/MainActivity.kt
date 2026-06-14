@@ -6,9 +6,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.Surface
-import androidx.compose.ui.Modifier
 import org.shiroumi.quant_kmp.ui.auth.AuthGate
 import org.shiroumi.quant_kmp.ui.theme.AppTheme
 
@@ -30,12 +27,9 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         setContent {
+            // 根背景兜底已收敛进 AppTheme 内部的全屏 Surface，入口不再各自包 Surface。
             AppTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    AuthGate()
-                }
+                AuthGate()
             }
         }
     }

@@ -3,11 +3,14 @@ package org.shiroumi.quant_kmp.ui.theme
 import androidx.compose.foundation.interaction.Interaction
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
@@ -53,8 +56,17 @@ fun AppTheme(content: @Composable () -> Unit) {
         MaterialTheme(
             colorScheme = colorScheme,
             typography = AppTypography(),
-            content = content,
-        )
+        ) {
+            // 根背景兜底：把全屏 surface 收敛进主题，三端统一铺底 colorScheme.background。
+            // iOS（ignoresSafeArea 让 Compose 铺满全屏）依赖此层填充刘海/Home 区，
+            // 避免安全区外露出系统白底；导航转场期间底层恒为主题色，杜绝透明闪现。
+            // Web 由 HTML/CSS 兜底、Android 旧版在入口包过 Surface，此处统一后入口不再各自铺底。
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background,
+                content = content,
+            )
+        }
     }
 }
 
