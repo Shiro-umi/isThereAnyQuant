@@ -1,4 +1,4 @@
-package org.shiroumi.quant_kmp.feature.candle.presentation.sentiment.components
+package org.shiroumi.quant_kmp.feature.sentiment.presentation.components
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column

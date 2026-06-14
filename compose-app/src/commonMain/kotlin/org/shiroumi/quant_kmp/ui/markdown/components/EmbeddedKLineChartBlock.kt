@@ -43,7 +43,7 @@ import model.candle.CandleChartData
 import model.candle.CandlePeriod
 import model.ws.toCandle
 import org.shiroumi.quant_kmp.ui.markdown.CandleTradePlanSpec
-import org.shiroumi.quant_kmp.feature.candle.contract.toCandleChartData
+import org.shiroumi.quant_kmp.data.candle.toCandleChartData
 import org.shiroumi.quant_kmp.service.GlobalWebSocketClient
 import org.shiroumi.quant_kmp.ui.markdown.CandleMarkerSpec
 import org.shiroumi.quant_kmp.ui.markdown.KLineBlockSpec

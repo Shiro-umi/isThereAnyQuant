@@ -1,4 +1,4 @@
-package org.shiroumi.quant_kmp.feature.candle.presentation.sentiment
+package org.shiroumi.quant_kmp.feature.sentiment.presentation
 
 import kotlin.math.abs
 import kotlin.math.exp

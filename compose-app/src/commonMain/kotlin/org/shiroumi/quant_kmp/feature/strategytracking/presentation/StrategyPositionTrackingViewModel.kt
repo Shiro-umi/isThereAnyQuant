@@ -3,12 +3,16 @@ package org.shiroumi.quant_kmp.feature.strategytracking.presentation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 import kotlinx.datetime.DatePeriod
@@ -23,8 +27,9 @@ import model.candle.StockInfo
 import model.candle.StrategyPositionTrackingResponse
 import model.candle.StrategyTrackingSection
 import model.candle.StrategyTrackingStockNode
-import org.shiroumi.quant_kmp.feature.candle.domain.repository.CandleRepository
+import org.shiroumi.quant_kmp.data.candle.CandleRepository
 import org.shiroumi.quant_kmp.service.GlobalWebSocketClient
+import org.shiroumi.quant_kmp.ui.core.mvi.MviViewModel
 import kotlin.uuid.ExperimentalUuidApi
 
 data class SelectedStockRef(
@@ -71,79 +76,150 @@ data class TrackingCalibration(
     val error: String? = null,
 )
 
+/**
+ * 策略持仓跟踪页 UI 状态。收敛原先并列的 7 个 StateFlow 为单一状态。
+ *
+ * [isLoadingTracking] 承载原 isLoading 流语义；为满足 [UiState] 契约用计算属性 [isLoading] 暴露。
+ */
+data class StrategyTrackingUiState(
+    val timeline: StrategyPositionTrackingTimeline? = null,
+    val isLoadingTracking: Boolean = true,
+    val error: String? = null,
+    val selectedStock: SelectedStockRef? = null,
+    val selectedDetail: SelectedStockDetail? = null,
+    val calibration: TrackingCalibration? = null,
+    val listObservedDate: String? = null,
+) : org.shiroumi.quant_kmp.ui.core.mvi.UiState {
+    override val isLoading: Boolean get() = isLoadingTracking
+    override val errorMessage: String? get() = error
+}
+
+sealed interface StrategyTrackingAction : org.shiroumi.quant_kmp.ui.core.mvi.UiAction {
+    data object Refresh : StrategyTrackingAction
+    data class SelectListObservedDate(val tradeDate: String?) : StrategyTrackingAction
+    data class CalibrateFollowStart(val followStartDate: String) : StrategyTrackingAction
+    data object ClearCalibration : StrategyTrackingAction
+    data object DismissDetail : StrategyTrackingAction
+    data class SelectStock(
+        val node: StrategyTrackingStockNode,
+        val section: StrategyTrackingSection,
+        val tradeDate: String,
+    ) : StrategyTrackingAction
+}
+
+/** 该页当前无一次性副作用，保留空标记以满足 [MviViewModel] 契约。 */
+sealed interface StrategyTrackingEffect : org.shiroumi.quant_kmp.ui.core.mvi.UiEffect
+
 class StrategyPositionTrackingViewModel(
     private val repository: CandleRepository,
-) : ViewModel() {
+) : ViewModel(),
+    MviViewModel<StrategyTrackingUiState, StrategyTrackingAction, StrategyTrackingEffect> {
     private companion object {
         const val STRATEGY_TRACKING_OWNER = "tracking"
     }
 
-    private val _timeline = MutableStateFlow<StrategyPositionTrackingTimeline?>(null)
-    val timeline: StateFlow<StrategyPositionTrackingTimeline?> = _timeline.asStateFlow()
+    private val _state = MutableStateFlow(StrategyTrackingUiState())
+    override val state: StateFlow<StrategyTrackingUiState> = _state.asStateFlow()
 
-    private val _isLoading = MutableStateFlow(true)
-    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
-
-    private val _error = MutableStateFlow<String?>(null)
-    val error: StateFlow<String?> = _error.asStateFlow()
-
-    private val _selectedStock = MutableStateFlow<SelectedStockRef?>(null)
-    val selectedStock: StateFlow<SelectedStockRef?> = _selectedStock.asStateFlow()
-
-    private val _selectedDetail = MutableStateFlow<SelectedStockDetail?>(null)
-    val selectedDetail: StateFlow<SelectedStockDetail?> = _selectedDetail.asStateFlow()
-
-    private val _calibration = MutableStateFlow<TrackingCalibration?>(null)
-    val calibration: StateFlow<TrackingCalibration?> = _calibration.asStateFlow()
-
-    /**
-     * 列表浏览的观察日（yyyy-MM-dd）。null = 跟随最新日（默认）。
-     * 列表面板据此翻页展示窗口内任意确认交易日的持有/选股/清仓三列；全景流转图不受影响。
-     */
-    private val _listObservedDate = MutableStateFlow<String?>(null)
-    val listObservedDate: StateFlow<String?> = _listObservedDate.asStateFlow()
+    /** 当前无一次性事件，留空流即可。 */
+    override val effect: Flow<StrategyTrackingEffect> = emptyFlow()
 
     private var detailLoadJob: Job? = null
     private val stockInfoCache = linkedMapOf<String, StockInfo>()
+
+    // 与 CandleViewModel/SentimentViewModel 一致的引用计数：同一 ViewModel 可被多个 NavEntry
+    // 同时持有，用计数代替 boolean，避免新 entry 已 enter 后被旧 entry 的 onScreenLeave 误清理。
+    private var screenActiveRefCount: Int = 0
+    private val isScreenActive: Boolean get() = screenActiveRefCount > 0
+    private var screenLeaveCleanupJob: Job? = null
 
     init {
         observeStrategyPositionTracking()
     }
 
-    fun refresh() {
+    /**
+     * 跟踪页进入前台可见区域：订阅持仓跟踪 topic。
+     *
+     * 订阅生命周期收敛到 ViewModel 单一所有者，从 0→1 时才真正下发订阅命令。
+     */
+    fun onScreenEnter() {
+        screenLeaveCleanupJob?.cancel()
+        screenLeaveCleanupJob = null
+        val wasInactive = screenActiveRefCount == 0
+        screenActiveRefCount += 1
+        if (!wasInactive) return
+        GlobalWebSocketClient.subscribeStrategyPositionTracking(STRATEGY_TRACKING_OWNER)
+    }
+
+    /**
+     * 跟踪页离开可见区域：300ms 防抖后撤销订阅，避免快速切页时误解订。
+     */
+    fun onScreenLeave() {
+        if (screenActiveRefCount == 0) return
+        screenActiveRefCount -= 1
+        if (screenActiveRefCount > 0) return
+        screenLeaveCleanupJob?.cancel()
+        screenLeaveCleanupJob = viewModelScope.launch {
+            delay(300)
+            if (!isScreenActive) {
+                GlobalWebSocketClient.unsubscribeStrategyPositionTracking(STRATEGY_TRACKING_OWNER)
+            }
+            screenLeaveCleanupJob = null
+        }
+    }
+
+    override fun dispatch(action: StrategyTrackingAction) {
+        when (action) {
+            is StrategyTrackingAction.Refresh -> refresh()
+            is StrategyTrackingAction.SelectListObservedDate -> selectListObservedDate(action.tradeDate)
+            is StrategyTrackingAction.CalibrateFollowStart -> calibrateFollowStart(action.followStartDate)
+            is StrategyTrackingAction.ClearCalibration -> clearCalibration()
+            is StrategyTrackingAction.DismissDetail -> dismissDetail()
+            is StrategyTrackingAction.SelectStock -> selectStock(action.node, action.section, action.tradeDate)
+        }
+    }
+
+    private fun refresh() {
         GlobalWebSocketClient.refreshStrategyPositionTracking(STRATEGY_TRACKING_OWNER)
     }
 
     /** 切换列表浏览观察日；传 null 回到最新日。校准/模型流共用，仅影响列表面板。 */
-    fun selectListObservedDate(tradeDate: String?) {
-        _listObservedDate.value = tradeDate
+    private fun selectListObservedDate(tradeDate: String?) {
+        _state.update { it.copy(listObservedDate = tradeDate) }
     }
 
     /** 激活最早跟随日校准：以 [followStartDate] 为第一笔跟随买入日拉取重放视图，并通过 WS 同步到服务端。 */
-    fun calibrateFollowStart(followStartDate: String) {
-        _calibration.value = TrackingCalibration(followStartDate = followStartDate)
-        _listObservedDate.value = null
+    private fun calibrateFollowStart(followStartDate: String) {
         // 新的用户意图作废任何旧的订阅错误，避免上一轮残留错误混入本次校准展示。
-        _error.value = null
+        _state.update {
+            it.copy(
+                calibration = TrackingCalibration(followStartDate = followStartDate),
+                listObservedDate = null,
+                error = null,
+            )
+        }
         GlobalWebSocketClient.setTrackingFollowStartDate(followStartDate)
     }
 
     /** 清除校准，回到模型自身持仓流，并通过 WS 清空服务端设置。 */
-    fun clearCalibration() {
-        _calibration.value = null
-        _listObservedDate.value = null
+    private fun clearCalibration() {
         // 清除是明确的用户意图，连同主错误流一并复位，防止校准期积压的迟到 ERROR 在清除后冒出。
-        _error.value = null
+        _state.update {
+            it.copy(
+                calibration = null,
+                listObservedDate = null,
+                error = null,
+            )
+        }
         GlobalWebSocketClient.setTrackingFollowStartDate("")
     }
 
-    fun dismissDetail() {
+    private fun dismissDetail() {
         detailLoadJob?.cancel()
-        _selectedStock.value = null
-        _selectedDetail.value = null
+        _state.update { it.copy(selectedStock = null, selectedDetail = null) }
     }
 
-    fun selectStock(
+    private fun selectStock(
         node: StrategyTrackingStockNode,
         section: StrategyTrackingSection,
         tradeDate: String,
@@ -159,12 +235,16 @@ class StrategyPositionTrackingViewModel(
                 slotIndex = node.slotIndex,
             ),
         )
-        _selectedStock.value = selected
-        _selectedDetail.value = SelectedStockDetail(
-            selected = selected,
-            stockInfo = stockInfoCache[node.stockCode],
-            isLoading = true,
-        )
+        _state.update {
+            it.copy(
+                selectedStock = selected,
+                selectedDetail = SelectedStockDetail(
+                    selected = selected,
+                    stockInfo = stockInfoCache[node.stockCode],
+                    isLoading = true,
+                ),
+            )
+        }
         loadSelectedDetail(selected)
     }
 
@@ -184,40 +264,44 @@ class StrategyPositionTrackingViewModel(
             .map<StrategyPositionTrackingResponse?, TrackingEvent> { TrackingEvent.Response(it) }
         viewModelScope.launch {
             merge(errorEvents, responseEvents).collectLatest { event ->
-                _isLoading.value = false
                 when (event) {
                     is TrackingEvent.Error -> {
-                        val active = _calibration.value
+                        val active = _state.value.calibration
                         if (active != null) {
-                            _calibration.value = CalibrationStateReducer.onError(active, event.message)
+                            val reduced = CalibrationStateReducer.onError(active, event.message)
+                            _state.update { it.copy(isLoadingTracking = false, calibration = reduced) }
                         } else {
                             // 非校准态的订阅错误写主错误流，由 timeline 兜底渲染失败态。
-                            _error.value = event.message
+                            _state.update { it.copy(isLoadingTracking = false, error = event.message) }
                         }
                     }
                     is TrackingEvent.Response -> {
                         val response = event.response
                         if (response == null) {
-                            _timeline.value = null
+                            _state.update { it.copy(isLoadingTracking = false, timeline = null) }
                             return@collectLatest
                         }
-                        _error.value = null
                         val timeline = response.toTimeline()
                         hydrateStockInfo(timeline)
-                        _timeline.value = timeline
-
-                        _calibration.value = CalibrationStateReducer.onResponse(
-                            current = _calibration.value,
+                        val reducedCalibration = CalibrationStateReducer.onResponse(
+                            current = _state.value.calibration,
                             wsFollowStartDate = response.followStartDate,
                             timeline = timeline,
                         )
+                        _state.update {
+                            it.copy(
+                                isLoadingTracking = false,
+                                error = null,
+                                timeline = timeline,
+                                calibration = reducedCalibration,
+                            )
+                        }
 
                         rebuildSelectedDetail()
                     }
                 }
             }
         }
-        GlobalWebSocketClient.subscribeStrategyPositionTracking(STRATEGY_TRACKING_OWNER)
     }
 
     private fun hydrateStockInfo(timeline: StrategyPositionTrackingTimeline) {
@@ -246,57 +330,73 @@ class StrategyPositionTrackingViewModel(
                 val candleResult = repository.getStockCandles(selected.node.stockCode, startDate, endDate)
                 val infoResult = repository.getStockByCode(selected.node.stockCode)
                 val historicalCandleData = candleResult.getOrElse {
-                    if (_selectedStock.value?.cardKey == selected.cardKey) {
-                        _selectedDetail.value = _selectedDetail.value?.copy(
-                            isLoading = false,
-                            error = it.message ?: "K线数据加载失败"
-                        )
+                    if (_state.value.selectedStock?.cardKey == selected.cardKey) {
+                        _state.update { state ->
+                            state.copy(
+                                selectedDetail = state.selectedDetail?.copy(
+                                    isLoading = false,
+                                    error = it.message ?: "K线数据加载失败"
+                                )
+                            )
+                        }
                     }
                     return@launch
                 }
                 val stockInfo = infoResult.getOrNull()
                 stockInfo?.let { stockInfoCache[it.code] = it }
 
-                if (_selectedStock.value?.cardKey != selected.cardKey) {
+                if (_state.value.selectedStock?.cardKey != selected.cardKey) {
                     return@launch
                 }
 
-                _selectedDetail.value = SelectedStockDetail(
-                    selected = selected,
-                    candleData = historicalCandleData,
-                    stockInfo = stockInfo ?: stockInfoCache[selected.node.stockCode],
-                    isLoading = false,
-                    error = null,
-                )
-            } catch (e: Exception) {
-                if (_selectedStock.value?.cardKey == selected.cardKey) {
-                    _selectedDetail.value = _selectedDetail.value?.copy(
-                        isLoading = false,
-                        error = e.message ?: "加载失败"
+                _state.update {
+                    it.copy(
+                        selectedDetail = SelectedStockDetail(
+                            selected = selected,
+                            candleData = historicalCandleData,
+                            stockInfo = stockInfo ?: stockInfoCache[selected.node.stockCode],
+                            isLoading = false,
+                            error = null,
+                        )
                     )
+                }
+            } catch (e: Exception) {
+                if (_state.value.selectedStock?.cardKey == selected.cardKey) {
+                    _state.update { state ->
+                        state.copy(
+                            selectedDetail = state.selectedDetail?.copy(
+                                isLoading = false,
+                                error = e.message ?: "加载失败"
+                            )
+                        )
+                    }
                 }
             }
         }
     }
 
     private fun rebuildSelectedDetail() {
-        val current = _selectedDetail.value ?: return
-        val timeline = _timeline.value ?: return
+        val current = _state.value.selectedDetail ?: return
+        val timeline = _state.value.timeline ?: return
 
         val latestNode = timeline.days
             .flatMap { it.selection + it.holdings + it.cleared }
             .firstOrNull { it.stockCode == current.selected.node.stockCode && it.section == current.selected.section }
 
         if (latestNode != null && latestNode != current.selected.node) {
-            _selectedDetail.value = current.copy(
-                selected = current.selected.copy(node = latestNode)
-            )
+            _state.update {
+                it.copy(
+                    selectedDetail = current.copy(
+                        selected = current.selected.copy(node = latestNode)
+                    )
+                )
+            }
         }
     }
 
     private fun resolveStockName(code: String): String =
         stockInfoCache[code]?.name
-            ?: _timeline.value?.days
+            ?: _state.value.timeline?.days
                 ?.asReversed()
                 ?.asSequence()
                 ?.flatMap { day -> (day.selection + day.holdings + day.cleared).asSequence() }
@@ -338,6 +438,10 @@ class StrategyPositionTrackingViewModel(
     override fun onCleared() {
         super.onCleared()
         detailLoadJob?.cancel()
+        screenActiveRefCount = 0
+        screenLeaveCleanupJob?.cancel()
+        screenLeaveCleanupJob = null
+        // 兜底解订：防止 ViewModel 直接销毁而未走 onScreenLeave。
         GlobalWebSocketClient.unsubscribeStrategyPositionTracking(STRATEGY_TRACKING_OWNER)
     }
 }

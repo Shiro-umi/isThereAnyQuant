@@ -1,4 +1,4 @@
-package org.shiroumi.quant_kmp.feature.candle.presentation.sentiment
+package org.shiroumi.quant_kmp.feature.sentiment.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -23,7 +23,7 @@ import org.shiroumi.quant_kmp.service.GlobalWebSocketClient
  * 这里不再承担任何旧盘中快照恢复或本地重算职责。
  */
 class SentimentViewModel(
-    private val repository: org.shiroumi.quant_kmp.feature.candle.domain.repository.CandleRepository
+    private val repository: org.shiroumi.quant_kmp.data.candle.CandleRepository
 ) : ViewModel() {
     private companion object {
         const val RETRY_DELAY_MS = 1_000L
@@ -45,10 +45,59 @@ class SentimentViewModel(
     private var retryJob: Job? = null
     private var retryCount = 0
 
+    // 与 CandleViewModel 一致的引用计数：同一 ViewModel 可被多个 NavEntry 同时持有，
+    // 用计数代替 boolean，避免新 entry 已 enter 后被旧 entry 的 onScreenLeave 误清理。
+    private var screenActiveRefCount: Int = 0
+    private val isScreenActive: Boolean get() = screenActiveRefCount > 0
+    private var screenLeaveCleanupJob: Job? = null
+
     init {
         loadSentiment()
         observeIntradaySnapshot()
         observeIntradaySnapshotError()
+    }
+
+    /**
+     * 情绪页进入前台可见区域：订阅盘中快照。
+     *
+     * 订阅生命周期收敛到 ViewModel 单一所有者，不再由 Screen 与 ViewModel 各持一处 owner
+     * 字符串而产生竞争。
+     */
+    fun onScreenEnter() {
+        screenLeaveCleanupJob?.cancel()
+        screenLeaveCleanupJob = null
+        val wasInactive = screenActiveRefCount == 0
+        screenActiveRefCount += 1
+        if (!wasInactive) return
+        GlobalWebSocketClient.subscribeIntradaySnapshot(INTRADAY_SNAPSHOT_OWNER)
+    }
+
+    /**
+     * 情绪页离开可见区域：300ms 防抖后撤销订阅，避免快速切页时误解订。
+     */
+    fun onScreenLeave() {
+        if (screenActiveRefCount == 0) return
+        screenActiveRefCount -= 1
+        if (screenActiveRefCount > 0) return
+        screenLeaveCleanupJob?.cancel()
+        screenLeaveCleanupJob = viewModelScope.launch {
+            delay(300)
+            if (!isScreenActive) {
+                GlobalWebSocketClient.unsubscribeIntradaySnapshot(INTRADAY_SNAPSHOT_OWNER)
+                retryJob?.cancel()
+                retryJob = null
+            }
+            screenLeaveCleanupJob = null
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        screenActiveRefCount = 0
+        screenLeaveCleanupJob?.cancel()
+        screenLeaveCleanupJob = null
+        retryJob?.cancel()
+        retryJob = null
     }
 
     private fun loadSentiment() {

@@ -34,14 +34,10 @@ fun DataUpdateStatusIndicator(
     centered: Boolean = false
 ) {
     val service = remember { DataUpdateService.getInstance() }
+    // status/shouldShowIndicator 由 WhileSubscribed 惰性绑定：collectAsState 订阅即拉起上游，
+    // 离开组合订阅归零后自动停，无需手动 start/stop。
     val status by service.status.collectAsState()
     val shouldShow by service.shouldShowIndicator.collectAsState()
-
-    // 启动服务
-    DisposableEffect(Unit) {
-        service.start()
-        onDispose { service.stop() }
-    }
 
     AnimatedVisibility(
         visible = shouldShow,

@@ -1,4 +1,4 @@
-package org.shiroumi.quant_kmp.feature.candle.presentation.sentiment.components
+package org.shiroumi.quant_kmp.feature.sentiment.presentation.components
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -24,7 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import model.candle.StrategySentimentResponse
-import org.shiroumi.quant_kmp.feature.candle.presentation.sentiment.ParameterSpec
+import org.shiroumi.quant_kmp.feature.sentiment.presentation.ParameterSpec
 import org.shiroumi.quant_kmp.ui.agent.theme.AgentTheme
 
 @Composable

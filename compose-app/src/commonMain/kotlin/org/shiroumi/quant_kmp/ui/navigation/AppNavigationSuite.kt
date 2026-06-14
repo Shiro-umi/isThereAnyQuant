@@ -380,7 +380,8 @@ private fun CompactContent(
                     onResumeAgent = { agentViewModel.dispatch(org.shiroumi.quant_kmp.ui.agent.state.AgentContract.Action.ResumeAgent) },
                     onConnect = agentOnConnect,
                     onNewSession = { agentViewModel.dispatch(org.shiroumi.quant_kmp.ui.agent.state.AgentContract.Action.NewSession) },
-                    isCompactExpanded = agentSidebarState.isExpanded
+                    isCompactExpanded = agentSidebarState.isExpanded,
+                    effect = agentViewModel.effect
                 )
             }
         }
@@ -506,7 +507,8 @@ private fun ExpandedContent(
                     onResumeAgent = { agentViewModel.dispatch(org.shiroumi.quant_kmp.ui.agent.state.AgentContract.Action.ResumeAgent) },
                     onConnect = { agentViewModel.dispatch(org.shiroumi.quant_kmp.ui.agent.state.AgentContract.Action.Connect) },
                     onCollapse = if (!shouldAutoCollapse) null else {{ agentSidebarViewModel.setExpanded(false) }},
-                    onNewSession = { agentViewModel.dispatch(org.shiroumi.quant_kmp.ui.agent.state.AgentContract.Action.NewSession) }
+                    onNewSession = { agentViewModel.dispatch(org.shiroumi.quant_kmp.ui.agent.state.AgentContract.Action.NewSession) },
+                    effect = agentViewModel.effect
                 )
             }
         }
@@ -537,7 +539,8 @@ private fun ExpandedContent(
                     onResumeAgent = { agentViewModel.dispatch(org.shiroumi.quant_kmp.ui.agent.state.AgentContract.Action.ResumeAgent) },
                     onConnect = { agentViewModel.dispatch(org.shiroumi.quant_kmp.ui.agent.state.AgentContract.Action.Connect) },
                     onCollapse = { onOverlayExpandedChange(false) },
-                    onNewSession = { agentViewModel.dispatch(org.shiroumi.quant_kmp.ui.agent.state.AgentContract.Action.NewSession) }
+                    onNewSession = { agentViewModel.dispatch(org.shiroumi.quant_kmp.ui.agent.state.AgentContract.Action.NewSession) },
+                    effect = agentViewModel.effect
                 )
             }
         }

@@ -1,4 +1,4 @@
-package org.shiroumi.quant_kmp.feature.candle.domain.repository
+package org.shiroumi.quant_kmp.data.candle
 
 import kotlinx.datetime.LocalDate
 import model.candle.CandleChartData

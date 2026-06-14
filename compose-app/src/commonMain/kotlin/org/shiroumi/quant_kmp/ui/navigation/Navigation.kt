@@ -28,7 +28,7 @@ import org.shiroumi.quant_kmp.NavDest
 import org.shiroumi.quant_kmp.di.HttpClientProvider
 import org.shiroumi.quant_kmp.feature.agent.navigation.AgentAnalysisRoute
 import org.shiroumi.quant_kmp.feature.auth.AuthContract
-import org.shiroumi.quant_kmp.feature.candle.data.repository.CandleRepositoryImpl
+import org.shiroumi.quant_kmp.data.candle.CandleRepositoryImpl
 import org.shiroumi.quant_kmp.feature.candle.navigation.CandleRoute
 import org.shiroumi.quant_kmp.feature.candle.presentation.CandleViewModel
 import org.shiroumi.quant_kmp.service.GlobalWebSocketClient
@@ -133,7 +133,7 @@ fun Navigation() = MultiPlatform {
             }
             is NavDest.Sentiment -> NavEntry(key) {
                 OpaquePage {
-                    org.shiroumi.quant_kmp.feature.candle.presentation.sentiment.SentimentScreen()
+                    org.shiroumi.quant_kmp.feature.sentiment.presentation.SentimentScreen()
                 }
             }
             is NavDest.PositionTracking -> NavEntry(key) {
