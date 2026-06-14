@@ -561,10 +561,12 @@ object AppWebSocketConnectionManager {
      * 旧命令的 `isStale` 检查全部失效，服务端必须为中途点过的每一只股票完整跑一遍
      * 投影 + 序列化 + 下发。
      *
-     * SUBSCRIBE 和 UNSUBSCRIBE 共用同一前缀（不再拆 sub/unsub），是因为
-     * `CandleDataProvider.subscribe` 在执行时会主动清理本 session 同 period 下其他
-     * tsCode 的旧订阅——业务不变量由 provider 自己保证，不需要依赖 UNSUBSCRIBE 命令
-     * 一定被执行。这样中间过期的 UNSUBSCRIBE 即使被 stale 丢弃也不会泄漏订阅。
+     * SUBSCRIBE 和 UNSUBSCRIBE 共用同一前缀（不再拆 sub/unsub），是因为 `CandleDataProvider`
+     * 对每个 (session, key) 做引用计数：每次 SUBSCRIBE 抬一份计数，对应的 UNSUBSCRIBE 落一份。
+     * 同一 period 收敛域内只保留 commandSeq 最大的那条命令——前端切股是"先对旧 tsCode 发
+     * UNSUBSCRIBE，再对新 tsCode 发 SUBSCRIBE"，新 SUBSCRIBE 的 seq 更大，旧 tsCode 的
+     * UNSUBSCRIBE 即使被 stale 丢弃也无伤：旧 tsCode 那份引用会由后续同周期的 UNSUBSCRIBE 或
+     * session 断开时的 cleanupSession 一并回收，不会泄漏。
      *
      * 收敛到 period 而非全局，是因为不同周期之间的订阅是叠加关系：
      * 用户在切日线时不应让另一只股票的分钟线订阅被丢弃。

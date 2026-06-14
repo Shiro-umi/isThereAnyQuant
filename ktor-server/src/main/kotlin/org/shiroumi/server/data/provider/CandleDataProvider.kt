@@ -46,6 +46,21 @@ class CandleDataProvider(
         ConcurrentHashMap<Pair<DefaultWebSocketServerSession, CandleKey>, model.ws.CandleSubscribeRequest>()
     private val lastSentVersion = ConcurrentHashMap<CandleKey, Long>()
 
+    // --- Subscription reference counting ---
+    // 每个 `(session, CandleKey)` 维护一个引用计数。
+    //
+    // 为什么是计数而不是布尔在场：同一个 session 在同一个 (tsCode, period) 下会被多个互相独立的
+    // 前端组件订阅——一张主图加上分析报告里若干张同周期 EmbeddedKLineChartBlock。每个组件在
+    // onDispose 时只应释放"自己"的那一份引用，不能把整条订阅一并掐断、误伤仍在看同一只股票的
+    // 兄弟组件。只有计数归零，才真正把 session 从该 key 的 subscribers 摘除并清理瞬时状态。
+    //
+    // 这同时去掉了旧的"同 session 同 period 只能看一只股票"全局互斥：subscribe() 不再主动释放
+    // 其他 tsCode 的订阅，多只股票可在同 session 同 period 下并存。前端"同周期只看一只"的业务
+    // 约束改由客户端 selectStock / selectPeriod 流程显式 stopCandleSubscription 保证，服务端
+    // 只做忠实的增量引用管理，不再越权强制收口。
+    private val subscriptionRefCount =
+        ConcurrentHashMap<Pair<DefaultWebSocketServerSession, CandleKey>, Int>()
+
     // --- Payload encode cache ---
     // 缓存 (CandleKey, version, requestSignature) → 已编码的 K 线主体（candles 数组）JSON 片段。
     //
@@ -70,11 +85,14 @@ class CandleDataProvider(
         request: model.ws.CandleSubscribeRequest
     ) {
         val startNanos = System.nanoTime()
-        // 业务不变量：同一 session 同一周期同时只看一只股票（CandleViewModel.selectStock/
-        // selectPeriod 切股切周期总是先 UNSUBSCRIBE 再 SUBSCRIBE）。由 server 自己守住这个
-        // 不变量，可以让 SUBSCRIBE/UNSUBSCRIBE_CANDLE 共用同一个收敛域（candle:<period>），
-        // 旧 tsCode 的命令在 channel 里被 stale 丢弃也不会留下泄漏订阅。
-        releaseOtherTsCodeSubscriptions(session, key)
+        // 增量引用管理：把本次订阅记到 (session, key) 的引用计数上。首次进入（计数 0 → 1）才把
+        // session 加入该 key 的 subscribers 集合，后续同 (session, key) 的重复订阅只抬计数，不重复
+        // 入集合。不再主动释放本 session 同 period 下其他 tsCode 的订阅——多只股票在同 session 同
+        // period 下并存，由客户端 selectStock / selectPeriod 显式 stopCandleSubscription 守住
+        // "同周期只看一只"的业务约束。
+        // compute 在 ConcurrentHashMap 上对同一 key 是原子的，保证并发 subscribe/unsubscribe 不会
+        // 让计数错乱或为负。
+        subscriptionRefCount.compute(session to key) { _, current -> (current ?: 0) + 1 }
         subscribers.computeIfAbsent(key) { ConcurrentHashMap.newKeySet() }.add(session)
         subscriptionRequests[session to key] = request
         CandleTrace.log(
@@ -111,37 +129,48 @@ class CandleDataProvider(
     }
 
     fun unsubscribe(session: DefaultWebSocketServerSession, key: CandleKey) {
-        subscribers[key]?.remove(session)
-        if (subscribers[key].isNullOrEmpty()) {
-            subscribers.remove(key)
-            lastSentVersion.remove(key)
-        }
-        subscriptionRequests.remove(session to key)
-    }
-
-    private fun releaseOtherTsCodeSubscriptions(
-        session: DefaultWebSocketServerSession,
-        targetKey: CandleKey
-    ) {
-        val obsoleteKeys = subscriptionRequests.keys
-            .asSequence()
-            .filter { (registeredSession, registeredKey) ->
-                registeredSession == session &&
-                    registeredKey.period == targetKey.period &&
-                    registeredKey != targetKey
+        val pair = session to key
+        // 原子地把引用计数减一。compute 返回 null 时 ConcurrentHashMap 会删除该 entry，
+        // 因此"计数归零"与"摘除 entry"是同一步完成，不会留下 0 计数的残骸；计数仍为正时
+        // 保留 entry，只是少了一份引用。对未订阅过的 (session, key) 调用是无副作用的（current
+        // 为 null 直接返回 null，不会出现负数）。
+        val remaining = subscriptionRefCount.compute(pair) { _, current ->
+            when {
+                current == null -> null
+                current <= 1 -> null
+                else -> current - 1
             }
-            .map { it.second }
-            .toList()
-        obsoleteKeys.forEach { unsubscribe(session, it) }
+        }
+        if (remaining == null) {
+            // 最后一份引用释放：从 subscribers 集合摘除 session，并清理本 (session, key) 的瞬时
+            // 请求快照。当该 key 不再有任何 session 关注时，连同已发版本一并清空，避免泄漏。
+            subscribers[key]?.remove(session)
+            if (subscribers[key].isNullOrEmpty()) {
+                subscribers.remove(key)
+                lastSentVersion.remove(key)
+            }
+            subscriptionRequests.remove(pair)
+        }
     }
 
     fun cleanupSession(session: DefaultWebSocketServerSession) {
-        val keys = subscriptionRequests.keys
+        // session 断开时一次性清空它的全部订阅，无论各 (session, key) 的引用计数残值是多少。
+        // 同时遍历 subscriptionRefCount 与 subscriptionRequests 两张表收集该 session 绑定过的
+        // 全部 key，保证引用计数不会在 session 已消失后仍留下残骸导致内存泄漏。
+        val keys = (subscriptionRefCount.keys.asSequence() + subscriptionRequests.keys.asSequence())
             .filter { (registeredSession, _) -> registeredSession == session }
             .map { it.second }
             .distinct()
+            .toList()
         keys.forEach { key ->
-            unsubscribe(session, key)
+            val pair = session to key
+            subscriptionRefCount.remove(pair)
+            subscribers[key]?.remove(session)
+            if (subscribers[key].isNullOrEmpty()) {
+                subscribers.remove(key)
+                lastSentVersion.remove(key)
+            }
+            subscriptionRequests.remove(pair)
         }
     }
 

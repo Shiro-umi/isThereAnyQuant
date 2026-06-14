@@ -173,7 +173,19 @@ private fun emaSeries(values: DoubleArray, period: Int): DoubleArray {
 }
 
 private fun zScoreSeries(values: DoubleArray, window: Int, minPeriods: Int): DoubleArray {
-    val out = DoubleArray(values.size)
+    val n = values.size
+    val out = DoubleArray(n)
+    if (n == 0) return out
+
+    // 前缀和与前缀平方和：prefixSum[k] = sum(values[0 until k])，长度 n+1，prefixSum[0]=0。
+    // 任意闭区间 [from, index] 的统计量由前缀差 O(1) 得到，整体从 O(n*window) 降到 O(n)。
+    val prefixSum = DoubleArray(n + 1)
+    val prefixSumSq = DoubleArray(n + 1)
+    for (i in 0 until n) {
+        prefixSum[i + 1] = prefixSum[i] + values[i]
+        prefixSumSq[i + 1] = prefixSumSq[i] + values[i] * values[i]
+    }
+
     for (index in values.indices) {
         val from = max(0, index - window + 1)
         val size = index - from + 1
@@ -181,15 +193,13 @@ private fun zScoreSeries(values: DoubleArray, window: Int, minPeriods: Int): Dou
             out[index] = 0.0
             continue
         }
-        var sum = 0.0
-        for (i in from..index) sum += values[i]
+        val sum = prefixSum[index + 1] - prefixSum[from]
+        val sumSq = prefixSumSq[index + 1] - prefixSumSq[from]
         val mean = sum / size
-        var variance = 0.0
-        for (i in from..index) {
-            val diff = values[i] - mean
-            variance += diff * diff
-        }
-        val std = sqrt(variance / size).takeIf { it > 1e-8 } ?: 1.0
+        // 总体方差 = E[x²] - E[x]²，与逐窗口 Σ(x-mean)²/size 数学等价；
+        // 钳到 0 防止浮点抵消产生的微小负值。
+        val variance = max(0.0, sumSq / size - mean * mean)
+        val std = sqrt(variance).takeIf { it > 1e-8 } ?: 1.0
         out[index] = (values[index] - mean) / std
     }
     return out
@@ -214,15 +224,25 @@ private fun applyOverheatGuardInPlace(
     days: Int,
     decay: Double,
 ) {
-    if (combinedSeries.isEmpty()) return
-    for (i in combinedSeries.indices) {
+    val n = combinedSeries.size
+    if (n == 0) return
+
+    // 关键语义：原实现窗口 [from, i] 内的计数读取的是「已经过 decay」后的左侧值
+    // （索引 < i 在更早迭代里已被衰减覆写），唯独索引 i 自身在计数时仍是原值。
+    // decay < 1.0 时一次衰减只会变小，可能把原本 > threshold 的左侧值压到 <= threshold，
+    // 因此不能对原始数组建静态前缀计数，必须沿已定型值滚动维护前缀计数。
+    // prefixCount[k] = count(已定型的 combinedSeries[0 until k] > threshold)，长度 n+1，prefixCount[0]=0。
+    val prefixCount = IntArray(n + 1)
+    for (i in 0 until n) {
         val from = max(0, i - days + 1)
-        var count = 0
-        for (j in from..i) {
-            if (combinedSeries[j] > threshold) count += 1
-        }
+        // 左侧 [from, i-1] 取已定型前缀计数，加上当前未衰减的 i 自身贡献，复刻原逐窗口读取语义。
+        val leftCount = prefixCount[i] - prefixCount[from]
+        val selfCount = if (combinedSeries[i] > threshold) 1 else 0
+        val count = leftCount + selfCount
         val ratio = count.toDouble() / (i - from + 1).toDouble().coerceAtLeast(1.0)
         combinedSeries[i] = combinedSeries[i] * decay.pow(ratio)
+        // i 衰减定型后并入前缀计数，供后续窗口左侧 O(1) 查询。
+        prefixCount[i + 1] = prefixCount[i] + if (combinedSeries[i] > threshold) 1 else 0
     }
 }
 

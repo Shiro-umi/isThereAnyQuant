@@ -20,7 +20,10 @@ import utils.logger
  * - 任何 Candle 消费方都不应该绕过它直接摸 snapshot manager 的内部缓存结构
  * - 它负责把"当前是否 ready"与"如何等待 ready"变成稳定语义
  */
-class CandleDataFacade(
+// `open` 仅为给下游消费方（如 CandleDataProvider）提供一个干净的读口测试替身：
+// provider 被定位为纯 topic mapper，单测它的订阅/推送逻辑时无需拉起整条数据库链路，
+// 只要替换 readSnapshot 的返回即可。生产实现保持唯一，open 不改变运行期行为。
+open class CandleDataFacade(
     private val snapshotManager: CandleSnapshotManager
 ) {
     private val logger by logger("CandleDataFacade")
@@ -32,7 +35,7 @@ class CandleDataFacade(
      * 这样可以在不污染读模型的前提下，把"provider 读没读到 snapshot、耗时多少"
      * 这类排障信息稳定打印出来。
      */
-    fun readSnapshot(key: CandleKey, requestSeq: Long? = null): CandleSnapshotState? {
+    open fun readSnapshot(key: CandleKey, requestSeq: Long? = null): CandleSnapshotState? {
         val startNanos = System.nanoTime()
         val snapshot = snapshotManager.readSnapshot(key)
         CandleTrace.log(
