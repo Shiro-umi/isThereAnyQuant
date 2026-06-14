@@ -6,9 +6,13 @@ import androidx.compose.material.icons.outlined.CandlestickChart
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.ShowChart
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.adaptive.navigation3.ListDetailSceneStrategy
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -117,19 +121,25 @@ fun Navigation() = MultiPlatform {
                     ListDetailSceneStrategy.detailPane()
                 }
             ) {
-                CandleRoute(
-                    toastHostState = toastHostState,
-                    viewModel = candleViewModel,
-                    route = key,
-                    onNavigateToDetail = { code -> navigator.navigate(NavDest.Candle(code)) },
-                    onNavigateBack = { navigator.goBack() }
-                )
+                OpaquePage {
+                    CandleRoute(
+                        toastHostState = toastHostState,
+                        viewModel = candleViewModel,
+                        route = key,
+                        onNavigateToDetail = { code -> navigator.navigate(NavDest.Candle(code)) },
+                        onNavigateBack = { navigator.goBack() }
+                    )
+                }
             }
             is NavDest.Sentiment -> NavEntry(key) {
-                org.shiroumi.quant_kmp.feature.candle.presentation.sentiment.SentimentScreen()
+                OpaquePage {
+                    org.shiroumi.quant_kmp.feature.candle.presentation.sentiment.SentimentScreen()
+                }
             }
             is NavDest.PositionTracking -> NavEntry(key) {
-                org.shiroumi.quant_kmp.feature.strategytracking.presentation.StrategyPositionTrackingScreen()
+                OpaquePage {
+                    org.shiroumi.quant_kmp.feature.strategytracking.presentation.StrategyPositionTrackingScreen()
+                }
             }
             is NavDest.AgentResults -> NavEntry(
                 key = key,
@@ -139,18 +149,22 @@ fun Navigation() = MultiPlatform {
                     ListDetailSceneStrategy.detailPane()
                 }
             ) {
-                AgentAnalysisRoute(
-                    toastHostState = toastHostState,
-                    route = key,
-                    onNavigateToDetail = { resultId -> navigator.navigate(NavDest.AgentResults(resultId)) },
-                    onNavigateBack = { navigator.goBack() }
-                )
+                OpaquePage {
+                    AgentAnalysisRoute(
+                        toastHostState = toastHostState,
+                        route = key,
+                        onNavigateToDetail = { resultId -> navigator.navigate(NavDest.AgentResults(resultId)) },
+                        onNavigateBack = { navigator.goBack() }
+                    )
+                }
             }
             is NavDest.Settings -> NavEntry(key) {
-                org.shiroumi.quant_kmp.feature.settings.SettingsRoute(
-                    user = authState.user,
-                    onLogout = { authViewModel.dispatch(AuthContract.Action.Logout) }
-                )
+                OpaquePage {
+                    org.shiroumi.quant_kmp.feature.settings.SettingsRoute(
+                        user = authState.user,
+                        onLogout = { authViewModel.dispatch(AuthContract.Action.Logout) }
+                    )
+                }
             }
             else -> NavEntry(key) { error("未处理的 NavKey 类型: ${key::class.simpleName}，请在 entryProvider 中添加对应分支") }
         }
@@ -167,5 +181,23 @@ fun Navigation() = MultiPlatform {
             sidebarSelectedStock = sidebarSelectedStock
         )
     }
+}
+
+/**
+ * 每个 NavEntry 内容的不透明铺底。
+ *
+ * NavDisplay 切换顶级页时新页面 fadeIn、旧页面 fadeOut，淡入期间两者叠加可见。
+ * 页面自身（情绪页、设置页）根容器不铺背景，且 AppTheme 的根 Surface 在 NavDisplay
+ * 外层、是两个转场页面的共同底，挡不住页面之间互相透出。这里在转场的最小渲染单元
+ * （NavEntry 内容）统一铺一层不透明主题背景，使任意页面在淡入期间底层恒为主题色，
+ * 杜绝漏出上一页。一处治本，覆盖全部目的地及未来新增页面。
+ */
+@Composable
+private fun OpaquePage(content: @Composable () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+        content = content,
+    )
 }
 
