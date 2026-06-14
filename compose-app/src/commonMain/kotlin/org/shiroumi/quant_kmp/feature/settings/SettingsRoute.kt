@@ -45,6 +45,7 @@ import org.shiroumi.quant_kmp.di.HttpClientProvider
 import org.shiroumi.quant_kmp.ui.animation.ExpandVerticallyAnimation
 import org.shiroumi.quant_kmp.ui.agent.state.AgentContract
 import org.shiroumi.quant_kmp.ui.core.adaptive.AdaptivePageContainer
+import org.shiroumi.quant_kmp.ui.core.adaptive.m3.rememberAdaptiveLayoutConfig
 import org.shiroumi.quant_kmp.ui.core.viewmodel.LocalAgentViewModel
 import org.shiroumi.quant_kmp.ui.theme.AppColorTheme
 import org.shiroumi.quant_kmp.ui.theme.LocalAppThemeState
@@ -65,8 +66,14 @@ fun SettingsRoute(
     val themeState = LocalAppThemeState.current
     val agentViewModel = LocalAgentViewModel.current
     val agentConfigState by agentConfigViewModel.state.collectAsState()
+    val layoutConfig = rememberAdaptiveLayoutConfig()
+    val pageModifier = if (layoutConfig.isCompact) {
+        Modifier.padding(horizontal = 16.dp, vertical = 0.dp)
+    } else {
+        Modifier.padding(24.dp)
+    }
 
-    AdaptivePageContainer(modifier = Modifier.padding(24.dp)) {
+    AdaptivePageContainer(modifier = pageModifier) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()

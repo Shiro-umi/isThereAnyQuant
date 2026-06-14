@@ -308,6 +308,12 @@ private fun CompactContent(
     mobileTitleBarController: MobileTitleBarController,
 ) {
     Scaffold(
+        // Compact 嵌套在 NavigationSuiteScaffold 的 NavigationBar 形态内：
+        // - 顶部安全区由 MobileNavTitleBar.statusBarsPadding() 消费；
+        // - 底部导航栏与 home indicator / gesture bar 由外层 NavigationSuiteScaffold 管理。
+        // 这里若保留 Scaffold 默认 systemBars，会在 iOS/Android 上把底部安全区再次计入内容区，
+        // AgentFloatingCard 展开时也只能覆盖被压缩后的内容高度，表现为无法消除的下边距。
+        contentWindowInsets = WindowInsets(0),
         topBar = {
             MobileNavTitleBar(
                 canGoBack = navigationState.canGoBack,
