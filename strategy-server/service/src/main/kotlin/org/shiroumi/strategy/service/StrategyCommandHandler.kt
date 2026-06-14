@@ -121,9 +121,12 @@ class StrategyCommandHandler(
                 val followStartDate = kotlinx.datetime.LocalDate.parse(command.followStartDate)
                 val snapshot = positionTrackingRuntime.buildCalibratedSnapshot(followStartDate)
                 if (snapshot == null) {
+                    // followStartDate 不在可校准的已确认交易日窗口内；技术原因只进日志，
+                    // ack.message 经 ktor 透传至前端展示，必须是面向用户的自然语言。
+                    logger.warning("BuildCalibratedTracking out of confirmed window followStartDate=${command.followStartDate}")
                     StrategyCommandAck(
                         accepted = false,
-                        message = "跟随起始日不在可校准的已确认交易日窗口内: ${command.followStartDate}",
+                        message = "该跟随起始日无法校准，请选择其他交易日",
                         sourceInstanceId = serviceInstanceId,
                         contractVersion = STRATEGY_CONTRACT_VERSION,
                     )
@@ -140,10 +143,11 @@ class StrategyCommandHandler(
                     )
                 }
             }.getOrElse { error ->
+                // 技术异常细节只进日志供排查；ack.message 经 ktor 透传至前端展示，必须是面向用户的自然语言。
                 logger.warning("BuildCalibratedTracking failed followStartDate=${command.followStartDate}: ${error.message}")
                 StrategyCommandAck(
                     accepted = false,
-                    message = "invalid BuildCalibratedTracking command: ${error.message}",
+                    message = "该跟随起始日无法校准，请重新选择交易日",
                     sourceInstanceId = serviceInstanceId,
                     contractVersion = STRATEGY_CONTRACT_VERSION,
                 )

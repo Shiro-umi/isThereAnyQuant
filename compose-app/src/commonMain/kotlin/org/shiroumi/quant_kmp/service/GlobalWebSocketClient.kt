@@ -154,6 +154,17 @@ object GlobalWebSocketClient {
     val strategyPositionTrackingFlow: StateFlow<model.candle.StrategyPositionTrackingResponse?> = _strategyPositionTrackingFlow.asStateFlow()
 
     /**
+     * 策略持仓跟踪订阅错误流（一次性事件）。
+     * 后端在校准重放失败或 service snapshot 不可用时下发 [WsAction.ERROR] 帧，
+     * 经此流通知 ViewModel 退出 loading 并展示错误，避免 loading 永久挂起。
+     */
+    private val _strategyPositionTrackingErrorFlow = MutableSharedFlow<String>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val strategyPositionTrackingErrorFlow: SharedFlow<String> = _strategyPositionTrackingErrorFlow.asSharedFlow()
+
+    /**
      * 建立全局 WebSocket 连接
      * 该方法具有幂等性，App 生命周期框架可在回到前台时多次调用而不会创建重复连接。
      */
@@ -389,7 +400,9 @@ object GlobalWebSocketClient {
                         }
                     }
                     WsAction.ERROR -> {
-                        debugLog { "[GlobalWebSocket] STRATEGY_POSITION_TRACKING error: ${event.payload}" }
+                        val message = event.payload ?: "策略持仓跟踪数据获取失败"
+                        debugLog { "[GlobalWebSocket] STRATEGY_POSITION_TRACKING error: $message" }
+                        _strategyPositionTrackingErrorFlow.tryEmit(message)
                     }
                     else -> Unit
                 }

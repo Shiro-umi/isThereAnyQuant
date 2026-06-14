@@ -69,12 +69,14 @@ object StrategyRuntimeBridge {
      * 返回跟随者视角的持仓跟踪快照。失败时携带 service 侧的拒绝原因。
      */
     suspend fun buildCalibratedTracking(followStartDate: LocalDate): Result<StrategyPositionTrackingResponse> {
+        // ack.message 经 StrategyPositionTrackingSubscriptionService 透传至前端展示，
+        // 因此包装进 IllegalStateException 的兜底文案必须是面向用户的自然语言。
         val ack = sendCommand(StrategyCommand.BuildCalibratedTracking(followStartDate.toString()))
         if (!ack.accepted) {
-            return Result.failure(IllegalStateException(ack.message ?: "strategy-service 校准重放请求被拒绝"))
+            return Result.failure(IllegalStateException(ack.message ?: "该跟随起始日无法校准，请重新选择交易日"))
         }
         val payload = ack.payload
-            ?: return Result.failure(IllegalStateException("strategy-service 校准重放 ack 缺少 payload"))
+            ?: return Result.failure(IllegalStateException("该跟随起始日无法校准，请重新选择交易日"))
         return runCatching {
             json.decodeFromJsonElement(StrategyPositionTrackingResponse.serializer(), payload)
         }

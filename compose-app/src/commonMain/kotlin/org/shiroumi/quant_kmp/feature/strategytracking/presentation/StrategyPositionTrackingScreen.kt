@@ -74,6 +74,7 @@ import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.EditCalendar
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -671,9 +672,16 @@ private fun TrackingCalibrationControl(
         }
         return
     }
+    val hasError = !calibration.error.isNullOrBlank()
+    val containerColor =
+        if (hasError) MaterialTheme.colorScheme.errorContainer
+        else MaterialTheme.colorScheme.secondaryContainer
+    val onContainerColor =
+        if (hasError) MaterialTheme.colorScheme.onErrorContainer
+        else MaterialTheme.colorScheme.onSecondaryContainer
     Surface(
         shape = RoundedCornerShape(percent = 50),
-        color = MaterialTheme.colorScheme.secondaryContainer,
+        color = containerColor,
     ) {
         Row(
             modifier = Modifier
@@ -684,21 +692,21 @@ private fun TrackingCalibrationControl(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Icon(
-                imageVector = Icons.Outlined.EditCalendar,
+                imageVector = if (hasError) Icons.Outlined.ErrorOutline else Icons.Outlined.EditCalendar,
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                tint = onContainerColor,
             )
             Text(
-                text = "从 ${calibration.followStartDate} 起跟随",
+                text = if (hasError) "校准失败 · 点此重选" else "从 ${calibration.followStartDate} 起跟随",
                 style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                color = onContainerColor,
             )
             if (calibration.isLoading) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(14.dp),
                     strokeWidth = 1.5.dp,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    color = onContainerColor,
                 )
             }
             Box(
@@ -712,7 +720,7 @@ private fun TrackingCalibrationControl(
                     imageVector = Icons.Outlined.Close,
                     contentDescription = "清除跟随校准",
                     modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    tint = onContainerColor,
                 )
             }
         }

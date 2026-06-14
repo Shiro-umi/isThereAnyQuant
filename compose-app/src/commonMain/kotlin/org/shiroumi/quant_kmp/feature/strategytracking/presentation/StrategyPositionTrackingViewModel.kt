@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 import kotlinx.datetime.DatePeriod
@@ -18,6 +20,7 @@ import kotlinx.datetime.todayIn
 import model.candle.CandleChartData
 import model.candle.Exchange
 import model.candle.StockInfo
+import model.candle.StrategyPositionTrackingResponse
 import model.candle.StrategyTrackingSection
 import model.candle.StrategyTrackingStockNode
 import org.shiroumi.quant_kmp.feature.candle.domain.repository.CandleRepository
@@ -120,6 +123,8 @@ class StrategyPositionTrackingViewModel(
     fun calibrateFollowStart(followStartDate: String) {
         _calibration.value = TrackingCalibration(followStartDate = followStartDate)
         _listObservedDate.value = null
+        // 新的用户意图作废任何旧的订阅错误，避免上一轮残留错误混入本次校准展示。
+        _error.value = null
         GlobalWebSocketClient.setTrackingFollowStartDate(followStartDate)
     }
 
@@ -127,6 +132,8 @@ class StrategyPositionTrackingViewModel(
     fun clearCalibration() {
         _calibration.value = null
         _listObservedDate.value = null
+        // 清除是明确的用户意图，连同主错误流一并复位，防止校准期积压的迟到 ERROR 在清除后冒出。
+        _error.value = null
         GlobalWebSocketClient.setTrackingFollowStartDate("")
     }
 
@@ -161,32 +168,53 @@ class StrategyPositionTrackingViewModel(
         loadSelectedDetail(selected)
     }
 
+    /** 持仓跟踪订阅事件：数据帧与错误帧合并为单一事件流，串行消费以保证状态写入原子。 */
+    private sealed interface TrackingEvent {
+        data class Response(val response: StrategyPositionTrackingResponse?) : TrackingEvent
+        data class Error(val message: String) : TrackingEvent
+    }
+
     private fun observeStrategyPositionTracking() {
+        // 数据帧与错误帧 merge 成单一事件流，由单协程串行处理：所有对 _timeline/_calibration/_error
+        // 的写入都在同一协程内顺序发生，消除两个独立 collector 并发改共享状态导致的竞态
+        // （错误一闪而过、清除校准后陈旧错误冒出等）。
+        val errorEvents = GlobalWebSocketClient.strategyPositionTrackingErrorFlow
+            .map<String, TrackingEvent> { TrackingEvent.Error(it) }
+        val responseEvents = GlobalWebSocketClient.strategyPositionTrackingFlow
+            .map<StrategyPositionTrackingResponse?, TrackingEvent> { TrackingEvent.Response(it) }
         viewModelScope.launch {
-            GlobalWebSocketClient.strategyPositionTrackingFlow.collectLatest { response ->
+            merge(errorEvents, responseEvents).collectLatest { event ->
                 _isLoading.value = false
-                if (response == null) {
-                    _timeline.value = null
-                    return@collectLatest
-                }
-                val timeline = response.toTimeline()
-                hydrateStockInfo(timeline)
-                _timeline.value = timeline
+                when (event) {
+                    is TrackingEvent.Error -> {
+                        val active = _calibration.value
+                        if (active != null) {
+                            _calibration.value = CalibrationStateReducer.onError(active, event.message)
+                        } else {
+                            // 非校准态的订阅错误写主错误流，由 timeline 兜底渲染失败态。
+                            _error.value = event.message
+                        }
+                    }
+                    is TrackingEvent.Response -> {
+                        val response = event.response
+                        if (response == null) {
+                            _timeline.value = null
+                            return@collectLatest
+                        }
+                        _error.value = null
+                        val timeline = response.toTimeline()
+                        hydrateStockInfo(timeline)
+                        _timeline.value = timeline
 
-                // 模型流更新时，根据服务端下发的 followStartDate 同步校准状态
-                val wsFollowStartDate = response.followStartDate
-                if (wsFollowStartDate != null) {
-                    _calibration.value = TrackingCalibration(
-                        followStartDate = wsFollowStartDate,
-                        timeline = timeline,
-                        isLoading = false,
-                        error = null,
-                    )
-                } else {
-                    _calibration.value = null
-                }
+                        _calibration.value = CalibrationStateReducer.onResponse(
+                            current = _calibration.value,
+                            wsFollowStartDate = response.followStartDate,
+                            timeline = timeline,
+                        )
 
-                rebuildSelectedDetail()
+                        rebuildSelectedDetail()
+                    }
+                }
             }
         }
         GlobalWebSocketClient.subscribeStrategyPositionTracking(STRATEGY_TRACKING_OWNER)

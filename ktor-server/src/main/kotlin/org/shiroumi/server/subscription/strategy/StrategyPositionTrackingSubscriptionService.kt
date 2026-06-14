@@ -85,7 +85,7 @@ class StrategyPositionTrackingSubscriptionService {
                 WsEvent(
                     topic = WsTopic.STRATEGY_POSITION_TRACKING,
                     action = WsAction.ERROR,
-                    payload = "strategy-service 策略持仓跟踪 snapshot 当前不可用"
+                    payload = "策略数据暂时无法获取，请稍后重试"
                 )
             )
             logger.warning("[STRATEGY_POSITION_TRACKING] remote snapshot unavailable")
@@ -98,7 +98,7 @@ class StrategyPositionTrackingSubscriptionService {
                 WsEvent(
                     topic = WsTopic.STRATEGY_POSITION_TRACKING,
                     action = WsAction.ERROR,
-                    payload = "strategy-service 策略持仓跟踪 snapshot 尚未就绪"
+                    payload = "策略数据正在初始化，请稍后重试"
                 )
             )
         }
@@ -145,9 +145,21 @@ class StrategyPositionTrackingSubscriptionService {
         sessionFollowStartDates[session] = userId?.let { userRepository.getTrackingFollowStartDate(it) }
 
         val remoteCurrent = StrategyRuntimeBridge.currentRemotePositionTracking()
-        remoteCurrent?.let {
-            pushTracking(session, WsAction.SYNC, it)
+        if (remoteCurrent == null) {
+            // service 尚未就绪时若静默返回，前端校准请求会永久挂起在 loading；
+            // 明确发 ERROR 帧，让客户端退出 loading 并展示原因。
+            AppWebSocketConnectionManager.sendToSession(
+                session,
+                WsEvent(
+                    topic = WsTopic.STRATEGY_POSITION_TRACKING,
+                    action = WsAction.ERROR,
+                    payload = "策略数据正在初始化，校准暂不可用，请稍后重试"
+                )
+            )
+            logger.warning("[STRATEGY_POSITION_TRACKING] refresh skipped: remote snapshot unavailable")
+            return
         }
+        pushTracking(session, WsAction.SYNC, remoteCurrent)
     }
 
     /**
@@ -238,7 +250,10 @@ class StrategyPositionTrackingSubscriptionService {
             throw e
         } catch (e: Exception) {
             logger.warning("[STRATEGY_POSITION_TRACKING] calibrated tracking failed for $followStartDate: ${e.message}")
-            CalibratedResult.Failure(e.message ?: "CALIBRATION_FAILED")
+            // 仅透传 service 侧的业务拒绝原因（IllegalStateException 携带自然语言 message）；
+            // 其它异常（如 snapshot 反序列化失败）携带技术细节，统一兜底为面向用户的提示。
+            val userMessage = (e as? IllegalStateException)?.message ?: "该跟随起始日无法校准，请重新选择交易日"
+            CalibratedResult.Failure(userMessage)
         }
     }
 }
