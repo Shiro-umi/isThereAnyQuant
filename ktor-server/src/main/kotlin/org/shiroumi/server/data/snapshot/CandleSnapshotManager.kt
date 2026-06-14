@@ -44,7 +44,9 @@ class CandleSnapshotManager(
     private val logger by logger("CandleSnapshotManager")
     private val initialized = AtomicBoolean(false)
     private val versionCounter = AtomicLong(0L)
-    private val caches = PeriodCache(lruCapacity)
+    // internal 而非 private：同模块单测据此预置 minute 缓存，模拟异步回填完成后的缓存状态，
+    // 从而在不启动后台 worker 的前提下覆盖 readMinuteSnapshot 的命中 / 未命中 / 复用语义。
+    internal val caches = PeriodCache(lruCapacity)
     private val dayManager = DaySnapshotManager(dayHistoryLimit)
     private val minuteHistoryLoads = ConcurrentHashMap<String, AtomicBoolean>()
     private val minuteRealtimeLoads = ConcurrentHashMap<String, AtomicBoolean>()
@@ -118,6 +120,10 @@ class CandleSnapshotManager(
     }
 
     private fun readMinuteSnapshot(key: CandleKey): CandleSnapshotState? {
+        // 历史窗口 H 与实时窗口 R 各查一次缓存即可：本函数同步执行，回填走后台 worker，
+        // 回填结果只改缓存内部状态，对当前栈帧里的 history / realtime 引用不可见，
+        // 因此第二次重查必然得到与首次完全相同的对象引用，纯属冗余的 LRU get（含 synchronized
+        // 锁与 accessOrder 链表重排）。这里直接复用首次查询结果，把每次读取的 LRU get 从 4 次降到 2 次。
         val history = caches.minuteHistory(key.period)[key.tsCode]
         if (history == null) {
             submitMinuteHistoryLoad(key)
@@ -126,10 +132,10 @@ class CandleSnapshotManager(
         if (realtime == null) {
             submitMinuteRealtimeLoad(key)
         }
-        val currentHistory = caches.minuteHistory(key.period)[key.tsCode].orEmpty()
-        val currentRealtime = caches.minuteRealtime(key.period).get(key.tsCode).orEmpty()
-        if (currentHistory.isEmpty() && currentRealtime.isEmpty()) return null
-        val merged = currentHistory + currentRealtime
+        val historyWindow = history.orEmpty()
+        val realtimeWindow = realtime.orEmpty()
+        if (historyWindow.isEmpty() && realtimeWindow.isEmpty()) return null
+        val merged = historyWindow + realtimeWindow
         return publishIfChanged(
             key = key,
             merged = merged,
@@ -481,9 +487,11 @@ class CandleSnapshotManager(
         private fun mergeRealtime(realtime: Candle, now: Long) {
             val key = CandleKey(realtime.tsCode, CandlePeriod.DAY)
             val current = snapshots[realtime.tsCode]
-            val merged = (current?.candles.orEmpty().filterNot { it.date == realtime.date } + realtime)
-                .sortedBy { it.date }
-                .takeLast(historyLimit)
+            val merged = mergeRealtimeIntoWindow(
+                current = current?.candles.orEmpty(),
+                realtime = realtime,
+                historyLimit = historyLimit
+            ) ?: return
             if (current != null && sameWindow(current.candles, merged)) return
             val next = CandleSnapshotState(
                 key = key,
@@ -498,6 +506,39 @@ class CandleSnapshotManager(
             markChanged(key)
         }
     }
+}
+
+/**
+ * 把一根实时日 K 增量合并进既有升序窗口。
+ *
+ * 既有窗口由 SQL `ORDER BY trade_date ASC`（[StockReader.getAllStockDailyWindows]）
+ * 与历史回填共同维持升序，实时日 K 只可能落在窗口尾部（当日盘中刷新或新交易日），
+ * 据此把原先每股 `filterNot + sortedBy + takeLast`（O(n log n)）替换为
+ * 末根二路决策（O(1)~O(n)）：
+ *
+ * - 末根同日：盘中刷新，原地替换末根（[List.dropLast] + 追加），长度不变
+ * - 实时日更晚：新交易日，直接追加；停牌空洞导致的大跨度跳变同样保持升序
+ * - 实时日更早：网络/队列乱序或历史重传，返回 `null` 表示忽略，避免破坏升序
+ * - 窗口为空：尚未回填，直接以实时 K 作为窗口起点
+ *
+ * 末根替换长度不变、追加后 +1，统一由 [List.takeLast] 收口在 [historyLimit] 内；
+ * 仅在确实超限时才分配新列表，未超限直接复用合并结果，避免多余拷贝。
+ * 返回 `null` 专门表示乱序忽略，调用方据此跳过版本推进与发布，与旧实现
+ * "乱序 K 被 filterNot 留下又被 sortedBy 排到中间、再被 takeLast 裁掉" 的净效果一致。
+ */
+internal fun mergeRealtimeIntoWindow(
+    current: List<Candle>,
+    realtime: Candle,
+    historyLimit: Int
+): List<Candle>? {
+    val last = current.lastOrNull()
+    val merged = when {
+        last == null -> listOf(realtime)
+        realtime.date == last.date -> current.dropLast(1) + realtime
+        realtime.date > last.date -> current + realtime
+        else -> return null
+    }
+    return if (merged.size > historyLimit) merged.takeLast(historyLimit) else merged
 }
 
 data class CandleSnapshotState(

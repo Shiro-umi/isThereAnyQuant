@@ -42,7 +42,9 @@ import java.util.concurrent.atomic.AtomicLong
  *   和 `CandleDataAdapters` 上层调用点的“直接打外部接口”行为
  * - 旧 adapter 仍可作为底层抓取能力被复用，但新的上层入口必须只走这一层
  */
-class CandleApiLayer(
+// open 仅为支撑同模块单测：snapshot 层依赖注入这一层，测试通过子类覆写 submit 统计回填提交次数，
+// 并验证 submit 成功后 callback 不会同步触发。生产路径行为不变。
+open class CandleApiLayer(
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     private val historicalDailyLoader: StockReaderHistoricalDailyCandleLoader = StockReaderHistoricalDailyCandleLoader(),
     private val realtimeDailyLoader: AuthoritativeRealtimeDailyCandleLoader = AuthoritativeRealtimeDailyCandleLoader(),
@@ -104,7 +106,7 @@ class CandleApiLayer(
      * - 若接口限流器当前无令牌，任务会在 channel worker 中被直接丢弃并回调失败
      * - snapshot 层必须把“丢弃”视为预期行为，下一次读取时继续尝试，而不是在这里做阻塞等待
      */
-    fun submit(task: ApiTask): Boolean {
+    open fun submit(task: ApiTask): Boolean {
         val channel = channels[task.interfaceId]
             ?: error("未知 K 线接口: ${task.interfaceId}")
         return channel.submit(task)
