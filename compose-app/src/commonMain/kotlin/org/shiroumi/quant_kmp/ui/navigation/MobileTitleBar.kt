@@ -17,9 +17,10 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.unit.Dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -30,7 +31,6 @@ import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -191,13 +191,18 @@ fun MobileNavTitleBar(
         globalActions()
     }
 
+    // 状态栏避让统一由外层 Box 的 statusBarsPadding 处理，topBar 自身禁用 windowInsets。
+    // 否则在 enableEdgeToEdge() 下，TopAppBar 默认会把 statusBar inset 叠加进固定容器高度
+    // （容器变成 statusBar + 64dp，inset 段是空白色带），表现为「标题下方/周围多一段空白」。
+    // 收敛后：topBar 容器回归标准高度，statusBar 区由根背景自然延伸，标题与返回键整体下移对齐。
     if (spec?.large == true) {
-        Box(modifier = modifier) {
+        Box(modifier = modifier.statusBarsPadding()) {
             LargeTopAppBar(
                 title = titleContent,
                 navigationIcon = {},
                 actions = actionsContent,
                 scrollBehavior = spec.scrollBehavior,
+                windowInsets = WindowInsets(0, 0, 0, 0),
             )
             AnimatedBackButton(
                 onBack = effectiveOnBack,
@@ -207,17 +212,17 @@ fun MobileNavTitleBar(
             )
         }
     } else {
-        Box(modifier = modifier) {
+        Box(modifier = modifier.statusBarsPadding()) {
             TopAppBar(
                 title = titleContent,
                 navigationIcon = {},
                 actions = actionsContent,
+                windowInsets = WindowInsets(0, 0, 0, 0),
             )
             AnimatedBackButton(
                 onBack = effectiveOnBack,
                 modifier = Modifier
                     .align(Alignment.CenterStart)
-                    .windowInsetsPadding(TopAppBarDefaults.windowInsets)
                     .padding(start = 4.dp),
             )
         }

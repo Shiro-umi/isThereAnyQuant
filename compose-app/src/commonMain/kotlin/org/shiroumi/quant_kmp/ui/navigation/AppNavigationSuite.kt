@@ -1,10 +1,16 @@
 package org.shiroumi.quant_kmp.ui.navigation
 
+import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
@@ -26,12 +32,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.NavKey
+import androidx.navigation3.scene.Scene
 import androidx.navigation3.ui.NavDisplay
 import org.shiroumi.quant_kmp.MultiPlatform
 import org.shiroumi.quant_kmp.NavDest
@@ -57,7 +65,73 @@ import org.shiroumi.quant_kmp.ui.core.backhandler.PlatformBrowserBackHandler
 import org.shiroumi.quant_kmp.ui.core.backhandler.PlatformBackHandler
 import org.shiroumi.quant_kmp.ui.core.lifecycle.PlatformLifecycleEffect
 import org.shiroumi.quant_kmp.ui.core.viewmodel.LocalAgentViewModel
+import org.shiroumi.quant_kmp.ui.animation.AnimationDurations
 import org.shiroumi.config.AppConfig
+
+/**
+ * Android 可预测返回手势转场。
+ *
+ * 只作用于返回手势进行中（push / 点击切顶级页仍走 NavDisplay 默认无动画）。
+ * navigation3-ui 用 SeekableTransitionState 把系统返回手势进度 seek 进 transition，
+ * 因此这里给出的目标态会被按手势进度实时插值——返回过程跟手。
+ *
+ * 观感对齐 Android 14+ Predictive Back 的「层级后退」，以**横向平移为主**：被弹出的当前页
+ * 随手势向右滑出并淡出，下层页从左侧轻微归位并淡入；只保留极轻的纵深（缩放下限 0.96，
+ * 不作为主导视觉），以确保是「跟随手势滑出」而非「中心缩小消失」。
+ * 第二参数为返回手势的方向边（SwipeEdge），当前两侧返回统一同一观感，不做镜像区分。
+ *
+ * 仅 Android 应用此 spec；iOS 传 null 走 NavDisplay 默认（保留 iOS 原生侧滑返回质感），
+ * Web 无系统预测返回手势，传入与否都不会被 seek。
+ */
+private fun predictiveBackTransitionSpec():
+    AnimatedContentTransitionScope<Scene<NavKey>>.(Int) -> ContentTransform = {
+    val durationMillis = AnimationDurations.NORMAL
+    val enter = fadeIn(
+        animationSpec = tween(durationMillis, easing = FastOutSlowInEasing),
+    ) + slideInHorizontally(
+        animationSpec = tween(durationMillis, easing = FastOutSlowInEasing),
+        initialOffsetX = { fullWidth -> -fullWidth / 6 },
+    )
+    val exit = slideOutHorizontally(
+        animationSpec = tween(durationMillis, easing = FastOutSlowInEasing),
+        targetOffsetX = { fullWidth -> fullWidth / 3 },
+    ) + scaleOut(
+        animationSpec = tween(durationMillis, easing = FastOutSlowInEasing),
+        targetScale = 0.96f,
+        transformOrigin = TransformOrigin(0.5f, 0.5f),
+    ) + fadeOut(
+        animationSpec = tween(durationMillis, easing = FastOutSlowInEasing),
+    )
+    enter togetherWith exit
+}
+
+/**
+ * 平台分流的 NavDisplay：Android 传入自定义平移跟手 spec 实现可预测返回手势；
+ * 其它平台省略 predictivePopTransitionSpec（参数为非空必填，不能传 null），走 NavDisplay
+ * 库默认——iOS 保留原生侧滑返回质感，Web 无系统预测手势不受影响。
+ */
+@Composable
+private fun AppNavDisplay(
+    navigationState: NavigationState,
+    navigator: Navigator,
+    entryProvider: (NavKey) -> NavEntry<NavKey>,
+    sceneStrategy: androidx.navigation3.scene.SceneStrategy<NavKey>,
+) {
+    if (isAndroidPlatform()) {
+        NavDisplay(
+            entries = navigationState.toEntries(entryProvider),
+            sceneStrategies = listOf(sceneStrategy),
+            predictivePopTransitionSpec = predictiveBackTransitionSpec(),
+            onBack = { navigator.goBack() },
+        )
+    } else {
+        NavDisplay(
+            entries = navigationState.toEntries(entryProvider),
+            sceneStrategies = listOf(sceneStrategy),
+            onBack = { navigator.goBack() },
+        )
+    }
+}
 
 private val NavDest.label: String
     get() = when (this) {
@@ -254,6 +328,14 @@ private fun CompactContent(
         PlatformBackHandler(enabled = agentSidebarState.isExpanded) {
             agentSidebarViewModel.toggleExpand()
         }
+        // 临时浮层（全景图 / 详情）打开时，优先用系统 BackHandler 直接关浮层：
+        // 否则 Android 预测返回手势会对「二级页」播放整页 pop 预演，松手却只关浮层，
+        // 造成「整页缩放预演但没切页」的观感错配。拦截后预测手势在浮层期间不参与。
+        PlatformBackHandler(
+            enabled = !agentSidebarState.isExpanded && navigationState.transientBackDepth > 0
+        ) {
+            navigator.goBack()
+        }
         val contentModifier = mobileTitleBarController.spec?.scrollBehavior?.let { scrollBehavior ->
             Modifier
                 .fillMaxSize()
@@ -264,10 +346,11 @@ private fun CompactContent(
             .padding(paddingValues)
 
         Box(modifier = contentModifier) {
-            NavDisplay(
-                entries = navigationState.toEntries(entryProvider),
-                sceneStrategies = listOf(rememberListDetailSceneStrategy<NavKey>()),
-                onBack = { navigator.goBack() }
+            AppNavDisplay(
+                navigationState = navigationState,
+                navigator = navigator,
+                entryProvider = entryProvider,
+                sceneStrategy = rememberListDetailSceneStrategy<NavKey>(),
             )
             ToastHost(hostState = toastHostState, modifier = Modifier.align(Alignment.BottomCenter))
 
@@ -342,6 +425,12 @@ private fun ExpandedContent(
     // Expanded（enableTopBar=false）保留桌面工作台形态，不显示 TopBar。
     val titleBarController = LocalMobileTitleBarController.current
 
+    // 临时浮层（Medium 形态下策略跟踪全景图等）打开时优先关浮层，避免 Android 预测返回手势
+    // 对二级页播放整页 pop 预演但松手只关浮层的错配。与 CompactContent 同策略。
+    PlatformBackHandler(enabled = navigationState.transientBackDepth > 0) {
+        navigator.goBack()
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         Row(modifier = Modifier.fillMaxSize()) {
             // 主内容区
@@ -379,10 +468,11 @@ private fun ExpandedContent(
                     Modifier.fillMaxSize().padding(paddingValues)
                 }
                 Box(modifier = contentModifier) {
-                    NavDisplay(
-                        entries = navigationState.toEntries(entryProvider),
-                        sceneStrategies = listOf(sceneStrategy),
-                        onBack = { navigator.goBack() }
+                    AppNavDisplay(
+                        navigationState = navigationState,
+                        navigator = navigator,
+                        entryProvider = entryProvider,
+                        sceneStrategy = sceneStrategy,
                     )
                     ToastHost(hostState = toastHostState, modifier = Modifier.align(Alignment.BottomCenter))
                 }
