@@ -5,6 +5,23 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# server-only 标志：release 部署时跳过原生客户端出包（Android APK + iOS 未签名 ipa），
+# 只构建 server fat jar + 内嵌 Web 静态资源。可放在任意位置（如 `./deploy.sh release server-only`）。
+# 从参数列表中剥离该标志，避免污染后续的 mode / strategy-service 位置参数解析。
+SERVER_ONLY=false
+POSITIONAL_ARGS=()
+for arg in "$@"; do
+    case "$arg" in
+        server-only|--server-only)
+            SERVER_ONLY=true
+            ;;
+        *)
+            POSITIONAL_ARGS+=("$arg")
+            ;;
+    esac
+done
+set -- "${POSITIONAL_ARGS[@]+"${POSITIONAL_ARGS[@]}"}"
+
 # 默认模式
 MODE_RAW="${1:-release}"
 CONFIG_FILE="$SCRIPT_DIR/config.yaml"
@@ -86,11 +103,12 @@ case "$MODE_RAW" in
         GRADLE_TASK=":ktor-server:packageRelease"
         ;;
     *)
-        echo "Usage: $0 {debug|debug-wan|release}"
+        echo "Usage: $0 {debug|debug-wan|release} [server-only]"
         echo "       $0 strategy-service {deploy|restart|rollback|health|logs|status|stop|start} [debug|debug-wan|release]"
-        echo "  debug     - Deploy local debug mode"
-        echo "  debug-wan - Deploy WAN-accessible debug mode"
-        echo "  release   - Deploy release mode (default)"
+        echo "  debug       - Deploy local debug mode"
+        echo "  debug-wan   - Deploy WAN-accessible debug mode"
+        echo "  release     - Deploy release mode (default)"
+        echo "  server-only - Skip native client packaging (Android APK + iOS ipa); build server + Web only"
         echo "  strategy-service deploy   - Build and restart only strategy-service"
         echo "  strategy-service rollback - Roll back only strategy-service from previous backup"
         echo "  strategy-service stop     - Stop strategy-service (does not affect ktor-server)"
@@ -244,6 +262,15 @@ if [ "$STRATEGY_SERVICE_ONLY" = true ]; then
     exit 0
 fi
 
+# server-only 时排除原生客户端出包任务：Android APK 链路（assembleRelease + copyApk）。
+# 排除后 packageRelease 仍产出 server fat jar 与内嵌 Web 静态资源，仅 deploy/data/apk 不刷新
+# （前端「下载 APK」入口将指向上一版 release 留下的 APK）。debug/debug-wan 本就不打 APK，标志无副作用。
+SERVER_ONLY_GRADLE_ARGS=()
+if [ "$SERVER_ONLY" = true ]; then
+    SERVER_ONLY_GRADLE_ARGS=(-x :compose-app:assembleRelease -x :ktor-server:copyApk)
+    echo "⏭️  server-only: 跳过原生客户端出包（Android APK / iOS ipa），仅构建 server + Web。"
+fi
+
 # 先构建到 staging 目录，成功后再停止旧实例，避免编译失败导致线上服务提前下线。
 echo "📦 Building staged deployment package..."
 ./gradlew \
@@ -251,7 +278,8 @@ echo "📦 Building staged deployment package..."
     -Pquant.deploy.dir="$STAGING_DEPLOY_DIR" \
     -Pquant.dist.dir="$STAGING_DIST_DIR" \
     :ktor-server:cleanDeploy \
-    "$GRADLE_TASK"
+    "$GRADLE_TASK" \
+    "${SERVER_ONLY_GRADLE_ARGS[@]+"${SERVER_ONLY_GRADLE_ARGS[@]}"}"
 
 STAGING_START_SCRIPT="$STAGING_DEPLOY_DIR/bin/start-${MODE}.sh"
 STAGING_STRATEGY_START_SCRIPT="$STAGING_DEPLOY_DIR/bin/start-strategy-service.sh"
@@ -363,7 +391,10 @@ echo "   Logs:   tail -f $DEPLOY_DIR/logs/server.log"
 # iOS 出包依赖 Xcode 工具链，无法在 Linux/CI/Docker 执行，因此独立于 packageRelease
 # （后者跨平台可构建），在此守卫触发，杜绝非 macOS 环境 release 部署失败。
 # 出包失败不回滚已完成的 server 部署（server 已起），仅提示重试。
-if [ "$MODE_FAMILY" = "release" ]; then
+if [ "$MODE_FAMILY" = "release" ] && [ "$SERVER_ONLY" = true ]; then
+    echo ""
+    echo "⏭️  跳过 iOS ipa 出包：server-only 模式。需要出包时手动执行 scripts/build-ios-ipa.sh。"
+elif [ "$MODE_FAMILY" = "release" ]; then
     if [ "$(uname -s)" = "Darwin" ]; then
         echo ""
         echo "🍎 Building unsigned iOS ipa (release)..."

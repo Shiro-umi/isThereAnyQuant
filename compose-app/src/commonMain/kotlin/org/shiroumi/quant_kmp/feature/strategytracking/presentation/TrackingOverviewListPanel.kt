@@ -24,8 +24,6 @@ import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Shield
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -65,75 +63,15 @@ private const val ClearedHistoryLimit = 8
  */
 @Composable
 internal fun TrackingOverviewListPanel(
-    timeline: StrategyPositionTrackingTimeline?,
-    isLoading: Boolean,
-    error: String?,
-    onRefresh: () -> Unit,
+    timeline: StrategyPositionTrackingTimeline,
     onStockClick: (StrategyTrackingStockNode, StrategyTrackingSection, String) -> Unit,
     observedDate: String?,
     onObservedDateChange: (String?) -> Unit,
     modifier: Modifier = Modifier,
     bottomContentPadding: Dp = 0.dp,
 ) {
-    when {
-        isLoading && timeline == null -> {
-            Box(modifier = modifier, contentAlignment = Alignment.Center) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.md),
-                ) {
-                    CircularProgressIndicator(
-                        trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    )
-                    Text(
-                        text = "正在加载持仓列表",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-
-        timeline == null || timeline.days.isEmpty() -> {
-            Box(modifier = modifier, contentAlignment = Alignment.Center) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.md),
-                ) {
-                    Text(
-                        text = error ?: "暂无策略持仓数据",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    FilledTonalButton(onClick = onRefresh) {
-                        Text("重新加载")
-                    }
-                }
-            }
-        }
-
-        else -> {
-            TrackingOverviewListContent(
-                timeline = timeline,
-                observedDate = observedDate,
-                onObservedDateChange = onObservedDateChange,
-                onStockClick = onStockClick,
-                bottomContentPadding = bottomContentPadding,
-                modifier = modifier,
-            )
-        }
-    }
-}
-
-@Composable
-private fun TrackingOverviewListContent(
-    timeline: StrategyPositionTrackingTimeline,
-    observedDate: String?,
-    onObservedDateChange: (String?) -> Unit,
-    onStockClick: (StrategyTrackingStockNode, StrategyTrackingSection, String) -> Unit,
-    bottomContentPadding: Dp,
-    modifier: Modifier = Modifier,
-) {
+    // 反馈态（加载中 / 无数据 / 加载失败）由 StrategyPositionTrackingScreen 在内容区统一短路渲染，
+    // 此面板只在拿到有数据的 timeline 时被调用，直接渲染日期导航 + 三组列表。
     val days = timeline.days
     val latestIndex = days.lastIndex
     // 观察日落点：未指定或越界时回退最新日
