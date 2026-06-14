@@ -127,6 +127,29 @@ case "$MODE_FAMILY" in
     *)       PROFIT_PREDICTION_INFER_PORT=9874 ;;
 esac
 
+# 等待端口被内核真正释放后再返回。
+# kill -9 是异步的，且 socket 在进程退出后仍可能因内核回收（TIME_WAIT 等）短暂占用，
+# 固定 sleep 无法保证端口已可被新进程 bind —— 这正是旧实现停服后立即启新版偶发
+# BindException 的根因（已于 2026-06-14 release 部署中实证复现）。这里改为轮询确认端口
+# 无监听再继续，带超时上限避免无限等待。返回 0 表示端口已释放，返回 1 表示超时仍被占用。
+wait_port_released() {
+    local port="$1"
+    local max_wait_secs="${2:-15}"
+    local waited=0
+    while [ "$waited" -lt "$max_wait_secs" ]; do
+        if ! lsof -ti:"$port" > /dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    if lsof -ti:"$port" > /dev/null 2>&1; then
+        echo "⚠️  Port $port still occupied after ${max_wait_secs}s; new instance may fail to bind." >&2
+        return 1
+    fi
+    return 0
+}
+
 kill_inference_port_leftover() {
     # 推理子进程只靠 strategy-service JVM 的 shutdown hook 清理；kill -9 兜底或 JVM 异常退出
     # 会留下孤儿进程占住端口。模型切换后身份守卫会拒绝旧模型孤儿、同端口重启必然失败，
@@ -136,10 +159,9 @@ kill_inference_port_leftover() {
     if [ -n "$leftover_pids" ]; then
         echo "🛑 Killing leftover inference process on port $PROFIT_PREDICTION_INFER_PORT (PID: $leftover_pids)..."
         kill $leftover_pids 2>/dev/null || true
-        sleep 2
-        if lsof -ti:"$PROFIT_PREDICTION_INFER_PORT" > /dev/null 2>&1; then
+        if ! wait_port_released "$PROFIT_PREDICTION_INFER_PORT" 5; then
             kill -9 $leftover_pids 2>/dev/null || true
-            sleep 1
+            wait_port_released "$PROFIT_PREDICTION_INFER_PORT" 5 || true
         fi
     fi
 }
@@ -306,10 +328,11 @@ STRATEGY_REMAINING_PID=$(lsof -ti:"$STRATEGY_SERVICE_PORT" 2>/dev/null || true)
 if [ -n "$STRATEGY_REMAINING_PID" ]; then
     echo "🛑 Killing remaining strategy-service process on port $STRATEGY_SERVICE_PORT (PID: $STRATEGY_REMAINING_PID)..."
     kill "$STRATEGY_REMAINING_PID" 2>/dev/null || true
-    sleep 2
-    if lsof -ti:"$STRATEGY_SERVICE_PORT" > /dev/null 2>&1; then
+    # 先给优雅退出留窗口；端口未释放再 kill -9，最后必须确认端口真正空出再继续，
+    # 否则后续启动的新 strategy-service 会在该端口上 BindException。
+    if ! wait_port_released "$STRATEGY_SERVICE_PORT" 10; then
         kill -9 "$STRATEGY_REMAINING_PID" 2>/dev/null || true
-        sleep 1
+        wait_port_released "$STRATEGY_SERVICE_PORT" 10 || true
     fi
 fi
 
@@ -319,10 +342,11 @@ REMAINING_PID=$(lsof -ti:"$TARGET_PORT" 2>/dev/null || true)
 if [ -n "$REMAINING_PID" ]; then
     echo "🛑 Killing remaining process on port $TARGET_PORT (PID: $REMAINING_PID)..."
     kill "$REMAINING_PID" 2>/dev/null || true
-    sleep 2
-    if lsof -ti:"$TARGET_PORT" > /dev/null 2>&1; then
+    # 同 strategy-service：kill -9 后确认 Ktor 端口真正释放再 Promoting + 启新版，
+    # 杜绝新实例在 $TARGET_PORT 上 BindException。
+    if ! wait_port_released "$TARGET_PORT" 10; then
         kill -9 "$REMAINING_PID" 2>/dev/null || true
-        sleep 1
+        wait_port_released "$TARGET_PORT" 10 || true
     fi
 fi
 
