@@ -16,7 +16,6 @@ import androidx.compose.animation.core.animateIntOffsetAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -50,7 +49,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -59,7 +57,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -111,6 +108,7 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -306,7 +304,42 @@ fun StrategyPositionTrackingScreen(
                         val onStockClick: (StrategyTrackingStockNode, StrategyTrackingSection, String) -> Unit =
                             { node, section, tradeDate -> viewModel.dispatch(StrategyTrackingAction.SelectStock(node, section, tradeDate)) }
                         Box(modifier = Modifier.fillMaxSize()) {
-                            if (useSplitPanes) {
+                            val contentTimeline = displayTimeline?.takeIf { it.days.isNotEmpty() }
+                            if (contentTimeline == null) {
+                                // 反馈态（加载中 / 无数据 / 加载失败）统一在内容区居中渲染一次，
+                                // 短路掉双栏与 Compact 两套布局，从根上消除左右子面板各渲染一份反馈的重复。
+                                // 校准失败且无数据时无法靠「重新加载」自救（那是重拉模型自身流），
+                                // 故此场景的重试动作改为「清除校准」回到必有数据的模型流，避免卡死。
+                                val calibrationFailed = activeCalibration?.error?.isNotBlank() == true
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    if (displayLoading) {
+                                        TrackingLoadingState()
+                                    } else {
+                                        TrackingFeedbackState(
+                                            title = if (displayError.isNullOrBlank()) {
+                                                "暂无策略持仓跟踪数据"
+                                            } else {
+                                                "策略持仓跟踪加载失败"
+                                            },
+                                            message = displayError
+                                                ?: "策略审计数据生成后，这里会展示最近 20 个交易日的持仓变化树。",
+                                            actionLabel = if (calibrationFailed) "返回模型完整持仓流" else "重新加载",
+                                            onAction = {
+                                                viewModel.dispatch(
+                                                    if (calibrationFailed) {
+                                                        StrategyTrackingAction.ClearCalibration
+                                                    } else {
+                                                        StrategyTrackingAction.Refresh
+                                                    }
+                                                )
+                                            },
+                                        )
+                                    }
+                                }
+                            } else if (useSplitPanes) {
                                 Column(
                                     modifier = Modifier.fillMaxSize(),
                                     verticalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.lg),
@@ -323,10 +356,7 @@ fun StrategyPositionTrackingScreen(
                                         horizontalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.lg),
                                     ) {
                                         TrackingOverviewListPanel(
-                                            timeline = displayTimeline,
-                                            isLoading = displayLoading,
-                                            error = displayError,
-                                            onRefresh = { viewModel.dispatch(StrategyTrackingAction.Refresh) },
+                                            timeline = contentTimeline,
                                             onStockClick = onStockClick,
                                             observedDate = listObservedDate,
                                             onObservedDateChange = { viewModel.dispatch(StrategyTrackingAction.SelectListObservedDate(it)) },
@@ -335,10 +365,7 @@ fun StrategyPositionTrackingScreen(
                                                 .fillMaxHeight(),
                                         )
                                         TrackingTimelineScaffold(
-                                            timeline = displayTimeline,
-                                            isLoading = displayLoading,
-                                            error = displayError,
-                                            onRefresh = { viewModel.dispatch(StrategyTrackingAction.Refresh) },
+                                            timeline = contentTimeline,
                                             sharedTransitionScope = this@SharedTransitionLayout,
                                             animatedVisibilityScope = timelineAnimatedScope,
                                             overlayState = timelineOverlayState,
@@ -374,10 +401,7 @@ fun StrategyPositionTrackingScreen(
                                     ) { showPanorama ->
                                         if (showPanorama) {
                                             TrackingTimelineScaffold(
-                                                timeline = displayTimeline,
-                                                isLoading = displayLoading,
-                                                error = displayError,
-                                                onRefresh = { viewModel.dispatch(StrategyTrackingAction.Refresh) },
+                                                timeline = contentTimeline,
                                                 sharedTransitionScope = this@SharedTransitionLayout,
                                                 animatedVisibilityScope = timelineAnimatedScope,
                                                 overlayState = timelineOverlayState,
@@ -389,10 +413,7 @@ fun StrategyPositionTrackingScreen(
                                         } else {
                                             Box(modifier = Modifier.fillMaxSize()) {
                                                 TrackingOverviewListPanel(
-                                                    timeline = displayTimeline,
-                                                    isLoading = displayLoading,
-                                                    error = displayError,
-                                                    onRefresh = { viewModel.dispatch(StrategyTrackingAction.Refresh) },
+                                                    timeline = contentTimeline,
                                                     onStockClick = onStockClick,
                                                     observedDate = listObservedDate,
                                                     onObservedDateChange = { viewModel.dispatch(StrategyTrackingAction.SelectListObservedDate(it)) },
@@ -496,120 +517,100 @@ fun StrategyPositionTrackingScreen(
     }
 }
 
+/**
+ * 全景流转图脚手架。仅在 timeline 非空且有数据时被调用（反馈态由
+ * [StrategyPositionTrackingScreen] 在内容区统一短路渲染），故此处不再判 loading/error。
+ */
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun TrackingTimelineScaffold(
-    timeline: StrategyPositionTrackingTimeline?,
-    isLoading: Boolean,
-    error: String?,
-    onRefresh: () -> Unit,
+    timeline: StrategyPositionTrackingTimeline,
     sharedTransitionScope: SharedTransitionScope,
     animatedVisibilityScope: AnimatedVisibilityScope,
     overlayState: TrackingTimelineOverlayState,
     onStockClick: (StrategyTrackingStockNode, StrategyTrackingSection, String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    when {
-        isLoading && timeline == null -> {
-            Box(modifier = modifier, contentAlignment = Alignment.Center) {
-                TrackingLoadingState()
-            }
+    val config = rememberAdaptiveLayoutConfig()
+    val layoutSpec = remember(config) { trackingTimelineLayoutSpec(config) }
+    var hasAutoScrolled by remember { mutableStateOf(false) }
+    var pageVisible by remember { mutableStateOf(false) }
+    var shouldAnimateTimelineSequence by remember { mutableStateOf(true) }
+    var revealedDayCount by remember { mutableStateOf(0) }
+    var revealedConnectorCount by remember { mutableStateOf(0) }
+    var revealStartDayIndex by remember { mutableStateOf(0) }
+    var revealStartConnectorIndex by remember { mutableStateOf(0) }
+    val timelineAlpha by animateFloatAsState(
+        targetValue = if (pageVisible) 1f else 0f,
+        animationSpec = tween(durationMillis = TimelineEnterDurationMs, delayMillis = 60, easing = LinearOutSlowInEasing),
+        label = "tracking_timeline_alpha"
+    )
+    val timelineOffset by animateIntOffsetAsState(
+        targetValue = if (pageVisible) IntOffset.Zero else IntOffset(0, 20),
+        animationSpec = tween(durationMillis = TimelineEnterDurationMs, delayMillis = 60, easing = LinearOutSlowInEasing),
+        label = "tracking_timeline_offset"
+    )
+
+    LaunchedEffect(Unit) {
+        pageVisible = true
+    }
+
+    LaunchedEffect(timeline.days.firstOrNull()?.tradeDate) {
+        if (timeline.days.isEmpty()) return@LaunchedEffect
+        if (!shouldAnimateTimelineSequence) {
+            revealedDayCount = timeline.days.size
+            revealedConnectorCount = (timeline.days.size - 1).coerceAtLeast(0)
+            revealStartDayIndex = 0
+            revealStartConnectorIndex = 0
+            return@LaunchedEffect
         }
+    }
 
-        timeline == null || timeline.days.isEmpty() -> {
-            Box(modifier = modifier, contentAlignment = Alignment.Center) {
-                TrackingFeedbackState(
-                    title = if (error.isNullOrBlank()) "暂无策略持仓跟踪数据" else "策略持仓跟踪加载失败",
-                    message = error ?: "策略审计数据生成后，这里会展示最近 20 个交易日的持仓变化树。",
-                    actionLabel = "重新加载",
-                    onAction = onRefresh,
-                )
-            }
+    LaunchedEffect(timeline.days.lastOrNull()?.tradeDate) {
+        if (!hasAutoScrolled && timeline.days.isNotEmpty()) {
+            hasAutoScrolled = true
         }
+    }
 
-        else -> {
-            val config = rememberAdaptiveLayoutConfig()
-            val layoutSpec = remember(config) { trackingTimelineLayoutSpec(config) }
-            var hasAutoScrolled by remember { mutableStateOf(false) }
-            var pageVisible by remember { mutableStateOf(false) }
-            var shouldAnimateTimelineSequence by remember { mutableStateOf(true) }
-            var revealedDayCount by remember { mutableStateOf(0) }
-            var revealedConnectorCount by remember { mutableStateOf(0) }
-            var revealStartDayIndex by remember { mutableStateOf(0) }
-            var revealStartConnectorIndex by remember { mutableStateOf(0) }
-            val timelineAlpha by animateFloatAsState(
-                targetValue = if (pageVisible) 1f else 0f,
-                animationSpec = tween(durationMillis = TimelineEnterDurationMs, delayMillis = 60, easing = LinearOutSlowInEasing),
-                label = "tracking_timeline_alpha"
-            )
-            val timelineOffset by animateIntOffsetAsState(
-                targetValue = if (pageVisible) IntOffset.Zero else IntOffset(0, 20),
-                animationSpec = tween(durationMillis = TimelineEnterDurationMs, delayMillis = 60, easing = LinearOutSlowInEasing),
-                label = "tracking_timeline_offset"
-            )
-
-            LaunchedEffect(Unit) {
-                pageVisible = true
-            }
-
-            LaunchedEffect(timeline.days.firstOrNull()?.tradeDate) {
-                if (timeline.days.isEmpty()) return@LaunchedEffect
-                if (!shouldAnimateTimelineSequence) {
-                    revealedDayCount = timeline.days.size
-                    revealedConnectorCount = (timeline.days.size - 1).coerceAtLeast(0)
+    Box(modifier = modifier) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .offset { timelineOffset }
+                .graphicsLayer(alpha = timelineAlpha)
+        ) {
+            TrackingTimelineContent(
+                timeline = timeline,
+                layoutSpec = layoutSpec,
+                shouldAutoScrollToLatest = hasAutoScrolled,
+                animateTimelineSequence = shouldAnimateTimelineSequence,
+                revealedDayCount = revealedDayCount,
+                revealedConnectorCount = revealedConnectorCount,
+                onRevealSequencePrepared = { startDayIndex, startConnectorIndex ->
+                    if (!shouldAnimateTimelineSequence) return@TrackingTimelineContent
+                    revealStartDayIndex = startDayIndex
+                    revealStartConnectorIndex = startConnectorIndex
+                    revealedDayCount = startDayIndex
+                    revealedConnectorCount = startConnectorIndex
+                },
+                onRevealDay = { nextDayCount ->
+                    revealedDayCount = nextDayCount
+                },
+                onRevealConnector = { nextConnectorCount ->
+                    revealedConnectorCount = nextConnectorCount
+                },
+                revealStartDayIndex = revealStartDayIndex,
+                revealStartConnectorIndex = revealStartConnectorIndex,
+                onRevealSequenceFinished = {
+                    shouldAnimateTimelineSequence = false
                     revealStartDayIndex = 0
                     revealStartConnectorIndex = 0
-                    return@LaunchedEffect
-                }
-            }
-
-            LaunchedEffect(timeline.days.lastOrNull()?.tradeDate) {
-                if (!hasAutoScrolled && timeline.days.isNotEmpty()) {
-                    hasAutoScrolled = true
-                }
-            }
-
-            Box(modifier = modifier) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .offset { timelineOffset }
-                        .graphicsLayer(alpha = timelineAlpha)
-                ) {
-                    TrackingTimelineContent(
-                        timeline = timeline,
-                        layoutSpec = layoutSpec,
-                        shouldAutoScrollToLatest = hasAutoScrolled,
-                        animateTimelineSequence = shouldAnimateTimelineSequence,
-                        revealedDayCount = revealedDayCount,
-                        revealedConnectorCount = revealedConnectorCount,
-                        onRevealSequencePrepared = { startDayIndex, startConnectorIndex ->
-                            if (!shouldAnimateTimelineSequence) return@TrackingTimelineContent
-                            revealStartDayIndex = startDayIndex
-                            revealStartConnectorIndex = startConnectorIndex
-                            revealedDayCount = startDayIndex
-                            revealedConnectorCount = startConnectorIndex
-                        },
-                        onRevealDay = { nextDayCount ->
-                            revealedDayCount = nextDayCount
-                        },
-                        onRevealConnector = { nextConnectorCount ->
-                            revealedConnectorCount = nextConnectorCount
-                        },
-                        revealStartDayIndex = revealStartDayIndex,
-                        revealStartConnectorIndex = revealStartConnectorIndex,
-                        onRevealSequenceFinished = {
-                            shouldAnimateTimelineSequence = false
-                            revealStartDayIndex = 0
-                            revealStartConnectorIndex = 0
-                        },
-                        sharedTransitionScope = sharedTransitionScope,
-                        animatedVisibilityScope = animatedVisibilityScope,
-                        overlayState = overlayState,
-                        onStockClick = onStockClick,
-                    )
-                }
-            }
+                },
+                sharedTransitionScope = sharedTransitionScope,
+                animatedVisibilityScope = animatedVisibilityScope,
+                overlayState = overlayState,
+                onStockClick = onStockClick,
+            )
         }
     }
 }
@@ -2149,7 +2150,7 @@ private fun TrackingLoadingState(
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.md)
     ) {
         CircularProgressIndicator(
             trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -2163,10 +2164,15 @@ private fun TrackingLoadingState(
             text = "正在加载最近 20 个交易日的持仓变化、调入与清仓关系",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
         )
     }
 }
 
+/**
+ * 反馈态（无数据 / 加载失败）：纯文字标题 + 说明 + 重试按钮，无卡片无边框。
+ * 与 [TrackingLoadingState] 同为内容区居中的原生 Material3 反馈，全页只渲染一份。
+ */
 @Composable
 private fun TrackingFeedbackState(
     title: String,
@@ -2175,32 +2181,26 @@ private fun TrackingFeedbackState(
     onAction: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    OutlinedCard(
-        modifier = modifier.widthIn(max = 420.dp),
-        shape = MaterialTheme.shapes.extraLarge,
-        colors = CardDefaults.outlinedCardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        ),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    Column(
+        modifier = modifier.widthIn(max = AgentTheme.Sizing.sidePanelWidthMax),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.md)
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 24.dp, vertical = 22.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            FilledTonalButton(onClick = onAction) {
-                Text(actionLabel)
-            }
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center,
+        )
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        FilledTonalButton(onClick = onAction) {
+            Text(actionLabel)
         }
     }
 }
