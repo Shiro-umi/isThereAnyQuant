@@ -508,7 +508,10 @@ class CandleViewModel(
                 )
 
                 result.onSuccess { response ->
-                    val newStocks = _state.value.stocks + response.stocks
+                    // 按 code 去重：列表尾部保留的策略选股（retainedStrategyStocks）可能在
+                    // 后续分页里自然出现，直接相加会产生重复 code，触发 LazyColumn 重复 key 崩溃。
+                    // distinctBy 保留先出现的元素，让策略股留在原尾部位置，避免顺序跳动。
+                    val newStocks = (_state.value.stocks + response.stocks).distinctBy { it.code }
                     _state.value = _state.value.copy(
                         stocks = newStocks,
                         isLoadingMore = false,

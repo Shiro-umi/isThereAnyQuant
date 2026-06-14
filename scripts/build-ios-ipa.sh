@@ -30,6 +30,14 @@ if ! command -v xcodebuild > /dev/null 2>&1; then
     exit 1
 fi
 
+# 强制 release 运行环境。xcodebuild archive 的 Build Phase 会调
+# `:compose-app:embedAndSignAppleFrameworkForXcode` 重新生成 AppEnvironment，
+# 而该 task 名不含 "release"，generateAppEnvironment 会落到默认 debug 分支，
+# 把内嵌 API 地址写成内网调试地址（172.31.x.x），导致 release ipa 连不上生产。
+# 这里显式导出 QUANT_MODE=release（generateAppEnvironment 读 QUANT_MODE 优先于任务名默认值），
+# 覆盖 archive 阶段的 mode 推断。deploy.sh release 已自带 QUANT_MODE=release，此处对其无副作用。
+export QUANT_MODE=release
+
 XCODE_PROJECT="$PROJECT_ROOT/iosApp/iosApp.xcodeproj"
 SCHEME="iosApp"
 OUTPUT_DIR="$PROJECT_ROOT/build/ios-ipa"
