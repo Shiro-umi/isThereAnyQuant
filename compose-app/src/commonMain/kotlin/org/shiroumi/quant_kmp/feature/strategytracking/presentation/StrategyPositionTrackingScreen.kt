@@ -64,7 +64,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.Icons
@@ -130,8 +131,12 @@ import org.shiroumi.quant_kmp.ui.navigation.RegisterTransientBack
 private val CompactPagePadding = 16.dp
 private val DefaultPagePadding = 24.dp
 
-/** 列表底部为常驻全景图按钮预留的占位高度（ExtendedFAB 56dp + 上下留白）。 */
-private val TrackingPanoramaButtonReserve = 96.dp
+/**
+ * 列表底部为悬浮切换按钮预留的滚动余量：仅保证末行能向上滚出按钮覆盖区并留出呼吸，
+ * 不再把按钮当作占位块挤压正文。正文背景自然铺满并延伸到按钮下方，
+ * 按钮以小尺寸 FAB 悬浮其上（SmallFAB 40dp + 底距 16dp = 56dp 占位，再 +12dp 呼吸）。
+ */
+private val TrackingPanoramaButtonReserve = 68.dp
 
 /** Compact/Medium 列表形态的内容最大宽度，与全局 Compact contentMaxWidth 一致。 */
 private val TrackingCompactListMaxWidth = 600.dp
@@ -269,7 +274,12 @@ fun StrategyPositionTrackingScreen(
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.surface
+        containerColor = MaterialTheme.colorScheme.surface,
+        // 该页嵌套在外层导航 Scaffold（已含 MobileNavTitleBar + statusBarsPadding 完成顶部避让）之内。
+        // 内层 Scaffold 无 topBar，若沿用默认 contentWindowInsets=systemBars 会把顶部安全区 inset
+        // 二次计入，iOS 刘海/灵动岛下重复约 44pt，表现为标题栏下方一整条空白。置 0 交由外层统一避让，
+        // 与 AgentAnalysisScreen 同结构页面的处理对齐。
+        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0)
     ) { innerPadding ->
         Box(
             modifier = Modifier
@@ -369,10 +379,9 @@ fun StrategyPositionTrackingScreen(
                                                 animatedVisibilityScope = timelineAnimatedScope,
                                                 overlayState = timelineOverlayState,
                                                 onStockClick = onStockClick,
-                                                // 与列表形态同款底部预留：矮窗口垂直滚动到底时不被常驻按钮压住清仓区
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .padding(bottom = TrackingPanoramaButtonReserve),
+                                                // 全景流转图铺满整个内容区，正文自然延伸到悬浮切换按钮下方；
+                                                // 底部呼吸由 TrackingTimelineContent 自身的 lazyRowBottom 负责。
+                                                modifier = Modifier.fillMaxSize(),
                                             )
                                         } else {
                                             Box(modifier = Modifier.fillMaxSize()) {
@@ -395,23 +404,27 @@ fun StrategyPositionTrackingScreen(
                                         }
                                     }
                                 }
-                                ExtendedFloatingActionButton(
+                                SmallFloatingActionButton(
                                     onClick = { panoramaOpen = !panoramaOpen },
-                                    icon = {
-                                        Icon(
-                                            imageVector = if (panoramaOpen) {
-                                                Icons.AutoMirrored.Outlined.ViewList
-                                            } else {
-                                                Icons.Outlined.AccountTree
-                                            },
-                                            contentDescription = null,
-                                        )
-                                    },
-                                    text = { Text(if (panoramaOpen) "列表" else "全景图") },
+                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    elevation = FloatingActionButtonDefaults.elevation(
+                                        defaultElevation = 3.dp,
+                                        pressedElevation = 3.dp,
+                                    ),
                                     modifier = Modifier
                                         .align(Alignment.BottomCenter)
                                         .padding(bottom = AgentTheme.Spacing.md),
-                                )
+                                ) {
+                                    Icon(
+                                        imageVector = if (panoramaOpen) {
+                                            Icons.AutoMirrored.Outlined.ViewList
+                                        } else {
+                                            Icons.Outlined.AccountTree
+                                        },
+                                        contentDescription = if (panoramaOpen) "切换到列表" else "切换到全景图",
+                                    )
+                                }
                             }
 
                             AnimatedVisibility(
@@ -452,18 +465,29 @@ fun StrategyPositionTrackingScreen(
             }
 
             if (calibrationPickerVisible) {
-                // 全尺寸统一底部抽屉：校准是轻量单选，抽屉「滑入点选即收」最贴合；
-                // ModalBottomSheet 在宽屏自动居中限宽，桌面观感同窄面板，无需 Dialog 分形态。
+                // 与跟踪说明同款分形态：Compact/Medium 用底部抽屉（滑入点选即收，贴合单手），
+                // Expanded 及以上用居中 Dialog（与桌面工作台形态一致，避免大屏底部抽屉横跨整屏）。
                 // 可选日期取模型自身流 timeline（集合不随校准收缩），而非校准视图。
-                // 三条收起路径（点交易日 / 点跟随全程 / 点关闭）都由抽屉内部统一先播放
-                // hide() 下滑动画再回调，故这里只传纯业务动作与关闭信号，不各自置 visible。
-                CalibrationPickerBottomSheet(
-                    selectedDate = activeCalibration?.followStartDate,
-                    timeline = timeline,
-                    onPick = viewModel::calibrateFollowStart,
-                    onClearCalibration = viewModel::clearCalibration,
-                    onDismiss = { calibrationPickerVisible = false },
-                )
+                val useBottomSheet = config.isCompact || config.isMedium
+                if (useBottomSheet) {
+                    // 三条收起路径（点交易日 / 点跟随全程 / 点关闭）都由抽屉内部统一先播放
+                    // hide() 下滑动画再回调，故这里只传纯业务动作与关闭信号，不各自置 visible。
+                    CalibrationPickerBottomSheet(
+                        selectedDate = activeCalibration?.followStartDate,
+                        timeline = timeline,
+                        onPick = viewModel::calibrateFollowStart,
+                        onClearCalibration = viewModel::clearCalibration,
+                        onDismiss = { calibrationPickerVisible = false },
+                    )
+                } else {
+                    CalibrationPickerDialog(
+                        selectedDate = activeCalibration?.followStartDate,
+                        timeline = timeline,
+                        onPick = viewModel::calibrateFollowStart,
+                        onClearCalibration = viewModel::clearCalibration,
+                        onDismiss = { calibrationPickerVisible = false },
+                    )
+                }
             }
         }
     }
@@ -879,6 +903,51 @@ private fun CalibrationPickerBottomSheet(
         )
         Spacer(modifier = Modifier.height(8.dp))
     }
+}
+
+/**
+ * 跟随校准 Dialog（大屏形态）。与 [CalibrationPickerBottomSheet] 共用 [CalibrationDateList]：
+ * 顶部说明 + 「跟随全程」+ 可校准交易日列表，点选即终态（先执行业务动作再收起 Dialog），
+ * 无确认按钮。容器与 [DisclaimerDialog] 同款 surfaceContainerLow，对齐大屏弹窗规格。
+ */
+@Composable
+private fun CalibrationPickerDialog(
+    selectedDate: String?,
+    timeline: StrategyPositionTrackingTimeline?,
+    onPick: (String) -> Unit,
+    onClearCalibration: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val tradeDates = remember(timeline) {
+        timeline?.calibratableTradeDates().orEmpty()
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "跟随校准",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+        },
+        text = {
+            CalibrationDateList(
+                selectedDate = selectedDate,
+                tradeDates = tradeDates,
+                onPick = { date -> onPick(date); onDismiss() },
+                onClearCalibration = { onClearCalibration(); onDismiss() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("关闭")
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+    )
 }
 
 @Composable
