@@ -358,3 +358,23 @@ echo "   Mode:   $MODE"
 echo "   Port:   $TARGET_PORT"
 echo "   Strategy service port: $STRATEGY_SERVICE_PORT"
 echo "   Logs:   tail -f $DEPLOY_DIR/logs/server.log"
+
+# iOS 未签名 ipa 出包：仅 release + 仅 macOS。
+# iOS 出包依赖 Xcode 工具链，无法在 Linux/CI/Docker 执行，因此独立于 packageRelease
+# （后者跨平台可构建），在此守卫触发，杜绝非 macOS 环境 release 部署失败。
+# 出包失败不回滚已完成的 server 部署（server 已起），仅提示重试。
+if [ "$MODE_FAMILY" = "release" ]; then
+    if [ "$(uname -s)" = "Darwin" ]; then
+        echo ""
+        echo "🍎 Building unsigned iOS ipa (release)..."
+        if "$SCRIPT_DIR/scripts/build-ios-ipa.sh"; then
+            echo "   iOS ipa ready: $SCRIPT_DIR/build/ios-ipa/Quant.ipa（用户自行签名 sideload）"
+        else
+            echo "⚠️  iOS ipa 出包失败；server 部署不受影响。"
+            echo "   手动重试：$SCRIPT_DIR/scripts/build-ios-ipa.sh"
+        fi
+    else
+        echo ""
+        echo "ℹ️  跳过 iOS ipa 出包：当前非 macOS（$(uname -s)），iOS 出包需在 macOS 上执行 scripts/build-ios-ipa.sh。"
+    fi
+fi
