@@ -1,4 +1,4 @@
-package org.shiroumi.quant_kmp.feature.candle.presentation.sentiment
+package org.shiroumi.quant_kmp.feature.sentiment.presentation
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable

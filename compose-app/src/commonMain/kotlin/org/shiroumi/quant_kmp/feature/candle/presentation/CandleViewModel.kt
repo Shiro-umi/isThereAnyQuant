@@ -8,9 +8,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,12 +27,13 @@ import model.candle.MarketStatus
 import model.candle.StockInfo
 import model.ws.CandleErrorCode
 import org.shiroumi.quant_kmp.feature.candle.contract.CandleContract
-import org.shiroumi.quant_kmp.feature.candle.contract.toCandleChartDataYielding
-import org.shiroumi.quant_kmp.feature.candle.domain.repository.CandleRepository
+import org.shiroumi.quant_kmp.data.candle.toCandleChartDataYielding
+import org.shiroumi.quant_kmp.data.candle.CandleRepository
 import org.shiroumi.quant_kmp.service.CandleTraceLogger
 import org.shiroumi.quant_kmp.service.ConnectionState
 import org.shiroumi.quant_kmp.service.GlobalWebSocketClient
 import org.shiroumi.quant_kmp.service.StockContextProvider
+import org.shiroumi.quant_kmp.ui.core.mvi.MviViewModel
 import org.shiroumi.config.AppConfig
 import kotlin.uuid.ExperimentalUuidApi
 
@@ -94,7 +95,7 @@ private class LruCache<K, V>(private val maxSize: Int) {
  */
 class CandleViewModel(
     private val repository: CandleRepository
-) : ViewModel() {
+) : ViewModel(), MviViewModel<CandleContract.State, CandleContract.Action, CandleContract.Effect> {
     private companion object {
         const val INTRADAY_SNAPSHOT_OWNER = "candle"
         const val STRATEGY_POSITIONS_OWNER = "candle"
@@ -107,10 +108,10 @@ class CandleViewModel(
     }
 
     private val _state = MutableStateFlow(CandleContract.State())
-    val state: StateFlow<CandleContract.State> = _state.asStateFlow()
+    override val state: StateFlow<CandleContract.State> = _state.asStateFlow()
 
     private val _effect = MutableSharedFlow<CandleContract.Effect>()
-    val effect: SharedFlow<CandleContract.Effect> = _effect.asSharedFlow()
+    override val effect: Flow<CandleContract.Effect> = _effect.asSharedFlow()
 
     /** 搜索防抖 Job */
     private var searchDebounceJob: Job? = null
@@ -227,7 +228,7 @@ class CandleViewModel(
     /**
      * 处理用户动作
      */
-    fun dispatch(action: CandleContract.Action) {
+    override fun dispatch(action: CandleContract.Action) {
         when (action) {
             is CandleContract.Action.SelectStock -> selectStock(action.stock)
             is CandleContract.Action.UpdateSearchQuery -> updateSearchQuery(action.query)

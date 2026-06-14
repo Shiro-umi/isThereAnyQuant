@@ -1,4 +1,4 @@
-package org.shiroumi.quant_kmp.feature.candle.presentation.sentiment
+package org.shiroumi.quant_kmp.feature.sentiment.presentation
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,7 +23,6 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -34,19 +33,16 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import model.candle.StrategySentimentResponse
 import org.shiroumi.quant_kmp.di.HttpClientProvider
-import org.shiroumi.quant_kmp.feature.candle.data.repository.CandleRepositoryImpl
-import org.shiroumi.quant_kmp.feature.candle.presentation.sentiment.components.CompactChartCard
-import org.shiroumi.quant_kmp.feature.candle.presentation.sentiment.components.FeaturedSentimentCard
-import org.shiroumi.quant_kmp.feature.candle.presentation.sentiment.components.MarketSentimentFoundationCard
-import org.shiroumi.quant_kmp.feature.candle.presentation.sentiment.components.MomentumMetricsCard
-import org.shiroumi.quant_kmp.feature.candle.presentation.sentiment.components.SecondaryMetricsCard
-import org.shiroumi.quant_kmp.feature.candle.presentation.sentiment.components.SentimentHeader
-import org.shiroumi.quant_kmp.feature.candle.presentation.sentiment.components.VolatilityMetricsCard
-import org.shiroumi.quant_kmp.service.GlobalWebSocketClient
+import org.shiroumi.quant_kmp.data.candle.CandleRepositoryImpl
+import org.shiroumi.quant_kmp.feature.sentiment.presentation.components.CompactChartCard
+import org.shiroumi.quant_kmp.feature.sentiment.presentation.components.FeaturedSentimentCard
+import org.shiroumi.quant_kmp.feature.sentiment.presentation.components.MarketSentimentFoundationCard
+import org.shiroumi.quant_kmp.feature.sentiment.presentation.components.MomentumMetricsCard
+import org.shiroumi.quant_kmp.feature.sentiment.presentation.components.SecondaryMetricsCard
+import org.shiroumi.quant_kmp.feature.sentiment.presentation.components.SentimentHeader
+import org.shiroumi.quant_kmp.feature.sentiment.presentation.components.VolatilityMetricsCard
 import org.shiroumi.quant_kmp.ui.core.adaptive.m3.rememberAdaptiveLayoutConfig
 import org.shiroumi.quant_kmp.ui.navigation.ProvideScrollableLargeMobileTitleBar
-
-private const val INTRADAY_SNAPSHOT_OWNER = "sentiment"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,16 +71,10 @@ fun SentimentScreen(
         scrollBehavior = scrollBehavior,
     )
 
-    LaunchedEffect(Unit) {
-        println("[SentimentScreen] Screen displayed, subscribing to INTRADAY_SNAPSHOT")
-        GlobalWebSocketClient.subscribeIntradaySnapshot(INTRADAY_SNAPSHOT_OWNER)
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            println("[SentimentScreen] Screen disposed, unsubscribing from INTRADAY_SNAPSHOT")
-            GlobalWebSocketClient.unsubscribeIntradaySnapshot(INTRADAY_SNAPSHOT_OWNER)
-        }
+    // 订阅生命周期统一交给 ViewModel 的引用计数：进入可见区订阅、离开防抖解订。
+    DisposableEffect(viewModel) {
+        viewModel.onScreenEnter()
+        onDispose { viewModel.onScreenLeave() }
     }
 
     Box(

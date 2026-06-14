@@ -1,4 +1,4 @@
-package org.shiroumi.quant_kmp.feature.candle.presentation.sentiment.components
+package org.shiroumi.quant_kmp.feature.sentiment.presentation.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -29,7 +29,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import model.candle.StrategySentimentResponse
-import org.shiroumi.quant_kmp.feature.candle.presentation.sentiment.ParameterSpec
+import org.shiroumi.quant_kmp.feature.sentiment.presentation.ParameterSpec
 import org.shiroumi.quant_kmp.ui.agent.theme.AgentTheme
 import org.shiroumi.quant_kmp.ui.theme.quantColors
 

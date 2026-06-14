@@ -1,4 +1,4 @@
-package org.shiroumi.quant_kmp.feature.candle.presentation.sentiment.components
+package org.shiroumi.quant_kmp.feature.sentiment.presentation.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
@@ -26,8 +26,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.sp
 import model.candle.StrategySentimentResponse
-import org.shiroumi.quant_kmp.feature.candle.presentation.sentiment.ThresholdLine
-import org.shiroumi.quant_kmp.feature.candle.presentation.sentiment.formatDouble
+import org.shiroumi.quant_kmp.feature.sentiment.presentation.ThresholdLine
+import org.shiroumi.quant_kmp.feature.sentiment.presentation.formatDouble
 
 @Composable
 fun MiniLineChart(
