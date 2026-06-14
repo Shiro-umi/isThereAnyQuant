@@ -7,6 +7,7 @@ import model.dataprovider.CandleKey
 import org.shiroumi.server.data.bootstrap.DataLayerBootstrap
 import org.shiroumi.server.data.snapshot.CandleSnapshotState
 import org.shiroumi.server.runtime.market.resolveEffectiveTradeDate
+import org.shiroumi.server.runtime.stock.StockCatalogEntry
 import org.shiroumi.server.runtime.stock.StockCatalogSnapshotService
 import org.shiroumi.database.stock.StockReader
 import org.shiroumi.database.strategy.daily.repository.DailyStockFactorRepository
@@ -70,35 +71,35 @@ class StockRepositoryImpl(
         // 计算总数
         val total = entries.size
 
-        // 对轻量数据排序（CODE/NAME 可在内存排序，价格类排序需要先查数据）
-        val sortedEntries = when (request.sortBy) {
+        // 分页参数：先于排序确定，RANK_SCORE 分支据此只选出当前页所需的 TopK，避免全量排序。
+        val page = request.page.coerceAtLeast(1)
+        val pageSize = request.pageSize.coerceIn(1, 100)
+        val offset = (page - 1) * pageSize
+
+        // 对轻量数据排序后只取当前页（CODE/NAME 可在内存排序，价格类排序需要先查数据）
+        val pagedEntries = when (request.sortBy) {
             SortField.CODE -> if (request.sortOrder == SortOrder.ASC) {
                 entries.sortedBy { it.tsCode }
             } else {
                 entries.sortedByDescending { it.tsCode }
-            }
+            }.drop(offset).take(pageSize)
             SortField.NAME -> if (request.sortOrder == SortOrder.ASC) {
                 entries.sortedBy { it.name }
             } else {
                 entries.sortedByDescending { it.name }
-            }
+            }.drop(offset).take(pageSize)
             SortField.RANK_SCORE -> {
                 val scores = getRankScores(currentTradeDate())
-                if (request.sortOrder == SortOrder.DESC) {
-                    entries.sortedByDescending { scores[it.tsCode] ?: 0.0 }
-                } else {
-                    entries.sortedBy { scores[it.tsCode] ?: 0.0 }
-                }
+                // 列表页只要某一页：用有界堆做 TopK 部分选择，把比较代价从全排序的 O(n log n) 降到 O(n log k)
+                // （k = offset + pageSize）。稳定性由 TopKPageSelector 内部按 catalog 原始下标补全序保证，
+                // 打分相同的条目按原始顺序排列，深翻页不会出现页间重复/遗漏。
+                val byScore = compareBy<StockCatalogEntry> { scores[it.tsCode] ?: 0.0 }
+                val comparator = if (request.sortOrder == SortOrder.DESC) byScore.reversed() else byScore
+                TopKPageSelector.select(entries, comparator, offset, pageSize)
             }
             // 价格类排序暂时按代码排序，实际价格排序需要全量行情数据支持
-            else -> entries.sortedBy { it.tsCode }
+            else -> entries.sortedBy { it.tsCode }.drop(offset).take(pageSize)
         }
-
-        // 分页：只取当前页
-        val page = request.page.coerceAtLeast(1)
-        val pageSize = request.pageSize.coerceIn(1, 100)
-        val offset = (page - 1) * pageSize
-        val pagedEntries = sortedEntries.drop(offset).take(pageSize)
 
         // 只对当前页的股票批量查询历史数据（单次批量查询代替 N 次单条查询）
         val pagedStocks = if (pagedEntries.isEmpty()) {
