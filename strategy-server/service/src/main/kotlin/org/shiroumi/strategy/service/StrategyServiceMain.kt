@@ -363,6 +363,20 @@ private class StrategySocketService(
                     logger.info("strategy-service intraday runtime paused phase=${decision.phase}")
                     publishHealth(status = "INTRADAY_REFRESH_PAUSED_${decision.phase.name}", topic = StrategyTopic.INTRADAY)
                 }
+                // 非交易时段每个 idle tick 检查审计追平：盘后审计若经补偿队列/其它途径落库，
+                // 在跑的 service 内存快照不会被动更新，跟踪页冻结在旧交易日。此处比对 DB 最新
+                // 审计日与内存快照日，DB 更新时重新 hydrate，使快照自动追平，无需重启 service。
+                if (!decision.shouldRefresh) {
+                    runCatching { postMarketRuntime.catchUpLatestPositionsIfStale() }
+                        .onSuccess { caughtUp ->
+                            if (caughtUp != null) {
+                                publishHealth(status = "POSITIONS_CATCHUP", topic = StrategyTopic.POSITIONS)
+                            }
+                        }
+                        .onFailure { error ->
+                            logger.warning("strategy-service positions audit catch-up failed: ${error.message}")
+                        }
+                }
                 delay(if (decision.phase == IntradayRuntimeSchedule.Phase.TRADING_ACTIVE) intervalMillis else idleIntervalMillis)
             }
         }

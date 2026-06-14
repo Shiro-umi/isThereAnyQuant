@@ -224,6 +224,7 @@ private object EmptyTrackingDataSource : StrategyPositionTrackingDataSource {
     override fun loadCandles(tsCodes: List<String>, startDate: LocalDate, endDate: LocalDate) =
         emptyMap<String, Map<LocalDate, model.Candle>>()
     override fun tradingDaysSince(entryDate: LocalDate, date: LocalDate) = 0
+    override fun tradingDayAfter(date: LocalDate, tradingDays: Int): LocalDate? = null
     override fun loadSelectionsByTargetDate(targetDate: LocalDate) =
         emptyList<org.shiroumi.database.strategy.daily.repository.ProfitPredictionSelection>()
     override fun entryPriority(tsCode: String, signalDate: LocalDate) = 0.0

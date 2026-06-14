@@ -57,6 +57,37 @@ class PostMarketStrategyRuntime(
         )
     }
 
+    /**
+     * 审计追平：DB 最新审计日比内存 POSITIONS 快照新时，重新 hydrate 最新持仓与跟踪快照。
+     *
+     * 闭环背景：盘后 `RebuildDate` 链路（[rebuildDate]）会在写库后顺带发布快照，是常态推进路径。
+     * 但若审计经补偿队列重试、其它实例或离线脚本落库，在跑的 service 内存快照不会被动更新，
+     * 跟踪页会冻结在更早交易日，必须手动重启。本方法在非交易时段被调度循环周期性调用，
+     * 比对 DB 最新审计日与当前内存快照日，仅在 DB 更新时触发一次 [publishLatestPositions]，
+     * 使内存快照自动追平已落库的最新审计，无需重启 service。
+     *
+     * @return 已追平到的新交易日；DB 无更新或无审计时返回 null（不发布、不打日志）。
+     */
+    suspend fun catchUpLatestPositionsIfStale(): LocalDate? {
+        val latestAuditDate = dataSource.loadLatestAuditSummary()?.tradeDate ?: return null
+        val currentSnapshotDate = currentPositionsTradeDate()
+        if (currentSnapshotDate != null && latestAuditDate <= currentSnapshotDate) return null
+
+        val result = publishLatestPositions("audit-catchup")
+        return if (result.accepted) latestAuditDate else null
+    }
+
+    private suspend fun currentPositionsTradeDate(): LocalDate? =
+        snapshotHub.current(StrategyTopic.POSITIONS)
+            ?.payload
+            ?.let { payload ->
+                runCatching {
+                    LocalDate.parse(
+                        json.decodeFromJsonElement(StrategyPositionSnapshot.serializer(), payload).tradeDate
+                    )
+                }.getOrNull()
+            }
+
     override suspend fun rebuildDate(tradeDate: LocalDate, reason: String?): PostMarketRebuildResult =
         rebuildDates(listOf(tradeDate), reason ?: "rebuild-date")
 

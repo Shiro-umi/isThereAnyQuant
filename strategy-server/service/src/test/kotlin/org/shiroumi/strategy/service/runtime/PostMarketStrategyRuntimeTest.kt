@@ -230,6 +230,57 @@ class PostMarketStrategyRuntimeTest {
         assertEquals(0, dataSource.executedDates.size)
     }
 
+    @Test
+    fun `catch up republishes positions when db audit is newer than memory snapshot`() = runTest {
+        val hub = LocalStrategySnapshotHub<kotlinx.serialization.json.JsonElement>("test-service")
+        val olderDate = LocalDate(2026, 4, 30)
+        val newerDate = LocalDate(2026, 5, 6)
+        val dataSource = FakePostMarketDataSource(
+            executionResult = PostMarketOrchestrator.ExecutionResult(processedDates = emptyList()),
+            auditSummary = auditSummary(tradeDate = olderDate, currentPositions = listOf("000001.SZ")),
+            nextSelections = listOf(selection("000001.SZ", 0.7))
+        )
+        val runtime = PostMarketStrategyRuntime(snapshotHub = hub, json = json, dataSource = dataSource)
+
+        // 内存先 hydrate 到旧日
+        runtime.publishLatestPositions("startup")
+        assertEquals(olderDate.toString(), latestPositionsTradeDate(hub))
+
+        // 模拟新审计落库（DB 最新审计日推进），追平应重新发布到新日
+        dataSource.auditSummary = auditSummary(tradeDate = newerDate, currentPositions = listOf("000002.SZ"))
+        val caughtUp = runtime.catchUpLatestPositionsIfStale()
+
+        assertEquals(newerDate, caughtUp)
+        assertEquals(newerDate.toString(), latestPositionsTradeDate(hub))
+    }
+
+    @Test
+    fun `catch up is no-op when db audit equals memory snapshot`() = runTest {
+        val hub = LocalStrategySnapshotHub<kotlinx.serialization.json.JsonElement>("test-service")
+        val dataSource = FakePostMarketDataSource(
+            executionResult = PostMarketOrchestrator.ExecutionResult(processedDates = emptyList()),
+            auditSummary = auditSummary(tradeDate = tradeDate, currentPositions = listOf("000001.SZ")),
+            nextSelections = listOf(selection("000001.SZ", 0.7))
+        )
+        val runtime = PostMarketStrategyRuntime(snapshotHub = hub, json = json, dataSource = dataSource)
+
+        runtime.publishLatestPositions("startup")
+        val versionAfterHydration = assertNotNull(hub.current(StrategyTopic.POSITIONS)).version
+
+        // DB 审计日未变,追平应不发布(返回 null),快照版本不变
+        val caughtUp = runtime.catchUpLatestPositionsIfStale()
+
+        assertEquals(null, caughtUp)
+        assertEquals(versionAfterHydration, assertNotNull(hub.current(StrategyTopic.POSITIONS)).version)
+    }
+
+    private suspend fun latestPositionsTradeDate(
+        hub: LocalStrategySnapshotHub<kotlinx.serialization.json.JsonElement>
+    ): String = json.decodeFromJsonElement(
+        StrategyPositionSnapshot.serializer(),
+        assertNotNull(hub.current(StrategyTopic.POSITIONS)).payload
+    ).tradeDate
+
     private fun selection(tsCode: String, modelScore: Double) = ProfitPredictionSelection(
         tradeDate = tradeDate,
         targetDate = tradeDate,
@@ -274,7 +325,8 @@ class PostMarketStrategyRuntimeTest {
 private class FakePostMarketDataSource(
     private val openDates: List<LocalDate> = emptyList(),
     private val executionResult: PostMarketOrchestrator.ExecutionResult,
-    private val auditSummary: StrategyAuditSummary? = null,
+    // var: 审计追平测试需在发布后改变 DB 最新审计日,模拟新审计落库
+    var auditSummary: StrategyAuditSummary? = null,
     private val currentPositions: List<String> = emptyList(),
     private val nextSelections: List<ProfitPredictionSelection> = emptyList()
 ) : PostMarketStrategyRuntimeDataSource {
