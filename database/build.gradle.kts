@@ -35,6 +35,8 @@ dependencies {
     testImplementation(kotlin("test"))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.kotlinx.coroutines.test)
+    // YAML 解析（与生产 ConfigManager 同款解析器），用于连接池配置反序列化单测
+    testImplementation(libs.kaml)
 }
 
 kotlin {

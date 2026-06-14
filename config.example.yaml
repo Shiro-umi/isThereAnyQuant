@@ -127,12 +127,35 @@ scheduler:
 
 # ==================== 数据库配置 ====================
 database:
-  # SQLite 数据库文件路径（相对路径或绝对路径）
-  path: data/quant.db
-  # 连接池配置
+  host: "127.0.0.1"
+  port: 3306
+  user: "remote"
+  password: ""
+  # 连接池配置（HikariCP，按分库各建一个池）
+  #
+  # 重要：项目按库分池——common_db 与 stock_db 各自维护一个独立连接池。
+  # 实际占用的 MySQL 连接总数 = 分库数(2) × maxConnections。
+  # 单连接 MySQL 内存约 2-3MB；32G 内存机器留给连接池 6-8GB，可承载数千连接，
+  # 真正上限是 MySQL 服务端的 max_connections（默认 151，需显式提升）。
+  #
+  # 并发档位推荐（单库值）：
+  #   低并发  20-50 QPS   -> maxConnections 15 / minimumIdle 5  -> 2库共 30 连接
+  #   中并发  100-200 QPS -> maxConnections 25 / minimumIdle 8  -> 2库共 50 连接（默认）
+  #   高并发  300+ QPS    -> maxConnections 40 / minimumIdle 12 -> 2库共 80 连接（需 MySQL max_connections ≥ 100）
+  #   实盘大并发           -> maxConnections 50 / minimumIdle 15 -> 2库共 100 连接（需 MySQL max_connections ≥ 200）
+  #
+  # 提升 maxConnections 前先在 MySQL 端执行：
+  #   SET GLOBAL max_connections = 200;
+  #   SET GLOBAL wait_timeout = 600;        -- 空闲连接超时
+  #   SET GLOBAL max_allowed_packet = 16M;  -- 支持较大批量导入
   pool:
-    maxConnections: 10
+    # 单库峰值连接数。约束：必须 ≤ MySQL max_connections ÷ 分库数。
+    maxConnections: 25
+    # 单库常驻空闲连接数。约束：必须 ≤ maxConnections，越界自动截断。
+    minimumIdle: 8
+    # 获取连接超时（毫秒）。池满且无空闲连接时，调用方等待上限。
     connectionTimeoutMs: 5000
+    # JDBC socket 读超时（毫秒）。慢查询/大批量导入需要更长时容忍。
     socketTimeoutMs: 60000
 
 # ==================== 日志配置 ====================

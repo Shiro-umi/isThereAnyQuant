@@ -111,7 +111,17 @@ data class DatabaseConfig(
 @Serializable
 @SerialName("databasePool")
 data class DatabasePoolConfig(
-    val maxConnections: Int = 10,
+    /**
+     * 单库连接池峰值连接数。每个分库（common_db / stock_db）各自维护一个 HikariCP 池，
+     * 总连接数 = 分库数 × maxConnections。32G 内存机器按中等并发推荐 25。
+     * 提升此值时必须同步抬高 MySQL `max_connections`（默认 151），否则 MySQL 端拒绝新连接。
+     */
+    val maxConnections: Int = 25,
+    /**
+     * 常驻空闲连接数。HikariCP 保持至少这么多连接随时可用，避开冷连接握手延迟。
+     * 取值必须 ≤ maxConnections；越界时由装配层 coerce 截断到 maxConnections。
+     */
+    val minimumIdle: Int = 8,
     val connectionTimeoutMs: Long = 5000,
     val socketTimeoutMs: Int = 60000
 )

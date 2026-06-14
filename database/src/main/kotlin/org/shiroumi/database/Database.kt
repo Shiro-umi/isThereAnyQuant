@@ -84,24 +84,11 @@ internal val stockDb: Database by lazy { connect("stock_db") }
 private fun connect(baseName: String): Database {
     val dbName = getDbName(baseName)
     val dbConfig = ConfigHolder.config.database
-    val poolConfig = dbConfig.pool
-    
+
     // 确保数据库存在
     createDb(dbName = dbName)
 
-    val hikariConfig = HikariConfig().apply {
-        jdbcUrl = getJdbcUrl(dbName, poolConfig.socketTimeoutMs)
-        driverClassName = "com.mysql.cj.jdbc.Driver"
-        username = dbConfig.user
-        password = dbConfig.password
-        maximumPoolSize = poolConfig.maxConnections.coerceAtLeast(1)
-        minimumIdle = 0
-        connectionTimeout = poolConfig.connectionTimeoutMs.coerceAtLeast(HIKARI_MIN_TIMEOUT_MS)
-        validationTimeout = poolConfig.connectionTimeoutMs
-            .coerceIn(HIKARI_MIN_TIMEOUT_MS, 5_000L)
-        initializationFailTimeout = -1
-        poolName = "quant-$dbName"
-    }
+    val hikariConfig = buildHikariConfig(dbName, dbConfig)
 
     return Database.connect(
         datasource = HikariDataSource(hikariConfig),
@@ -109,6 +96,54 @@ private fun connect(baseName: String): Database {
             useNestedTransactions = false
         }
     )
+}
+
+/**
+ * 纯函数装配单库 HikariCP 连接池配置，不触碰真实数据库。
+ *
+ * 由 [connect] 在 [createDb] 之后调用，独立可测。装配规则保证 HikariCP 不会因越界参数静默退化：
+ * - `maximumPoolSize` 至少 1（保护 maxConnections<=0 的误配）。
+ * - `minimumIdle` 截断到 `[0, maximumPoolSize]`：HikariCP 内部 minIdle>maxPool 时会自动拉平到 maxPool
+ *   且不打印明显告警，这里提前 coerce 并显式记日志，保证常驻空闲与峰值的语义可观测。
+ * - `connectionTimeout` 不低于 HikariCP 下限 250ms；`validationTimeout` 收敛在 [250ms, 5s]。
+ *
+ * @param dbName 已解析的物理库名（含测试模式 `_test` 后缀），用于 poolName 与 JDBC URL。
+ * @param dbConfig 当前生效的数据库配置（含连接池子配置）。
+ */
+internal fun buildHikariConfig(
+    dbName: String,
+    dbConfig: org.shiroumi.config.DatabaseConfig
+): HikariConfig {
+    val poolConfig = dbConfig.pool
+    val maxPool = poolConfig.maxConnections.coerceAtLeast(1)
+    val minIdle = poolConfig.minimumIdle.coerceIn(0, maxPool)
+    if (poolConfig.minimumIdle > maxPool) {
+        println(
+            "[DB_POOL] $dbName: minimumIdle=${poolConfig.minimumIdle} 超过 maxConnections=$maxPool，" +
+                "已截断到 $minIdle 以匹配 HikariCP 上限"
+        )
+    }
+    val connectionTimeout = poolConfig.connectionTimeoutMs.coerceAtLeast(HIKARI_MIN_TIMEOUT_MS)
+    val validationTimeout = poolConfig.connectionTimeoutMs.coerceIn(HIKARI_MIN_TIMEOUT_MS, 5_000L)
+
+    println(
+        "[DB_POOL] quant-$dbName 装配完成: maxPool=$maxPool, minIdle=$minIdle, " +
+            "connTimeoutMs=$connectionTimeout, validationTimeoutMs=$validationTimeout, " +
+            "socketTimeoutMs=${poolConfig.socketTimeoutMs}"
+    )
+
+    return HikariConfig().apply {
+        jdbcUrl = getJdbcUrl(dbName, poolConfig.socketTimeoutMs)
+        driverClassName = "com.mysql.cj.jdbc.Driver"
+        username = dbConfig.user
+        password = dbConfig.password
+        maximumPoolSize = maxPool
+        minimumIdle = minIdle
+        this.connectionTimeout = connectionTimeout
+        this.validationTimeout = validationTimeout
+        initializationFailTimeout = -1
+        poolName = "quant-$dbName"
+    }
 }
 
 private fun createDb(dbName: String) {
