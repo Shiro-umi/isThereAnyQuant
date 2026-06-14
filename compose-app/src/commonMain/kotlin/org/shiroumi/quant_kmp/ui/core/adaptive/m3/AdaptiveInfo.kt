@@ -1,5 +1,6 @@
 package org.shiroumi.quant_kmp.ui.core.adaptive.m3
 
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
@@ -60,6 +61,32 @@ data class AdaptiveLayoutConfig(
         WindowWidthType.Large -> 0.3f to 0.7f
         WindowWidthType.XLarge -> 0.25f to 0.75f
     }
+
+    /**
+     * 宽度是否足够并列分栏（≥840dp）。
+     *
+     * 各页统一用它判断双栏，取代散落的 `isExpanded || isLarge || isXLarge`。
+     */
+    val isAtLeastExpanded: Boolean get() = isExpanded || isLarge || isXLarge
+
+    /**
+     * 页面外层统一内边距。
+     *
+     * Compact 只留水平边距、纵向交给沉浸式内容；Medium 24dp 四周；更宽 40dp 四周。
+     * 取代 Sentiment / StrategyTracking 各自重写的 pagePadding when 表达式。
+     */
+    val pagePadding: PaddingValues get() = when {
+        isCompact -> PaddingValues(horizontal = 16.dp)
+        isMedium -> PaddingValues(24.dp)
+        else -> PaddingValues(40.dp)
+    }
+
+    /**
+     * 页面标题到主内容的纵向间距。
+     *
+     * Compact 由 TopBar 承载标题、页内间距小；更宽时页内大字标题留出更大呼吸。
+     */
+    val headerToContentGap: Dp get() = if (isCompact) 20.dp else 32.dp
 }
 
 enum class WindowWidthType {

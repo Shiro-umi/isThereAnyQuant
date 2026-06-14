@@ -77,6 +77,7 @@ import androidx.compose.material.icons.outlined.EditCalendar
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -122,7 +123,7 @@ import model.candle.StrategyTrackingEdgeKind
 import model.candle.StrategyTrackingSection
 import model.candle.StrategyTrackingStockNode
 import org.shiroumi.quant_kmp.di.HttpClientProvider
-import org.shiroumi.quant_kmp.feature.candle.data.repository.CandleRepositoryImpl
+import org.shiroumi.quant_kmp.data.candle.CandleRepositoryImpl
 import org.shiroumi.quant_kmp.ui.agent.theme.AgentTheme
 import org.shiroumi.quant_kmp.ui.animation.AnimationDurations
 import org.shiroumi.quant_kmp.ui.core.adaptive.m3.rememberAdaptiveLayoutConfig
@@ -180,13 +181,18 @@ fun StrategyPositionTrackingScreen(
         )
     }
 ) {
-    val timeline by viewModel.timeline.collectAsState()
-    val isLoading by viewModel.isLoading.collectAsState()
-    val error by viewModel.error.collectAsState()
-    val selectedStock by viewModel.selectedStock.collectAsState()
-    val selectedDetail by viewModel.selectedDetail.collectAsState()
-    val calibration by viewModel.calibration.collectAsState()
-    val listObservedDate by viewModel.listObservedDate.collectAsState()
+    val state by viewModel.state.collectAsState()
+    val timeline = state.timeline
+    val isLoading = state.isLoadingTracking
+    val error = state.error
+    val selectedStock = state.selectedStock
+    val selectedDetail = state.selectedDetail
+    val calibration = state.calibration
+    val listObservedDate = state.listObservedDate
+    DisposableEffect(viewModel) {
+        viewModel.onScreenEnter()
+        onDispose { viewModel.onScreenLeave() }
+    }
     // 校准激活时渲染跟随者视角重放流，模型自身流仍在后台随 WS 更新
     val activeCalibration = calibration
     val displayTimeline = if (activeCalibration != null) activeCalibration.timeline else timeline
@@ -194,14 +200,10 @@ fun StrategyPositionTrackingScreen(
     val displayError = activeCalibration?.error ?: error
     var calibrationPickerVisible by remember { mutableStateOf(false) }
     val config = rememberAdaptiveLayoutConfig()
-    val pagePadding = when {
-        config.isExpanded || config.isLarge || config.isXLarge -> PaddingValues(40.dp)
-        config.isMedium -> PaddingValues(24.dp)
-        else -> PaddingValues(horizontal = 16.dp, vertical = 0.dp)
-    }
+    val pagePadding = config.pagePadding
     var disclaimerVisible by remember { mutableStateOf(false) }
     // ≥840dp（Expanded 及以上）左列表 + 右全景流转图双栏；<840dp 列表为主、底部按钮切换全景图
-    val useSplitPanes = config.isExpanded || config.isLarge || config.isXLarge
+    val useSplitPanes = config.isAtLeastExpanded
     var panoramaOpen by remember { mutableStateOf(false) }
     // Compact / Medium 由 TopBar 承载标题；Expanded 及以上由页内 TrackingPageHeader 大字承载
     if (!useSplitPanes) {
@@ -240,7 +242,7 @@ fun StrategyPositionTrackingScreen(
     // Back 永远先关详情浮层、再收全景图、最后回退路由；若放进断点分支，
     // 跨断点重组会重排注册顺序导致消费倒置。双栏形态下 panoramaOpen 恒 false，注册无副作用。
     RegisterTransientBack(isOpen = panoramaOpen, onClose = { panoramaOpen = false })
-    RegisterTransientBack(isOpen = detailVisible, onClose = viewModel::dismissDetail)
+    RegisterTransientBack(isOpen = detailVisible, onClose = { viewModel.dispatch(StrategyTrackingAction.DismissDetail) })
 
     LaunchedEffect(selectedStock?.cardKey) {
         val stock = selectedStock ?: return@LaunchedEffect
@@ -302,7 +304,7 @@ fun StrategyPositionTrackingScreen(
                     ) {
                         val timelineAnimatedScope = this
                         val onStockClick: (StrategyTrackingStockNode, StrategyTrackingSection, String) -> Unit =
-                            { node, section, tradeDate -> viewModel.selectStock(node, section, tradeDate) }
+                            { node, section, tradeDate -> viewModel.dispatch(StrategyTrackingAction.SelectStock(node, section, tradeDate)) }
                         Box(modifier = Modifier.fillMaxSize()) {
                             if (useSplitPanes) {
                                 Column(
@@ -314,7 +316,7 @@ fun StrategyPositionTrackingScreen(
                                         onDisclaimerToggle = { disclaimerVisible = !disclaimerVisible },
                                         calibration = activeCalibration,
                                         onOpenCalibrationPicker = { calibrationPickerVisible = true },
-                                        onClearCalibration = viewModel::clearCalibration,
+                                        onClearCalibration = { viewModel.dispatch(StrategyTrackingAction.ClearCalibration) },
                                     )
                                     Row(
                                         modifier = Modifier.weight(1f),
@@ -324,10 +326,10 @@ fun StrategyPositionTrackingScreen(
                                             timeline = displayTimeline,
                                             isLoading = displayLoading,
                                             error = displayError,
-                                            onRefresh = viewModel::refresh,
+                                            onRefresh = { viewModel.dispatch(StrategyTrackingAction.Refresh) },
                                             onStockClick = onStockClick,
                                             observedDate = listObservedDate,
-                                            onObservedDateChange = viewModel::selectListObservedDate,
+                                            onObservedDateChange = { viewModel.dispatch(StrategyTrackingAction.SelectListObservedDate(it)) },
                                             modifier = Modifier
                                                 .width(AgentTheme.Sizing.sidePanelWidthMax)
                                                 .fillMaxHeight(),
@@ -336,7 +338,7 @@ fun StrategyPositionTrackingScreen(
                                             timeline = displayTimeline,
                                             isLoading = displayLoading,
                                             error = displayError,
-                                            onRefresh = viewModel::refresh,
+                                            onRefresh = { viewModel.dispatch(StrategyTrackingAction.Refresh) },
                                             sharedTransitionScope = this@SharedTransitionLayout,
                                             animatedVisibilityScope = timelineAnimatedScope,
                                             overlayState = timelineOverlayState,
@@ -357,7 +359,7 @@ fun StrategyPositionTrackingScreen(
                                             TrackingCalibrationControl(
                                                 calibration = it,
                                                 onOpenPicker = { calibrationPickerVisible = true },
-                                                onClear = viewModel::clearCalibration,
+                                                onClear = { viewModel.dispatch(StrategyTrackingAction.ClearCalibration) },
                                             )
                                         }
                                     }
@@ -375,7 +377,7 @@ fun StrategyPositionTrackingScreen(
                                                 timeline = displayTimeline,
                                                 isLoading = displayLoading,
                                                 error = displayError,
-                                                onRefresh = viewModel::refresh,
+                                                onRefresh = { viewModel.dispatch(StrategyTrackingAction.Refresh) },
                                                 sharedTransitionScope = this@SharedTransitionLayout,
                                                 animatedVisibilityScope = timelineAnimatedScope,
                                                 overlayState = timelineOverlayState,
@@ -390,10 +392,10 @@ fun StrategyPositionTrackingScreen(
                                                     timeline = displayTimeline,
                                                     isLoading = displayLoading,
                                                     error = displayError,
-                                                    onRefresh = viewModel::refresh,
+                                                    onRefresh = { viewModel.dispatch(StrategyTrackingAction.Refresh) },
                                                     onStockClick = onStockClick,
                                                     observedDate = listObservedDate,
-                                                    onObservedDateChange = viewModel::selectListObservedDate,
+                                                    onObservedDateChange = { viewModel.dispatch(StrategyTrackingAction.SelectListObservedDate(it)) },
                                                     // 列表底部为全景图按钮预留占位空间，避免末行被常驻按钮遮挡
                                                     bottomContentPadding = TrackingPanoramaButtonReserve,
                                                     modifier = Modifier
@@ -446,7 +448,7 @@ fun StrategyPositionTrackingScreen(
                                         sharedTransitionScope = this@SharedTransitionLayout,
                                         sharedAnimatedVisibilityScope = this,
                                         contentVisible = detailContentVisible,
-                                        onDismiss = viewModel::dismissDetail,
+                                        onDismiss = { viewModel.dispatch(StrategyTrackingAction.DismissDetail) },
                                         modifier = Modifier.fillMaxSize()
                                     )
                                 }
@@ -476,16 +478,16 @@ fun StrategyPositionTrackingScreen(
                     CalibrationPickerBottomSheet(
                         selectedDate = activeCalibration?.followStartDate,
                         timeline = timeline,
-                        onPick = viewModel::calibrateFollowStart,
-                        onClearCalibration = viewModel::clearCalibration,
+                        onPick = { viewModel.dispatch(StrategyTrackingAction.CalibrateFollowStart(it)) },
+                        onClearCalibration = { viewModel.dispatch(StrategyTrackingAction.ClearCalibration) },
                         onDismiss = { calibrationPickerVisible = false },
                     )
                 } else {
                     CalibrationPickerDialog(
                         selectedDate = activeCalibration?.followStartDate,
                         timeline = timeline,
-                        onPick = viewModel::calibrateFollowStart,
-                        onClearCalibration = viewModel::clearCalibration,
+                        onPick = { viewModel.dispatch(StrategyTrackingAction.CalibrateFollowStart(it)) },
+                        onClearCalibration = { viewModel.dispatch(StrategyTrackingAction.ClearCalibration) },
                         onDismiss = { calibrationPickerVisible = false },
                     )
                 }

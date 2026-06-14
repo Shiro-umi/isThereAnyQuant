@@ -27,6 +27,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.flow.Flow
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -95,9 +97,22 @@ fun AgentSidebarContent(
     onConnect: (() -> Unit)? = null,
     onNewSession: (() -> Unit)? = null,
     isCompactExpanded: Boolean = false,
+    effect: Flow<AgentContract.Effect>? = null,
     modifier: Modifier = Modifier
 ) {
     val listState = rememberLazyListState()
+
+    // 收到 ScrollToBottom 即把对话滚到底（reverseLayout=true，底部对应 index 0）。
+    // 由本组件持有 listState，故就近落地滚动，避免把 listState 提升到三个调用点。
+    if (effect != null) {
+        LaunchedEffect(effect) {
+            effect.collect { signal ->
+                if (signal is AgentContract.Effect.ScrollToBottom) {
+                    listState.animateScrollToItem(0)
+                }
+            }
+        }
+    }
 
     Column(
         modifier = modifier.fillMaxSize(),

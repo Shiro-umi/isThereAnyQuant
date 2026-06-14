@@ -1,4 +1,4 @@
-package org.shiroumi.quant_kmp.feature.candle.domain
+package org.shiroumi.quant_kmp.data.candle
 
 import kotlin.math.sqrt
 import kotlin.math.abs

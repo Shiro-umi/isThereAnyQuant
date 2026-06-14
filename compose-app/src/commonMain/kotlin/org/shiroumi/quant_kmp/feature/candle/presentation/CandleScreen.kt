@@ -29,7 +29,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.material3.adaptive.navigation3.LocalListDetailSceneScope
 import org.shiroumi.quant_kmp.NavDest
 import org.shiroumi.quant_kmp.feature.candle.contract.CandleContract
-import org.shiroumi.quant_kmp.feature.candle.data.repository.CandleRepositoryImpl
+import org.shiroumi.quant_kmp.data.candle.CandleRepositoryImpl
 import org.shiroumi.quant_kmp.feature.candle.presentation.components.CandleChartSection
 import org.shiroumi.quant_kmp.feature.candle.presentation.components.StockListPanel
 import org.shiroumi.quant_kmp.service.ConnectionState

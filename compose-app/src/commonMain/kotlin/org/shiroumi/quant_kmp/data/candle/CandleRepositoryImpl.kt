@@ -1,4 +1,4 @@
-package org.shiroumi.quant_kmp.feature.candle.data.repository
+package org.shiroumi.quant_kmp.data.candle
 
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -11,7 +11,6 @@ import model.candle.Exchange
 import model.candle.StockInfo
 import model.candle.StockListResponse
 import model.candle.StrategySentimentResponse
-import org.shiroumi.quant_kmp.feature.candle.domain.repository.CandleRepository
 
 /**
  * CandleRepository 实现类
