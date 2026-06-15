@@ -227,7 +227,6 @@ private object EmptyTrackingDataSource : StrategyPositionTrackingDataSource {
     override fun tradingDayAfter(date: LocalDate, tradingDays: Int): LocalDate? = null
     override fun loadSelectionsByTargetDate(targetDate: LocalDate) =
         emptyList<org.shiroumi.database.strategy.daily.repository.ProfitPredictionSelection>()
-    override fun entryPriority(tsCode: String, signalDate: LocalDate) = 0.0
 }
 
 private class FakeIntradayRuntime(

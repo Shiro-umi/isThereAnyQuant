@@ -7,20 +7,18 @@ import org.shiroumi.database.strategy.daily.repository.DailyHoldingState
 /**
  * 生产侧持仓状态机——多日持有 + 止盈止损。
  *
- * 业务主权在 strategy-server。默认规则 = v5 快线运营点（TP7%/H5/全档 2.5% 保盈阶梯/每日入场 1），
- * 2026-06-12 部署前在生产池（主板+创业板）复验：lw+bce 集成口径（生产包 = 双 loss × 双 seed 四成员）
- * 调参段 76.4%/EV+0.78%、验证段 77.3%/EV+0.89%、240 笔/年、分年全正
- * （研究文档 `private/research-docs/tp7-h5-feasibility-20260611.html`，复验脚本归档于
- * `private/research-docs/tp7-h5/train_v5b_bce_production.py` 头注）：
- * - 止盈：当日 HIGH 触及入场价 ×(1 + 7%) → 离场
- * - 保盈阶梯：入场后第 1~4 个可卖日，当日 HIGH 触及入场价 ×(1 + 2.5%) → 离场
- * - 时间止损：入场后第 5 个交易日收盘强制离场
- * - 每日入场上限 1：Top5 仅入场 [EntryCandidate.entryPriority]（20 日波动率）最高的一只
- * - 价格止损：默认关闭（验证结论：收盘价止损拦不住跳空深亏，反而消灭深蹲后反弹触达的盈利交易）
+ * 业务主权在 strategy-server。默认规则 = tp8/H3/3 只运营点（基于回测：每日 3 只模型分 + 各 1/N 等权 +
+ * 无浅止损，2022~2026 区间最大回撤 -56%→-34%、夏普 1.84→2.32 优于单票口径）：
+ * - 止盈：当日 HIGH 触及入场价 ×(1 + 8%) → 离场
+ * - 保盈阶梯：入场后第 1~2 个可卖日，当日 HIGH 触及入场价 ×(1 + 2.5%) → 离场
+ * - 浅浮亏止损：默认关闭（3 只分散口径下去掉浅止损年化与夏普更优；分散本身已控尾部）
+ * - 时间止损：入场后第 3 个交易日收盘强制离场
+ * - 每日入场上限 3：Top5 按 [EntryCandidate.entryPriority]（模型分）降序入场前 3 只
+ * - 价格止损：默认关闭（验证结论：收盘价跌破信号日低点止损拦不住跳空深亏，反而消灭深蹲后反弹触达的盈利交易）
  * - 入场跳空过滤：开盘较信号日收盘跳空 > 3% 不入场（跳空利润属于昨日持有者，追入为负期望）
  * - T+1 禁售：入场当日不离场
  *
- * 退出优先级：止盈 > 保盈阶梯 > 时间止损 > 价格止损。
+ * 退出优先级：止盈 > 保盈阶梯 > 浅浮亏止损 > 时间止损 > 价格止损。
  *
  * V3 运营点（TP5%/H15，`private/research-docs/v3-honest-model-paper.html`）为回滚通道，
  * 通过 [ExitRules.V3_OPERATING_POINT] 或系统属性显式覆盖。
@@ -47,6 +45,14 @@ class HoldingStateMachine(
         val takeProfitPct: Double = 0.08,
         val timeStopDays: Int = 3,
         val priceStopEnabled: Boolean = false,
+        /**
+         * 浅浮亏止损线：入场后到期前，当日收盘价跌破 入场价 ×(1 + value) 即当日收盘离场。
+         * value 为负数（如 -0.03）表示开启；0 或正数表示关闭。
+         * 默认 = 0.0（关闭）：3 只分散口径下回测显示去掉浅止损年化与夏普更优
+         * （分散本身已控尾部，浅止损反而砍掉深蹲后反弹的盈利交易）。
+         * 历史 -0.03 档（单票口径下把 H3 到期巨亏率 2.77%→1.04%，EV 中性）见 temp/probe_shallow_loss_exit_v5.py。
+         */
+        val shallowStopLossPct: Double = 0.0,
         /** 入场跳空上限：开盘价较信号日收盘价的涨幅超过该值时放弃入场。非正数表示关闭过滤。 */
         val entryGapMaxPct: Double = 0.03,
         /**
@@ -56,33 +62,37 @@ class HoldingStateMachine(
          */
         val profitProtectLadder: Map<Int, Double> = mapOf(1 to 0.025, 2 to 0.025),
         /**
-         * 每日新入场上限：默认 1（每日 Top5 仅入场 entryPriority 最高的一只，
-         * Top5 全入场实测稀释 4pp 胜率）；0 表示不限（V3 行为，目标组合全入场）。
+         * 每日新入场上限：默认 3（每日按 entryPriority 降序入场前 3 只，各 1/N 等权）；
+         * 0 表示不限（目标组合全入场）。入场排序由 entryPriority 决定（生产注入 model_score → 模型分降序）。
+         * 历史单票口径 = 1（Top5 仅入波动率最高 1 只）；3 只分散口径回测最大回撤 -56%→-34%、夏普 1.84→2.32。
          */
-        val maxDailyEntries: Int = 1,
+        val maxDailyEntries: Int = 3,
     ) {
         companion object {
-            /** V3 正式版运营点（TP5%/H15/无阶梯/全入场）——历史回滚通道。 */
+            /** V3 正式版运营点（TP5%/H15/无阶梯/全入场/无浅止损）——历史回滚通道。 */
             val V3_OPERATING_POINT = ExitRules(
                 takeProfitPct = 0.05,
                 timeStopDays = 15,
+                shallowStopLossPct = 0.0,
                 profitProtectLadder = emptyMap(),
                 maxDailyEntries = 0,
             )
 
             /**
-             * v5 快线旧运营点（TP7%/H5/全档 2.5% 阶梯/每日入场 1，2026-06-12~13 生产默认）。
-             * 用途：①回滚通道；②盘后影子对照基准（与现行 tp8/H3 双判决对比，验证切换增益在实盘复现）。
+             * v5 快线旧运营点（TP7%/H5/全档 2.5% 阶梯/每日入场 1/无浅止损，2026-06-12~13 生产默认）。
+             * 用途：①回滚通道；②盘后影子对照基准（与现行 tp8/H3+浅止损双判决对比，验证切换增益在实盘复现）。
              */
             val V5_FAST_TP7_H5 = ExitRules(
                 takeProfitPct = 0.07,
                 timeStopDays = 5,
+                shallowStopLossPct = 0.0,
                 profitProtectLadder = mapOf(1 to 0.025, 2 to 0.025, 3 to 0.025, 4 to 0.025),
+                maxDailyEntries = 1,
             )
 
             /**
              * 从系统属性装配持仓规则；全部缺省时与 `ExitRules()` 默认值一致
-             * （tp8/u25/H3 运营点：TP8%/H3/1~2 日 2.5% 阶梯/每日入场 1，2026-06-13 实装为生产默认）。
+             * （tp8/H3/3 只运营点：TP8%/H3/1~2 日 2.5% 阶梯/无浅止损/每日入场 3 只模型分降序）。
              * 盘后状态机推进与持仓跟踪展示链路共用同一装配入口，保证两侧规则口径一致。
              *
              * 回滚到 [V5_FAST_TP7_H5] 的覆盖示例：
@@ -107,6 +117,8 @@ class HoldingStateMachine(
                         ?.toInt() ?: defaults.timeStopDays,
                     priceStopEnabled = System.getProperty("quant.strategy.holding.priceStopEnabled")
                         ?.toBooleanStrictOrNull() ?: defaults.priceStopEnabled,
+                    shallowStopLossPct = System.getProperty("quant.strategy.holding.shallowStopLossPct")
+                        ?.toDouble() ?: defaults.shallowStopLossPct,
                     entryGapMaxPct = System.getProperty("quant.strategy.holding.entryGapMaxPct")
                         ?.toDouble() ?: defaults.entryGapMaxPct,
                     profitProtectLadder = ladder,
@@ -135,7 +147,7 @@ class HoldingStateMachine(
         val signalDateClose: Double = 0.0,
         /**
          * 入场优先级，仅 [ExitRules.maxDailyEntries] > 0 时参与排序（降序，越大越优先）。
-         * v5 体系填信号日 20 日对数收益波动率（高波动优先，验证 +1.8pp）。
+         * 生产填模型分（selection.modelScore），即每日入场模型分降序的前 maxDailyEntries 只。
          */
         val entryPriority: Double = 0.0,
     )
@@ -144,6 +156,7 @@ class HoldingStateMachine(
     enum class ExitReason {
         TAKE_PROFIT,
         PROFIT_PROTECT,
+        SHALLOW_STOP,
         TIME_STOP,
         PRICE_STOP,
     }
@@ -151,7 +164,7 @@ class HoldingStateMachine(
     /**
      * 离场判决：原因 + 规则口径离场价。
      * 触价类（止盈/保盈）的离场价 = max(当日开盘, 触发价)——高开直接越过触发价时按开盘价成交；
-     * 收盘类（时间止损/价格止损）的离场价 = 当日收盘价。
+     * 收盘类（浅浮亏止损/时间止损/价格止损）的离场价 = 当日收盘价。
      */
     data class ExitVerdict(
         val reason: ExitReason,
@@ -269,12 +282,21 @@ class HoldingStateMachine(
             }
         }
 
-        // 优先级 3：时间止损（入场后第 timeStopDays 个交易日收盘）
+        // 优先级 3：浅浮亏止损（到期前，当日收盘跌破入场价 ×(1+shallowStopLossPct) → 当日收盘离场）
+        // 收盘判定避开日内假摔；只在止盈/保盈未触发后生效，故不会错杀当日冲高回落但仍盈利的票。
+        if (config.shallowStopLossPct < 0.0 && daysSinceEntry < config.timeStopDays - 1) {
+            val stopPrice = holding.entryPrice * (1.0 + config.shallowStopLossPct)
+            if (bar.getPrice().toDouble() < stopPrice - EPS) {
+                return ExitVerdict(ExitReason.SHALLOW_STOP, bar.getPrice().toDouble())
+            }
+        }
+
+        // 优先级 4：时间止损（入场后第 timeStopDays 个交易日收盘）
         if (daysSinceEntry >= config.timeStopDays - 1) {
             return ExitVerdict(ExitReason.TIME_STOP, bar.getPrice().toDouble())
         }
 
-        // 优先级 4：价格止损（收盘 < 信号日最低）
+        // 优先级 5：价格止损（收盘 < 信号日最低）
         if (config.priceStopEnabled && daysSinceEntry >= 1) {
             if (bar.getPrice().toDouble() + EPS < holding.signalDateLow) {
                 return ExitVerdict(ExitReason.PRICE_STOP, bar.getPrice().toDouble())

@@ -164,6 +164,7 @@ enum class StrategyTrackingSection {
 enum class StrategyTrackingExitReason {
     TAKE_PROFIT,
     PROFIT_PROTECT,
+    SHALLOW_STOP,
     TIME_STOP,
     PRICE_STOP,
 }

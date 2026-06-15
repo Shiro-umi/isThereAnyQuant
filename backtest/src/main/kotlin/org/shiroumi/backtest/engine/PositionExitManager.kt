@@ -7,30 +7,68 @@ import org.shiroumi.backtest.domain.ExecutionHint
 import org.shiroumi.backtest.domain.Side
 import org.shiroumi.backtest.domain.StockPosition
 import org.shiroumi.backtest.domain.StrategyDecision
-import java.math.BigDecimal
-import java.math.RoundingMode
 
 /**
- * 持仓退出规则配置，对齐用户指定的交易规则：
+ * 持仓退出规则配置，逐分支复刻生产持仓状态机 tp8/u25/H3 运营点
+ * （`strategy-server/service/.../postmarket/HoldingStateMachine.ExitRules`，2026-06-13 实装默认）。
  *
- * - 止盈：+7% 立即清仓（以 HIGH 价触发，LIMIT 执行）
- * - 时间止损：T+3 收盘未止盈则强制清仓（CLOSE 执行）
- * - 价格止损：T+2 / T+3 收盘价 < T 日最低点（CLOSE 执行）
- * - T+1 禁售：入场当日不可卖出
+ * 边界约束：backtest 严禁依赖 `:strategy-server:service`，本配置只复刻数值与分支语义，不 import 生产类型。
+ *
+ * 退出优先级（逐行对齐生产 evaluateExit）：
+ *  1. T+1 禁售：入场当日不离场
+ *  2. 止盈：HIGH 触及入场价 ×(1+takeProfitPct) → 离场价 = max(开盘, 触发价)
+ *  3. 保盈阶梯：profitProtectLadder[daysSinceEntry] 命中且 HIGH 触及入场价 ×(1+档位) → max(开盘, 触发价)
+ *  4. 浅浮亏止损：shallowStopLossPct<0 && daysSinceEntry<timeStopDays-1 && 收盘 < 入场价 ×(1+shallowStopLossPct) → 收盘离场
+ *  5. 时间止损：daysSinceEntry>=timeStopDays-1 → 收盘离场
+ *  6. 价格止损：priceStopEnabled && daysSinceEntry>=1 && 收盘 < 信号日最低 → 收盘离场
+ *
+ * 触价类（止盈/保盈）离场价取 max(开盘, 触发价)（高开穿越按开盘成交）；收盘类离场价 = 当日收盘。
  */
 data class ExitRulesConfig(
-    /** 止盈比例（从入场价算起），默认 0.07。 */
-    val takeProfitPct: Double = 0.07,
-    /** 时间止损天数（从入场日算起，含入场日）。默认 3 即 T+3 收盘强制清仓。 */
+    /** 止盈比例（从入场价算起），默认 0.08（生产 tp8）。 */
+    val takeProfitPct: Double = 0.08,
+    /** 时间止损天数（入场后第 timeStopDays 个交易日收盘强平）。默认 3（H3）。 */
     val timeStopDays: Int = 3,
-    /** 是否启用价格止损。 */
-    val priceStopEnabled: Boolean = true,
+    /** 是否启用价格止损（收盘跌破信号日最低）。默认 false（生产关闭）。 */
+    val priceStopEnabled: Boolean = false,
     /** T+1 禁止卖出（入场日不可卖出）。 */
     val t1NoSell: Boolean = true,
+    /**
+     * 浅浮亏止损线：入场后到期前（daysSinceEntry < timeStopDays-1），当日收盘价跌破
+     * 入场价 ×(1+value) 即当日收盘离场。value 为负数（如 -0.03）表示开启；0 或正数表示关闭。
+     */
+    val shallowStopLossPct: Double = -0.03,
+    /**
+     * 保盈阶梯：key = 入场后第 N 个可交易日（daysSinceEntry，1 = 入场次日即首个可卖日），
+     * value = 当日 HIGH 触及 入场价 ×(1+value) 即离场的保盈档位。空表示关闭。
+     * 默认 = 1~2 日各 2.5%（H3 周期内，第 3 日为时间止损日）。
+     */
+    val profitProtectLadder: Map<Int, Double> = mapOf(1 to 0.025, 2 to 0.025),
+    /** 入场跳空上限：开盘价较信号日收盘价的涨幅超过该值时放弃入场。非正数表示关闭过滤。 */
+    val entryGapMaxPct: Double = 0.03,
+    /** 每日新入场上限：默认 1（每日 Top5 仅入场 entryPriority 最高的一只）；0 表示不限。 */
+    val maxDailyEntries: Int = 1,
 ) {
     init {
         require(takeProfitPct > 0.0) { "止盈比例必须为正，当前: $takeProfitPct" }
         require(timeStopDays >= 2) { "时间止损天数至少为 2，当前: $timeStopDays" }
+        require(maxDailyEntries >= 0) { "每日入场上限不可为负，当前: $maxDailyEntries" }
+        profitProtectLadder.forEach { (day, lv) ->
+            require(day >= 1 && lv > 0.0) { "保盈阶梯档位非法: day=$day level=$lv" }
+        }
+    }
+
+    companion object {
+        /**
+         * tp8/u25/H3 生产运营点（TP8%/H3/1~2 日 2.5% 阶梯/浅止损 -3%/每日入场 1，2026-06-13 实装默认）。
+         * 与无参 [ExitRulesConfig] 默认值一致，提供具名常量便于 CLI 一键套用。
+         */
+        val TP8_H3 = ExitRulesConfig()
+
+        /**
+         * tp8/u25/H3 但关闭浅浮亏止损（shallowStopLossPct=0），用于对照不含浅止损的左尾/EV 影响。
+         */
+        val TP8_H3_NO_SHALLOW = ExitRulesConfig(shallowStopLossPct = 0.0)
     }
 }
 
@@ -38,11 +76,12 @@ data class ExitRulesConfig(
  * 持仓退出管理器：按交易规则自动监控持仓并生成退出决策。
  *
  * 职责明确：
- * - 记录每笔持仓的入场元数据（日期、价格、信号日最低价）
+ * - 记录每笔持仓的入场元数据（日期、价格、信号日最低价、信号日收盘价）
  * - 每日盘前检查所有持仓是否满足退出条件
  * - 生成 [StrategyDecision.TradeIntentDecision] 退出决策，由 [BacktestScheduler] 统一执行
  *
- * 退出优先级：止盈 > 时间止损 > 价格止损
+ * 退出优先级（对齐生产 HoldingStateMachine.evaluateExit）：
+ * 止盈 > 保盈阶梯 > 浅浮亏止损 > 时间止损 > 价格止损。
  */
 class PositionExitManager(
     private val config: ExitRulesConfig,
@@ -60,6 +99,8 @@ class PositionExitManager(
         val entryPrice: Double,
         /** 信号日最低价（T 日 low），用于价格止损判定。 */
         val signalDateLow: Double,
+        /** 信号日收盘价（T 日 close），仅用于入场闸门复用（退出判定不依赖）。 */
+        val signalDateClose: Double,
     )
 
     /** tsCode → 入场元数据。仅跟踪当前持仓。 */
@@ -80,13 +121,15 @@ class PositionExitManager(
     fun onEntry(tsCode: String, entryDate: LocalDate, entryPrice: Double) {
         // 查找信号日（入场日的前一个交易日，即 T 日）
         val signalDate = previousTradingDate(entryDate) ?: entryDate
-        // 从行情 feed 获取 T 日最低价
-        val signalLow = marketDataFeed.marketDataFor(signalDate)
-            .quotes[tsCode]?.low?.toDouble() ?: entryPrice
+        // 从行情 feed 获取 T 日最低价 / 收盘价
+        val signalBar = marketDataFeed.marketDataFor(signalDate).quotes[tsCode]
+        val signalLow = signalBar?.low?.toDouble() ?: entryPrice
+        val signalClose = signalBar?.close?.toDouble() ?: 0.0
         activeMeta[tsCode] = EntryMeta(
             entryDate = entryDate,
             entryPrice = entryPrice,
             signalDateLow = signalLow,
+            signalDateClose = signalClose,
         )
     }
 
@@ -124,21 +167,56 @@ class PositionExitManager(
             // T+1 禁售：入场日不可卖出
             if (config.t1NoSell && daysSinceEntry == 0) continue
 
-            // 优先级 1：止盈 — HIGH 触及入场价 × (1 + takeProfitPct)
-            val tpPrice = round2(meta.entryPrice * (1.0 + config.takeProfitPct))
-            if (bar.high.toDouble() + EPS >= tpPrice) {
+            val open = bar.open.toDouble()
+            val high = bar.high.toDouble()
+            val close = bar.close.toDouble()
+
+            // 优先级 1：止盈 — HIGH 触及入场价 ×(1+takeProfitPct)；离场价 = max(开盘, 触发价)
+            val tpPrice = meta.entryPrice * (1.0 + config.takeProfitPct)
+            if (high + EPS >= tpPrice) {
+                val exitPrice = maxOf(open, tpPrice)
                 exits += exitOrder(
                     date = date,
                     tsCode = tsCode,
-                    reason = "止盈: HIGH ${bar.high} 触及 +${(config.takeProfitPct * 100).toInt()}% ($tpPrice)",
+                    reason = "止盈: HIGH ${bar.high} 触及 +${pct(config.takeProfitPct)} (离场价 ${fmt(exitPrice)})",
                     hint = ExecutionHint.LIMIT,
-                    limitPrice = tpPrice,
+                    limitPrice = exitPrice,
                 )
                 continue
             }
 
-            // 优先级 2：时间止损 — T+N 收盘强制清仓
-            // daysSinceEntry == timeStopDays - 1 表示已是第 N 个交易日
+            // 优先级 2：保盈阶梯 — 档位按 daysSinceEntry 查表；HIGH 触及 → max(开盘, 触发价)
+            val ladderLevel = config.profitProtectLadder[daysSinceEntry]
+            if (ladderLevel != null) {
+                val ladderPrice = meta.entryPrice * (1.0 + ladderLevel)
+                if (high + EPS >= ladderPrice) {
+                    val exitPrice = maxOf(open, ladderPrice)
+                    exits += exitOrder(
+                        date = date,
+                        tsCode = tsCode,
+                        reason = "保盈阶梯: 第 ${daysSinceEntry} 个可卖日 HIGH ${bar.high} 触及 +${pct(ladderLevel)} (离场价 ${fmt(exitPrice)})",
+                        hint = ExecutionHint.LIMIT,
+                        limitPrice = exitPrice,
+                    )
+                    continue
+                }
+            }
+
+            // 优先级 3：浅浮亏止损 — 到期前收盘跌破 入场价 ×(1+shallowStopLossPct) → 当日收盘离场
+            if (config.shallowStopLossPct < 0.0 && daysSinceEntry < config.timeStopDays - 1) {
+                val stopPrice = meta.entryPrice * (1.0 + config.shallowStopLossPct)
+                if (close < stopPrice - EPS) {
+                    exits += exitOrder(
+                        date = date,
+                        tsCode = tsCode,
+                        reason = "浅浮亏止损: 收盘 ${bar.close} < 入场价 ×(1${pct(config.shallowStopLossPct)}) (${fmt(stopPrice)})，第 ${daysSinceEntry} 个可卖日",
+                        hint = ExecutionHint.CLOSE,
+                    )
+                    continue
+                }
+            }
+
+            // 优先级 4：时间止损 — 入场后第 timeStopDays 个交易日收盘强制清仓
             if (daysSinceEntry >= config.timeStopDays - 1) {
                 exits += exitOrder(
                     date = date,
@@ -149,13 +227,13 @@ class PositionExitManager(
                 continue
             }
 
-            // 优先级 3：价格止损 — T+2 / T+3 收盘价 < T 日最低点
+            // 优先级 5：价格止损 — 收盘 < 信号日最低
             if (config.priceStopEnabled && daysSinceEntry >= 1) {
-                if (bar.close.toDouble() + EPS < meta.signalDateLow) {
+                if (close + EPS < meta.signalDateLow) {
                     exits += exitOrder(
                         date = date,
                         tsCode = tsCode,
-                        reason = "价格止损: 收盘 ${bar.close} < T日最低 ${meta.signalDateLow}（入场后第 ${daysSinceEntry + 1} 日）",
+                        reason = "价格止损: 收盘 ${bar.close} < 信号日最低 ${meta.signalDateLow}（入场后第 ${daysSinceEntry + 1} 日）",
                         hint = ExecutionHint.CLOSE,
                     )
                     continue
@@ -206,7 +284,14 @@ class PositionExitManager(
     private companion object {
         const val EPS = 1e-6
 
-        fun round2(v: Double): Double =
-            BigDecimal.valueOf(v).setScale(2, RoundingMode.HALF_UP).toDouble()
+        fun pct(v: Double): String {
+            val rounded = kotlin.math.round(v * 10000.0) / 100.0
+            return "${rounded}%"
+        }
+
+        fun fmt(v: Double): String {
+            val rounded = kotlin.math.round(v * 1000.0) / 1000.0
+            return rounded.toString()
+        }
     }
 }

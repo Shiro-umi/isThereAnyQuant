@@ -29,8 +29,11 @@ class HoldingStateMachineTest {
     /** v5 快线旧运营点（影子/回滚预设）：止盈 7% / 时间止损 5 交易日 / 阶梯 1~4 日 2.5% / 每日入场上限 1。 */
     private val machine = HoldingStateMachine(HoldingStateMachine.ExitRules.V5_FAST_TP7_H5)
 
-    /** 现行生产默认 = tp8/u25/H3：止盈 8% / 时间止损 3 交易日 / 阶梯 1~2 日 2.5% / 每日入场上限 1。 */
+    /** 现行生产默认 = tp8/H3/3 只：止盈 8% / 时间止损 3 交易日 / 阶梯 1~2 日 2.5% / 无浅止损 / 每日入场上限 3。 */
     private val prodMachine = HoldingStateMachine()
+
+    /** 含浅止损 -3% 的状态机（浅止损已非生产默认，需显式开启验证其行为）。 */
+    private val shallowMachine = HoldingStateMachine(HoldingStateMachine.ExitRules(shallowStopLossPct = -0.03))
 
     /** V3 运营点（回滚通道）：止盈 5% / 时间止损 15 交易日 / 无阶梯 / 全入场。 */
     private val v3Machine = HoldingStateMachine(HoldingStateMachine.ExitRules.V3_OPERATING_POINT)
@@ -60,21 +63,23 @@ class HoldingStateMachineTest {
         )
 
     @Test
-    fun `生产默认运营点_tp8_u25_H3参数`() {
+    fun `生产默认运营点_tp8_H3_3只参数`() {
         val rules = HoldingStateMachine.ExitRules()
         assertEquals(0.08, rules.takeProfitPct)
         assertEquals(3, rules.timeStopDays)
         assertEquals(false, rules.priceStopEnabled)
+        assertEquals(0.0, rules.shallowStopLossPct) // 浅止损默认关闭（3 只分散口径）
         assertEquals(0.03, rules.entryGapMaxPct)
         assertEquals(mapOf(1 to 0.025, 2 to 0.025), rules.profitProtectLadder)
-        assertEquals(1, rules.maxDailyEntries)
+        assertEquals(3, rules.maxDailyEntries) // 每日入场前 3 只（模型分降序，各 1/N 等权）
     }
 
     @Test
-    fun `影子预设_v5快线旧运营点参数`() {
+    fun `影子预设_v5快线旧运营点参数_无浅止损`() {
         val rules = HoldingStateMachine.ExitRules.V5_FAST_TP7_H5
         assertEquals(0.07, rules.takeProfitPct)
         assertEquals(5, rules.timeStopDays)
+        assertEquals(0.0, rules.shallowStopLossPct)
         assertEquals(mapOf(1 to 0.025, 2 to 0.025, 3 to 0.025, 4 to 0.025), rules.profitProtectLadder)
         assertEquals(1, rules.maxDailyEntries)
     }
@@ -108,6 +113,54 @@ class HoldingStateMachineTest {
             d3, bar, ::tradingDaysSince,
         )
         assertEquals(null, verdictEarly)
+    }
+
+    @Test
+    fun `浅浮亏止损_到期前收盘跌破负3pct当日收盘离场`() {
+        // C 于 d2 入场价 10；d3（daysSinceEntry=1，到期前）收盘 9.6（-4%）跌破 -3% 线 9.7 → 当日收盘离场
+        val holding = DailyHoldingState(d2, "C.SZ", entryDate = d2, entryPrice = 10.0, signalDateLow = 9.0)
+        val stopBar = candle(open = 9.9f, high = 9.95f, low = 9.5f, close = 9.6f)
+        val verdict = shallowMachine.evaluateExit(holding, d3, stopBar, ::tradingDaysSince)
+        assertEquals(HoldingStateMachine.ExitReason.SHALLOW_STOP, verdict?.reason)
+        assertEquals(9.6, verdict!!.exitPrice, 1e-6)
+    }
+
+    @Test
+    fun `浅浮亏止损_收盘浮亏未达负3pct不触发继续持有`() {
+        // 收盘 9.8（-2%）未跌破 -3% 线 9.7 → 不触发（噪声浮亏不砍）
+        val holding = DailyHoldingState(d2, "C.SZ", entryDate = d2, entryPrice = 10.0, signalDateLow = 9.0)
+        val mildBar = candle(open = 9.95f, high = 10.0f, low = 9.7f, close = 9.8f)
+        val verdict = shallowMachine.evaluateExit(holding, d3, mildBar, ::tradingDaysSince)
+        assertEquals(null, verdict)
+    }
+
+    @Test
+    fun `浅浮亏止损_止盈优先于浅止损_当日冲高后收盘深跌仍按止盈`() {
+        // HIGH 10.8 先触 +8% 止盈，即便收盘 9.5 深跌 → 仍 TAKE_PROFIT（优先级在浅止损之上，不错杀）
+        val holding = DailyHoldingState(d2, "C.SZ", entryDate = d2, entryPrice = 10.0, signalDateLow = 9.0)
+        val whipsawBar = candle(open = 10.2f, high = 10.8f, low = 9.4f, close = 9.5f)
+        val verdict = shallowMachine.evaluateExit(holding, d3, whipsawBar, ::tradingDaysSince)
+        assertEquals(HoldingStateMachine.ExitReason.TAKE_PROFIT, verdict?.reason)
+        assertEquals(10.8, verdict!!.exitPrice, 1e-6)
+    }
+
+    @Test
+    fun `浅浮亏止损_到期日不走浅止损而走时间止损`() {
+        // d4（daysSinceEntry=2 = timeStopDays-1，到期日）收盘 9.6 深跌：浅止损条件 days<timeStop-1 不满足 → TIME_STOP
+        val holding = DailyHoldingState(d2, "C.SZ", entryDate = d2, entryPrice = 10.0, signalDateLow = 9.0)
+        val stopBar = candle(open = 9.9f, high = 9.95f, low = 9.5f, close = 9.6f)
+        val verdict = prodMachine.evaluateExit(holding, d4, stopBar, ::tradingDaysSince)
+        assertEquals(HoldingStateMachine.ExitReason.TIME_STOP, verdict?.reason)
+        assertEquals(9.6, verdict!!.exitPrice, 1e-6)
+    }
+
+    @Test
+    fun `浅浮亏止损_v5影子预设关闭_深跌扛到到期`() {
+        // V5_FAST_TP7_H5（shallowStopLossPct=0）下 d3 收盘 9.6 深跌不触发浅止损 → 继续持有（H5 未到期）
+        val holding = DailyHoldingState(d2, "C.SZ", entryDate = d2, entryPrice = 10.0, signalDateLow = 9.0)
+        val stopBar = candle(open = 9.9f, high = 9.95f, low = 9.5f, close = 9.6f)
+        val verdict = machine.evaluateExit(holding, d3, stopBar, ::tradingDaysSince)
+        assertEquals(null, verdict)
     }
 
     @Test

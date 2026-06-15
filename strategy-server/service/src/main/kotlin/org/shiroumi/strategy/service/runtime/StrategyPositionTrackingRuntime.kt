@@ -29,12 +29,14 @@ import org.shiroumi.strategy.client.LocalStrategySnapshotHub
 import org.shiroumi.strategy.contract.StrategySnapshotEnvelope
 import org.shiroumi.strategy.contract.StrategyTopic
 import org.shiroumi.strategy.core.audit.StrategyAuditSummary
-import org.shiroumi.strategy.service.postmarket.EntryPriority
 import org.shiroumi.strategy.service.postmarket.HoldingStateMachine
 import utils.logger
 
 private const val DEFAULT_TRACKING_LIMIT = 60
-private const val MAX_TRACKING_SLOT_COUNT = 5
+
+// 6 = 每日入场 3 只 × H3（持仓存活 daysSinceEntry 0/1，第 2 日离场）→ 同一交易日并发在手最多 6 只。
+// 必须与前端 TrackingSlotCount 同步，否则后端发 6 只前端仍裁 5 只。
+private const val MAX_TRACKING_SLOT_COUNT = 6
 
 /**
  * 持仓跟踪时间线 runtime——`STRATEGY_POSITION_TRACKING` 快照的唯一 owner。
@@ -163,11 +165,8 @@ class StrategyPositionTrackingRuntime(
                     tsCode = selection.tsCode,
                     signalDateLow = signalBar?.getLow()?.toDouble() ?: 0.0,
                     signalDateClose = signalBar?.getPrice()?.toDouble() ?: 0.0,
-                    entryPriority = if (holdingStateMachine.entryCapEnabled) {
-                        dataSource.entryPriority(selection.tsCode, selection.tradeDate)
-                    } else {
-                        0.0
-                    },
+                    // 入场优先级 = 模型分（与生产推进 PostMarketPreparationJob 同口径：模型分降序取前 maxDailyEntries 只）。
+                    entryPriority = if (holdingStateMachine.entryCapEnabled) selection.modelScore else 0.0,
                 )
             }
             val result = holdingStateMachine.advance(
@@ -581,6 +580,7 @@ class StrategyPositionTrackingRuntime(
     private fun HoldingStateMachine.ExitReason.toWs(): StrategyTrackingExitReason = when (this) {
         HoldingStateMachine.ExitReason.TAKE_PROFIT -> StrategyTrackingExitReason.TAKE_PROFIT
         HoldingStateMachine.ExitReason.PROFIT_PROTECT -> StrategyTrackingExitReason.PROFIT_PROTECT
+        HoldingStateMachine.ExitReason.SHALLOW_STOP -> StrategyTrackingExitReason.SHALLOW_STOP
         HoldingStateMachine.ExitReason.TIME_STOP -> StrategyTrackingExitReason.TIME_STOP
         HoldingStateMachine.ExitReason.PRICE_STOP -> StrategyTrackingExitReason.PRICE_STOP
     }
@@ -599,8 +599,6 @@ interface StrategyPositionTrackingDataSource {
     fun tradingDayAfter(date: LocalDate, tradingDays: Int): LocalDate?
     /** 校准重放入场候选：target_date = [targetDate] 的 selected 票（与盘后状态机推进同一来源），行自带信号日 tradeDate。 */
     fun loadSelectionsByTargetDate(targetDate: LocalDate): List<ProfitPredictionSelection>
-    /** 入场优先级（信号日 20 日对数收益波动率），口径必须与盘后状态机推进一致。 */
-    fun entryPriority(tsCode: String, signalDate: LocalDate): Double
 }
 
 object DefaultStrategyPositionTrackingDataSource : StrategyPositionTrackingDataSource {
@@ -640,9 +638,6 @@ object DefaultStrategyPositionTrackingDataSource : StrategyPositionTrackingDataS
 
     override fun loadSelectionsByTargetDate(targetDate: LocalDate): List<ProfitPredictionSelection> =
         DailyProfitPredictionSelectionRepository.findSelectionsByTargetDate(targetDate)
-
-    override fun entryPriority(tsCode: String, signalDate: LocalDate): Double =
-        EntryPriority.signalDayVolatility20(tsCode, signalDate)
 }
 
 private fun fillPnl(

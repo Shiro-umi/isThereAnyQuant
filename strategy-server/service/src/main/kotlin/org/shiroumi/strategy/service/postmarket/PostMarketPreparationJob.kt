@@ -479,7 +479,8 @@ object PostMarketPreparationJob {
         }
 
         // 新入场候选：前一交易日选出、今日生效买入的 selected 票。
-        // 每日入场上限开启时，入场优先级 = 信号日 20 日对数收益波动率（v5 验证：高波动优先 +1.8pp）。
+        // 每日入场上限开启时，入场优先级 = 模型分（selection.modelScore），advance 按 entryPriority 降序
+        // 取前 maxDailyEntries 只，即每日入场模型分最高的若干只（findSelectionsByTargetDate 已按模型分降序）。
         val entryCapEnabled = holdingStateMachine.entryCapEnabled
         val newEntries = DailyProfitPredictionSelectionRepository
             .findSelectionsByTargetDate(tradeDate)
@@ -489,11 +490,7 @@ object PostMarketPreparationJob {
                     tsCode = selection.tsCode,
                     signalDateLow = signalBar?.getLow()?.toDouble() ?: 0.0,
                     signalDateClose = signalBar?.getPrice()?.toDouble() ?: 0.0,
-                    entryPriority = if (entryCapEnabled && previousTradeDate != null) {
-                        EntryPriority.signalDayVolatility20(selection.tsCode, previousTradeDate)
-                    } else {
-                        0.0
-                    },
+                    entryPriority = if (entryCapEnabled) selection.modelScore else 0.0,
                 )
             }
 

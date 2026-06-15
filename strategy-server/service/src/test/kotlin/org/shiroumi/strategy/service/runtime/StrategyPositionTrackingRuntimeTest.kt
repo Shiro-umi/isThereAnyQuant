@@ -200,9 +200,9 @@ class StrategyPositionTrackingRuntimeTest {
                     audit(day2, currentPositions = listOf("000010.SZ")),
                     audit(day1, currentPositions = listOf("000010.SZ"))
                 ),
-                // 信号日 day1 选出三只、target_date=day2：
-                // 000012 优先级最高但跳空 5% 超限（不占名额）；000011 次之正常入场；
-                // 000013 合法但被每日入场上限 1 挡住
+                // 信号日 day1 选出三只、target_date=day2，入场优先级 = 模型分降序（0.9 > 0.8 > 0.7）：
+                // 000011 模型分最高且不跳空 → 入场；000012 跳空 5% 超限（不占名额）；
+                // 000013 模型分最低被每日入场上限 1（V5_FAST_TP7_H5）挡住
                 selectionsByTradeDate = mapOf(
                     day1 to listOf(
                         selection(day1, "000011.SZ", 0.9, targetDate = day2),
@@ -236,7 +236,6 @@ class StrategyPositionTrackingRuntimeTest {
                     ),
                 ),
                 tradeDates = listOf(day1, day2),
-                entryPriorities = mapOf("000012.SZ" to 0.95, "000011.SZ" to 0.9, "000013.SZ" to 0.3),
             )
         )
 
@@ -251,7 +250,7 @@ class StrategyPositionTrackingRuntimeTest {
             calibrated.days.first().selection.map { it.stockCode }.toSet()
         )
 
-        // 跟随日入场：跳空超限候选不占名额，按优先级入场 000011，每日上限 1 挡住 000013；
+        // 跟随日入场：跳空超限候选不占名额，按模型分降序入场 000011，每日上限 1 挡住 000013；
         // 模型自身持仓 000010 不出现在跟随者书本
         val followDayHoldings = calibrated.days.last().holdings
         assertEquals(listOf("000011.SZ"), followDayHoldings.map { it.stockCode })
@@ -330,7 +329,6 @@ private class FakeTrackingDataSource(
     private val names: Map<String, String>,
     private val candles: Map<String, Map<LocalDate, Candle>>,
     private val tradeDates: List<LocalDate> = emptyList(),
-    private val entryPriorities: Map<String, Double> = emptyMap(),
 ) : StrategyPositionTrackingDataSource {
     override fun loadAuditSummaries(limit: Int): List<StrategyAuditSummary> = audits.take(limit)
 
@@ -361,7 +359,4 @@ private class FakeTrackingDataSource(
 
     override fun loadSelectionsByTargetDate(targetDate: LocalDate): List<ProfitPredictionSelection> =
         selectionsByTradeDate.values.flatten().filter { it.targetDate == targetDate }
-
-    override fun entryPriority(tsCode: String, signalDate: LocalDate): Double =
-        entryPriorities[tsCode] ?: 0.0
 }

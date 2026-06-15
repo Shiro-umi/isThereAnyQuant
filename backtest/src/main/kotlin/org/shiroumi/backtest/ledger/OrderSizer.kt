@@ -263,7 +263,9 @@ class OrderSizer(
 
         /** 判定是否来自 [PositionExitManager] 的退出订单。 */
         fun isExitReason(reason: String): Boolean =
-            reason.contains("止盈") || reason.contains("时间止损") || reason.contains("价格止损")
+            reason.contains("止盈") || reason.contains("保盈阶梯") ||
+                reason.contains("浅浮亏止损") || reason.contains("时间止损") ||
+                reason.contains("价格止损")
     }
 }
 

@@ -27,6 +27,8 @@ class BacktestRunExecutor(
         DatabaseBacktestMarketDataFeed(config.rules)
     },
     private val aggregator: SimulationResultAggregator = SimulationResultAggregator(),
+    /** 入场优先级口径（信号日 20 日波动率）；默认直读 stock_db，复刻生产 EntryPriority。 */
+    private val entryPriority: BacktestEntryPriority = BacktestEntryPriority.Db,
 ) {
 
     fun createRunId(): String = "bt-${UUID.randomUUID()}"
@@ -64,6 +66,12 @@ class BacktestRunExecutor(
         includeAuditSignalsWhenTargetsMissing: Boolean = true,
         /** 持仓退出规则。为 null 时不启用自动退出管理（保持原有每日调仓行为）。 */
         exitRules: ExitRulesConfig? = null,
+        /** 仓位口径：true = 单票满仓滚动；false = 沿用选股原始权重（等权切片）。仅入场闸门生效时有意义。 */
+        fullPositionPerEntry: Boolean = false,
+        /** 入场排序口径：VOLATILITY（复刻生产）/ MODEL_SCORE（按模型分降序）。 */
+        entryOrdering: EntryOrdering = EntryOrdering.VOLATILITY,
+        /** 入场仓位是否按当日实际入场只数等权（各 1/N）。仅 fullPositionPerEntry=false 时生效。 */
+        equalWeightAcrossEntries: Boolean = false,
     ): LocalBacktestResult {
         val dates = calendar.tradingDays(config.startDate, config.endDate)
 
@@ -114,12 +122,24 @@ class BacktestRunExecutor(
                 marketDataFeed = marketFeed,
             )
         }
+        // 入场闸门：仅在启用退出规则且每日入场上限 > 0 时生效（与生产 advance 入场上限语义一致）。
+        val entryGatekeeper = exitRules?.takeIf { it.maxDailyEntries > 0 }?.let {
+            EntryGatekeeper(
+                config = it,
+                entryPriority = entryPriority,
+                calendar = calendar,
+                fullPositionPerEntry = fullPositionPerEntry,
+                entryOrdering = entryOrdering,
+                equalWeightAcrossEntries = equalWeightAcrossEntries,
+            )
+        }
         val scheduler = BacktestScheduler(
             config = config,
             calendar = calendar,
             marketDataFeed = marketFeed,
             decisionFeed = decisionFeed,
             exitManager = exitManager,
+            entryGatekeeper = entryGatekeeper,
         )
         val result = aggregator.aggregate(workspace.runId, scheduler.runLoop())
         val summary = buildSummary(workspace.runId, config, result)

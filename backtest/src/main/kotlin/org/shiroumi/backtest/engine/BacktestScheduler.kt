@@ -35,6 +35,9 @@ import org.shiroumi.backtest.rule.ValidationResult
  * 当 [exitManager] 提供时，调度器会在盘前自动检查持仓退出条件（止盈/止损），
  * 并在成交后记录入场元数据供后续退出判定使用。
  *
+ * 当 [entryGatekeeper] 提供时，调度器会在取出当日决策后、加入退出决策前，对入场候选应用入场闸门
+ * （每日入场上限 + entryPriority 降序 + 已持有跳过 + 跳空过滤），与生产持仓状态机 advance 对齐。
+ *
  * 单日失败会被记录为 FAILED，调度器继续推进后续交易日。
  */
 class BacktestScheduler(
@@ -52,6 +55,8 @@ class BacktestScheduler(
     ),
     /** 持仓退出管理器。为 null 时不启用自动退出管理（保持原有行为）。 */
     private val exitManager: PositionExitManager? = null,
+    /** 入场闸门。为 null 时不应用入场上限/排序/跳空过滤（保持原有目标组合行为）。 */
+    private val entryGatekeeper: EntryGatekeeper? = null,
 ) {
 
     fun runLoop(
@@ -69,9 +74,25 @@ class BacktestScheduler(
         val unfilledBefore = matchingEngine.unfilledSnapshot().size
         return try {
             settler.preOpen(date)
-            val decisions = decisionFeed.decisionsFor(date).toMutableList()
+            val rawDecisions = decisionFeed.decisionsFor(date)
 
-            // 检查持仓退出条件（止盈 / 时间止损 / 价格止损）
+            // 入场闸门：每日入场上限 + entryPriority 降序 + 已持有跳过 + 跳空过滤（对齐生产 advance）。
+            // 在加入退出决策前应用，仅约束入场侧；存量持仓的离场完全交给 exitManager。
+            val decisions = if (entryGatekeeper != null) {
+                val heldTsCodes = ledger.positions
+                    .filterValues { it.totalQty > 0L }
+                    .keys
+                entryGatekeeper.gate(
+                    date = date,
+                    decisions = rawDecisions,
+                    market = marketDataFeed.marketDataFor(date),
+                    heldTsCodes = heldTsCodes,
+                ).toMutableList()
+            } else {
+                rawDecisions.toMutableList()
+            }
+
+            // 检查持仓退出条件（止盈 / 保盈阶梯 / 浅止损 / 时间止损 / 价格止损）
             val exitDecisions = exitManager?.checkExits(date, ledger.positions).orEmpty()
             if (exitDecisions.isNotEmpty()) {
                 decisions.addAll(exitDecisions)

@@ -7,7 +7,9 @@ import model.candle.StrategyTrackingEdgeKind
 import model.candle.StrategyTrackingExitReason
 import model.candle.StrategyTrackingSection
 
-internal const val TrackingSlotCount = 5
+// 6 = 每日入场 3 只 × H3（持仓存活 daysSinceEntry 0/1，第 2 日离场）→ 同一交易日并发在手最多 6 只。
+// selection 仍是 Top5（≤6）、cleared 一日离场亦 ≤6，统一用 6 覆盖三列上限，避免第 6 只持仓被静默截断。
+internal const val TrackingSlotCount = 6
 internal const val TrackingRealtimeDayLabel = "今天"
 
 /**
@@ -74,8 +76,9 @@ internal fun StrategyPositionTrackingTimeline.calibratableTradeDates(): List<Str
 internal fun StrategyTrackingExitReason.label(): String = when (this) {
     StrategyTrackingExitReason.TAKE_PROFIT -> "止盈"
     StrategyTrackingExitReason.PROFIT_PROTECT -> "保盈"
+    StrategyTrackingExitReason.SHALLOW_STOP -> "止损"
     StrategyTrackingExitReason.TIME_STOP -> "到期"
-    StrategyTrackingExitReason.PRICE_STOP -> "止损"
+    StrategyTrackingExitReason.PRICE_STOP -> "破位止损"
 }
 
 /** 流转边标签数据：文本 + 涨跌方向（null = 中性，无盈亏数值）。 */

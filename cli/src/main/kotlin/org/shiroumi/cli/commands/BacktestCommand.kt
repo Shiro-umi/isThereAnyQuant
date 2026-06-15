@@ -21,6 +21,7 @@ import org.shiroumi.backtest.config.OutputConfig
 import org.shiroumi.backtest.config.SlippageConfig
 import org.shiroumi.backtest.domain.Money
 import org.shiroumi.backtest.engine.BacktestRunExecutor
+import org.shiroumi.backtest.engine.EntryOrdering
 import org.shiroumi.backtest.engine.ExitRulesConfig
 import org.shiroumi.backtest.engine.LocalBacktestResult
 import org.shiroumi.backtest.feed.ExportResult
@@ -102,22 +103,60 @@ class BacktestRunCommand : CliktCommand(
         "--target-only",
         help = "只使用 daily_profit_prediction_selection 目标组合，不在缺失目标组合时降级读取 daily_strategy_audit",
     ).flag(default = false)
+    private val operatingPoint by option(
+        "--operating-point",
+        help = "一键套用生产运营点（含全部默认字段）：tp8-h3（tp8/u25/H3 含浅止损 -3%）/ " +
+            "tp8-h3-noshallow（同上但关闭浅止损）；指定后即启用持仓退出管理，逐参数选项可二次覆盖",
+    ).choice(
+        "tp8-h3" to ExitRulesConfig.TP8_H3,
+        "tp8-h3-noshallow" to ExitRulesConfig.TP8_H3_NO_SHALLOW,
+    )
     private val takeProfit by option(
         "--take-profit",
-        help = "止盈比例（从入场价算起），如 0.07 = 7%；不指定则不启用持仓退出管理",
+        help = "止盈比例（从入场价算起），如 0.08 = 8%；不指定 --operating-point 时，给定此项即启用持仓退出管理",
     ).double()
     private val timeStop by option(
         "--time-stop",
-        help = "时间止损天数（从入场日起算），默认 3（T+3）",
-    ).int().default(3)
+        help = "时间止损天数（从入场日起算），默认 3（H3）",
+    ).int()
     private val priceStop by option(
         "--price-stop",
-        help = "启用价格止损：T+2/T+3 收盘 < T 日最低点时清仓",
-    ).flag(default = false)
+        help = "启用价格止损：收盘 < 信号日最低点时清仓（生产默认关闭）",
+    ).flag()
+    private val shallowStop by option(
+        "--shallow-stop",
+        help = "浅浮亏止损线（负数开启，如 -0.03 = 收盘跌破入场价 ×0.97 离场）；传 0 关闭",
+    ).double()
+    private val entryGap by option(
+        "--entry-gap",
+        help = "入场跳空上限（开盘较信号日收盘涨幅超过即放弃入场），如 0.03 = 3%；非正数关闭",
+    ).double()
+    private val maxDailyEntries by option(
+        "--max-daily-entries",
+        help = "每日新入场上限，默认 1（仅入场 entryPriority 最高的一只）；0 表示不限",
+    ).int()
+    private val profitLadder by option(
+        "--profit-ladder",
+        help = "保盈阶梯，格式 'day:level,day:level'，如 '1:0.025,2:0.025'；空串关闭",
+    )
     private val t1NoSell by option(
         "--t1-no-sell",
         help = "禁止在入场当日（T+1）卖出",
     ).flag(default = true)
+    private val positionSizing by option(
+        "--position-sizing",
+        help = "仓位口径（仅启用入场闸门时生效）：full = 单票满仓滚动（每笔用全部可用资金，贴近每日 1 只字面执行）；" +
+            "equal = 沿用选股原始权重（等权切片，约 0.2/只，大量现金闲置）。默认 full。",
+    ).choice("full" to true, "equal" to false).default(true)
+    private val entryOrder by option(
+        "--entry-order",
+        help = "入场排序口径：volatility = 信号日 20 日波动率降序（复刻生产）；model-score = 按模型分降序选前 N。默认 volatility。",
+    ).choice("volatility" to EntryOrdering.VOLATILITY, "model-score" to EntryOrdering.MODEL_SCORE)
+        .default(EntryOrdering.VOLATILITY)
+    private val equalWeightEntries by option(
+        "--equal-weight-entries",
+        help = "入场仓位按当日实际入场只数等权（各 1/N，如每日 3 只各 1/3）；仅 --position-sizing equal 时生效。",
+    ).flag(default = false)
 
     override fun run() {
         ConfigManager.load()
@@ -132,19 +171,20 @@ class BacktestRunCommand : CliktCommand(
         }
         echo("[3/4] 运行回测模拟…")
         val executor = BacktestRunExecutor()
-        val exitRules = takeProfit?.let { tp ->
-            ExitRulesConfig(
-                takeProfitPct = tp,
-                timeStopDays = timeStop,
-                priceStopEnabled = priceStop,
-                t1NoSell = t1NoSell,
-            )
-        }
+        val exitRules = buildExitRules()
         if (exitRules != null) {
+            val shallowDesc = if (exitRules.shallowStopLossPct < 0.0)
+                "浅止损 ${(exitRules.shallowStopLossPct * 100).toInt()}%" else "浅止损关闭"
+            val ladderDesc = if (exitRules.profitProtectLadder.isEmpty()) "无阶梯"
+            else "保盈阶梯 " + exitRules.profitProtectLadder.entries.joinToString(",") { "${it.key}日:${(it.value * 100)}%" }
             echo("       持仓退出规则：止盈 +${(exitRules.takeProfitPct * 100).toInt()}% / " +
-                "T+${exitRules.timeStopDays} 时间止损 / " +
+                "H${exitRules.timeStopDays} 时间止损 / " +
+                "$ladderDesc / $shallowDesc / " +
                 "价格止损${if (exitRules.priceStopEnabled) "开启" else "关闭"} / " +
-                "T+1 禁售${if (exitRules.t1NoSell) "开启" else "关闭"}")
+                "每日入场 ${exitRules.maxDailyEntries} / " +
+                "入场跳空上限 ${if (exitRules.entryGapMaxPct > 0.0) "${(exitRules.entryGapMaxPct * 100)}%" else "关闭"} / " +
+                "T+1 禁售${if (exitRules.t1NoSell) "开启" else "关闭"} / " +
+                "仓位口径 ${if (positionSizing) "单票满仓" else "等权切片"}")
         }
         val result = executor.runLocal(
             workspace = workspace,
@@ -153,6 +193,9 @@ class BacktestRunCommand : CliktCommand(
             filterLimitUp = filterLimitUp,
             includeAuditSignalsWhenTargetsMissing = !targetOnly,
             exitRules = exitRules,
+            fullPositionPerEntry = positionSizing,
+            entryOrdering = entryOrder,
+            equalWeightAcrossEntries = equalWeightEntries,
         )
         if (!noExport) {
             echo("       决策导出：${result.export.writtenDays}/${result.export.totalDays} 个交易日，" +
@@ -161,6 +204,34 @@ class BacktestRunCommand : CliktCommand(
         echo("[4/4] 绩效摘要")
         printSummary(result)
         echo("       详情: ${workspace.outputDir}")
+    }
+
+    /**
+     * 装配持仓退出规则。
+     * - 给定 --operating-point 时以该预设为基；否则给定 --take-profit 时以 tp8-h3 默认为基。
+     * - 两者都未给定 → 返回 null（不启用持仓退出管理，保持原有每日调仓行为）。
+     * - 任意逐参数选项二次覆盖对应字段。
+     */
+    private fun buildExitRules(): ExitRulesConfig? {
+        val base = operatingPoint ?: takeProfit?.let { ExitRulesConfig() } ?: return null
+        val ladder = profitLadder?.let { spec ->
+            spec.split(',')
+                .filter { it.isNotBlank() }
+                .associate { entry ->
+                    val (day, level) = entry.split(':', limit = 2)
+                    day.trim().toInt() to level.trim().toDouble()
+                }
+        } ?: base.profitProtectLadder
+        return base.copy(
+            takeProfitPct = takeProfit ?: base.takeProfitPct,
+            timeStopDays = timeStop ?: base.timeStopDays,
+            priceStopEnabled = if (priceStop) true else base.priceStopEnabled,
+            t1NoSell = t1NoSell,
+            shallowStopLossPct = shallowStop ?: base.shallowStopLossPct,
+            entryGapMaxPct = entryGap ?: base.entryGapMaxPct,
+            maxDailyEntries = maxDailyEntries ?: base.maxDailyEntries,
+            profitProtectLadder = ladder,
+        )
     }
 
     private fun buildConfig(equityCurveCsv: String?): BacktestConfig {

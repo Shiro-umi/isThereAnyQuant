@@ -1438,6 +1438,68 @@ fun runLocal(workspace: BacktestWorkspace, config: BacktestConfig): SimulationRe
       详情: .backtest/bt-20260525-143052/output/
 ```
 
+### 11.5.1 持仓退出规则与入场闸门（对齐生产 tp8/u25/H3 运营点）
+
+本地模式可选启用「持仓多日持有 + 止盈止损 + 每日入场闸门」，逐分支复刻生产持仓状态机
+`strategy-server/service/.../postmarket/HoldingStateMachine`（2026-06-13 实装的 tp8/u25/H3 默认）。
+边界：`backtest` 严禁依赖 `:strategy-server:service`，只复刻数值与分支语义，不 import 生产类型。
+
+**退出优先级**（`PositionExitManager.checkExits`，逐行对齐生产 `evaluateExit`）：
+
+1. T+1 禁售：入场当日不离场（`daysSinceEntry==0`）
+2. 止盈：HIGH 触及入场价 ×(1+`takeProfitPct`，默认 0.08) → 离场价 = max(开盘, 触发价)
+3. 保盈阶梯：`profitProtectLadder[daysSinceEntry]` 命中且 HIGH 触及入场价 ×(1+档位，默认 1~2 日各 0.025) → max(开盘, 触发价)
+4. 浅浮亏止损：`shallowStopLossPct`<0（默认 -0.03）且 `daysSinceEntry < timeStopDays-1` 且收盘 < 入场价 ×(1+`shallowStopLossPct`) → 当日收盘离场
+5. 时间止损：`daysSinceEntry >= timeStopDays-1`（默认 `timeStopDays`=3，即 H3）→ 当日收盘离场
+6. 价格止损：`priceStopEnabled`（默认 false）且 `daysSinceEntry>=1` 且收盘 < 信号日最低 → 当日收盘离场
+
+触价类（止盈/保盈）离场价取 max(开盘, 触发价)（高开穿越按开盘成交，不 round）；收盘类离场价 = 当日收盘。
+
+**入场闸门**（`EntryGatekeeper.gate`，逐分支对齐生产 `advance`）：
+
+- `maxDailyEntries`>0（默认 1）时：当日候选按 `entryPriority`（信号日 20 日对数收益总体标准差，
+  `BacktestEntryPriority` 复刻生产 `EntryPriority.signalDayVolatility20` 口径）降序，逐只尝试至多
+  `maxDailyEntries` 只；已持有跳过；开盘<=0 跳过；入场跳空过滤（`entryGapMaxPct`>0，默认 0.03，
+  开盘较信号日收盘涨幅 > 阈值则跳过且不占名额）。
+- 闸门把当日 `TargetPortfolioDecision` 改写为显式 BUY `TradeIntentDecision`，存量持仓的离场完全交给
+  `PositionExitManager`（选股只加新仓、不触发目标组合 rebalance 卖出），与生产语义一致。
+- `maxDailyEntries`<=0（V3 全入场）时闸门不改写决策，原样透传。
+
+仅在 `--operating-point` 或 `--take-profit` 给定时启用上述两者；否则保持原有每日目标组合调仓行为。
+
+**CLI 选项**：
+
+```bash
+# 一键套用生产运营点（含浅止损 -3%）
+./cli backtest run --start 2024-01-02 --end 2024-12-31 --capital 1000000 \
+  --operating-point tp8-h3
+
+# 一键套用但关闭浅止损（对照左尾/EV 影响）
+./cli backtest run --start 2024-01-02 --end 2024-12-31 --capital 1000000 \
+  --operating-point tp8-h3-noshallow
+
+# 逐参数覆盖（可叠加在 --operating-point 之上二次覆盖单字段）
+./cli backtest run --start 2024-01-02 --end 2024-12-31 \
+  --take-profit 0.08 --time-stop 3 --shallow-stop -0.03 \
+  --entry-gap 0.03 --max-daily-entries 1 --profit-ladder '1:0.025,2:0.025'
+```
+
+| 选项 | 默认 | 说明 |
+| --- | --- | --- |
+| `--operating-point` | 未设 | `tp8-h3`（含浅止损）/ `tp8-h3-noshallow`（关闭浅止损）一键预设 |
+| `--take-profit` | — | 止盈比例；单独给定即以 tp8-h3 默认为基启用退出管理 |
+| `--time-stop` | 3 | 时间止损天数（H3） |
+| `--price-stop` | 关闭 | 启用价格止损（收盘 < 信号日最低） |
+| `--shallow-stop` | -0.03 | 浅浮亏止损线（负数开启，0 关闭） |
+| `--entry-gap` | 0.03 | 入场跳空上限（非正数关闭） |
+| `--max-daily-entries` | 1 | 每日新入场上限（0 不限 = V3 全入场） |
+| `--profit-ladder` | `1:0.025,2:0.025` | 保盈阶梯 `day:level,...`（空串关闭） |
+
+**仓位口径边界**：生产持仓状态机是纯持仓跟踪器（不含现金/数量/权重），不提供 sizing 真值；
+闸门只做入场过滤，选中标的沿用选股决策原始权重，由 `OrderSizer` 折股。
+**价格口径差异**：回测撮合与退出判定统一用 RAW 价（与回测全链路一致），生产展示链路用 QFQ 价；
+这是数据基准层的既定差异，非逻辑分歧。
+
 ### 11.6 与在线模式的关系
 
 | 维度 | 在线模式（§8） | 本地模式（本章） |
