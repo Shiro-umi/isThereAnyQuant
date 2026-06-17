@@ -9,8 +9,9 @@
 # 与 deploy.sh 的关系：iOS 出包依赖 macOS + Xcode 工具链，无法在 Linux/CI/Docker 执行，
 # 因此独立成脚本，由 deploy.sh release 在 macOS 上守卫调用。直接手动执行本脚本同样可出包。
 #
-# 链路（增量优先 + 二进制门禁 + 失败兜底，见 deployment-architecture.md §6.5）：
-#   增量 link（Gradle 自身增量判定，不清缓存、不 --rerun-tasks）
+# 链路（版本前置同步 + 增量优先 + 二进制门禁 + 失败兜底，见 deployment-architecture.md §6.5）：
+#   版本前置同步（syncIosVersion 把 APP_BUILD 钉到当前 versionCode，打破 archive 内写-读竞态）
+#   -> 增量 link（Gradle 自身增量判定，不清缓存、不 --rerun-tasks）
 #   -> xcodebuild archive（Release / 关闭签名 / 增量）
 #   -> 从 .xcarchive 提取 .app -> 打包 Payload/ 为未签名 ipa
 #   -> 二进制实证门禁：内嵌 host 必为生产 bigsmart.space（无内网 IP）+ CFBundleVersion 对版本
@@ -56,6 +57,25 @@ OUTPUT_DIR="$PROJECT_ROOT/build/ios-ipa"
 ARCHIVE_PATH="$OUTPUT_DIR/Quant.xcarchive"
 IPA_PATH="$OUTPUT_DIR/Quant.ipa"
 VERSION_PROPS="$PROJECT_ROOT/compose-app/version.properties"
+
+# ---------------------------------------------------------------------------
+# 版本前置同步（消除 fallback 全量重链的根因，实测结论 2026-06-17）：
+# version.properties 的 versionCode 在 deploy.sh release 的主 gradle 调用（packageRelease）
+# 配置阶段自增（如 50 -> 51），但写进 iosApp/Configuration/Config.xcconfig 的 APP_BUILD 只挂在
+# embedAndSignAppleFrameworkForXcode 的 dependsOn 上——那在本脚本后续 archive 内部才触发。
+# 同一次 archive 里 Xcode 在 build 早期就解析了 xcconfig（此时仍是旧 APP_BUILD），syncIosVersion
+# 作为 framework build 依赖随后才改文件，于是首次 archive 的 Info.plist CFBundleVersion 注入旧版本，
+# 二进制门禁判 CFBundleVersion != versionCode 不通过 -> 触发约 13 分钟全量重链；第二次 archive 时
+# xcconfig 已更新才过。纯粹是版本注入晚了一个 archive 周期，与 K/N 缓存陈旧无关。
+# 治本：archive 前独立执行一次 syncIosVersion，把 APP_BUILD 钉到当前 versionCode，打破同次 archive
+# 内的写-读竞态，首次 archive 即拿到正确版本，门禁一次过，不再进 fallback。该任务名不在 release
+# 自增集合内（仅 assembleRelease/bundleRelease/installRelease/packageRelease 自增），单独跑不会再次
+# 自增；已对齐时 UP-TO-DATE 无副作用，幂等安全。
+# ---------------------------------------------------------------------------
+sync_ios_version() {
+    echo "🔢 Syncing iOS version (APP_BUILD <- version.properties versionCode)..."
+    ./gradlew :compose-app:syncIosVersion
+}
 
 # ---------------------------------------------------------------------------
 # 增量 link：让 Gradle 自身增量判定接管。源码无变化时 link UP-TO-DATE（秒级），
@@ -194,8 +214,10 @@ PY
 }
 
 # ---------------------------------------------------------------------------
-# 主流程：增量出包 -> 门禁；不过则全量重链重出 -> 再门禁；二次仍不过硬退出。
+# 主流程：版本前置同步 -> 增量出包 -> 门禁；不过则全量重链重出 -> 再门禁；二次仍不过硬退出。
+# 版本前置同步消除「首次 archive 注入旧 CFBundleVersion -> 门禁挂 -> fallback 全量重链」的根因。
 # ---------------------------------------------------------------------------
+sync_ios_version
 incremental_link
 do_archive
 
