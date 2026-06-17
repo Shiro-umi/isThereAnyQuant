@@ -150,6 +150,13 @@ class HoldingStateMachine(
          * 生产填模型分（selection.modelScore），即每日入场模型分降序的前 maxDailyEntries 只。
          */
         val entryPriority: Double = 0.0,
+        /**
+         * 破位加分标记：该票在信号日 T 前 LOOKBACK 个交易日窗内出现回归通道破位事件。
+         * true = 破位票，入场排序排到所有非破位票之前（破位 = 高分票被超跌、非被追高，前置以减巨亏）。
+         * 仅当开关 quant.strategy.holding.breakdownRerank=true 时由 [BreakdownRerankService] 置 true；
+         * 开关关闭（默认）时恒为 false，入场排序行为与历史一致（纯模型分降序）。
+         */
+        val breakdownFlag: Boolean = false,
     )
 
     /** 离场原因，按退出优先级排列。 */
@@ -217,10 +224,16 @@ class HoldingStateMachine(
         }
 
         // 新入场：当日开盘买入，T+1 禁售（当日不参与离场判定）。
-        // maxDailyEntries > 0 时按 entryPriority 降序逐一尝试，跳空/缺行情不占名额。
+        // maxDailyEntries > 0 时按 [破位标记优先, 模型分降序] 逐一尝试，跳空/缺行情不占名额。
+        // 破位票（breakdownFlag=true）排到所有非破位票之前；破位组内、非破位组内均仍按 entryPriority（模型分）降序。
+        // breakdownFlag 仅在 quant.strategy.holding.breakdownRerank=true 时可能为 true；关闭时全 false，
+        // compareByDescending{breakdownFlag} 对全 false 退化为恒等，排序结果 = 纯模型分降序（行为同历史）。
         val entered = mutableListOf<String>()
         val orderedEntries = if (config.maxDailyEntries > 0) {
-            newEntries.sortedByDescending { it.entryPriority }
+            newEntries.sortedWith(
+                compareByDescending<EntryCandidate> { it.breakdownFlag }
+                    .thenByDescending { it.entryPriority }
+            )
         } else {
             newEntries
         }

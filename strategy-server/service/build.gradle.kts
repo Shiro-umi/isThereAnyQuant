@@ -11,6 +11,7 @@ dependencies {
     implementation(project(":strategy-server:contract"))
     implementation(project(":strategy-server:core"))
     implementation(project(":strategy-server:client"))
+    implementation(project(":strategy-server:breakdown"))
     implementation(project(":database"))
     implementation(project(":shared"))
     implementation(libs.kotlin.coroutines.core)
@@ -45,6 +46,7 @@ tasks.register<JavaExec>("rebuildStrategyRange") {
             .stringPropertyNames()
             .filter {
                 it.startsWith("quant.profitPrediction.") || it.startsWith("quant.strategy.rebuild.") ||
+                    it.startsWith("quant.strategy.holding.") ||
                     it == "quant.projectRoot" || it == "quant.project.root"
             }
             .associateWith { System.getProperty(it) }
