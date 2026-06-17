@@ -6,13 +6,15 @@ import androidx.compose.material.icons.outlined.CandlestickChart
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.ShowChart
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.adaptive.navigation3.ListDetailSceneStrategy
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -186,18 +188,29 @@ fun Navigation() = MultiPlatform {
 /**
  * 每个 NavEntry 内容的不透明铺底。
  *
- * NavDisplay 切换顶级页时新页面 fadeIn、旧页面 fadeOut，淡入期间两者叠加可见。
- * 页面自身（情绪页、设置页）根容器不铺背景，且 AppTheme 的根 Surface 在 NavDisplay
- * 外层、是两个转场页面的共同底，挡不住页面之间互相透出。这里在转场的最小渲染单元
- * （NavEntry 内容）统一铺一层不透明主题背景，使任意页面在淡入期间底层恒为主题色，
- * 杜绝漏出上一页。一处治本，覆盖全部目的地及未来新增页面。
+ * NavDisplay 切顶级页时，进入页是一个被转场平移的独立图层（iOS 默认转场是
+ * slideIntoContainer 横移，退出页只左移约 1/4 屏并盖暗色 scrim，整段转场期间下层旧页
+ * 始终大半可见）。情绪页 / 设置页是仅有的「根容器透明」顶级页（其余页各自带不透明
+ * Scaffold / containerColor），完全依赖这里兜底。
+ *
+ * 关键：必须把不透明底色作为该进入图层的【第一条绘制指令】原子落地。早先用
+ * `Surface(color = ...)` 包裹时，Surface 的背景填充与子内容是各自的绘制/合成节点，
+ * 在 iOS Metal 合成路径上会出现「页面子内容已现、本图层背景却晚一帧」的一帧，于是
+ * 透出下层旧页——正是「先透明透出上一页、随后背景闪现」的来源。
+ *
+ * 改用 `drawBehind { drawRect(background) }`：drawBehind 在子内容之前提交绘制，背景与
+ * 内容同属一个图层、同一帧落地，进入图层无论被怎样平移，自身首帧即不透明。clipToBounds
+ * 把绘制裁进图层边界。一处治本，覆盖情绪 / 设置及未来新增页面。
  */
 @Composable
 private fun OpaquePage(content: @Composable () -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background,
-        content = content,
+    val background = MaterialTheme.colorScheme.background
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clipToBounds()
+            .drawBehind { drawRect(background) },
+        content = { content() },
     )
 }
 

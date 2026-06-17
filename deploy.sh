@@ -411,8 +411,9 @@ elif [ "$MODE_FAMILY" = "release" ]; then
 fi
 
 # 客户端安装包上传夸克网盘：仅 release，且仅在非 server-only 时执行。
-# server 已起、本次客户端产物（APK 始终出，ipa 仅 macOS 出）已就绪，统一收敛后上传到固定目录
-# /quant-client。固定分享链接不变。
+# server 已起、本次客户端产物（APK 始终出，ipa 仅 macOS 出）已就绪，统一收敛后上传到分享页
+# 667221bcabd6 实际绑定的固定目录（目录名以 scripts/upload-client-packages.sh 内 QUARK_DIR 为准，
+# 当前为 /BigSmart；核账依据见该脚本第 29-35 行）。固定分享链接不变。
 # server-only 跳过上传：该模式本就跳过客户端出包（line 270 -x assembleRelease/copyApk + line 394
 # 跳过 iOS ipa），本次没有新客户端产物。此时若上传，collect 要么撞构建目录里上一版残留 APK
 # 把陈旧包当本次新包传，要么因找不到包硬失败且手动重跑同样失败（server-only 永不构建 APK）。
