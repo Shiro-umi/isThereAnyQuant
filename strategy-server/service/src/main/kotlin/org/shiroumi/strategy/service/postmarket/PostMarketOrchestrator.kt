@@ -1,6 +1,7 @@
 package org.shiroumi.strategy.service.postmarket
 
 import kotlinx.datetime.LocalDate
+import model.Candle
 import org.shiroumi.database.common.repository.TradingCalendarRepository
 import org.shiroumi.database.strategy.daily.repository.DailyHoldingState
 import org.shiroumi.database.strategy.daily.repository.DailyStrategyHoldingRepository
@@ -65,6 +66,9 @@ object PostMarketOrchestrator {
         tradeDates: List<LocalDate>,
         policy: PostMarketRebuildPolicy = PostMarketRebuildPolicy.default(),
         onTradeDateFailure: ((LocalDate, Throwable) -> Unit)? = null,
+        candleProvider: ((LocalDate) -> Map<String, Candle>)? = null,
+        // 重建专用：区间有序交易日索引，供 tradingDaysSince 段内二分定位（不改数值）。在线追平传 null。
+        tradeDateIndex: List<LocalDate>? = null,
     ): ExecutionResult {
         if (tradeDates.isEmpty()) {
             logger.info("没有待处理的策略数据预处理任务。")
@@ -80,6 +84,7 @@ object PostMarketOrchestrator {
         }
         val processedDates = mutableListOf<LocalDate>()
 
+        // 持仓链严格串行：previousHoldings 依赖前一交易日产出，不得并行/乱序。
         tradeDates.forEach { tradeDate ->
             val startDate = computeStartDate(tradeDate, policy.historyLookbackDays)
 
@@ -94,6 +99,8 @@ object PostMarketOrchestrator {
                     signalBasis = policy.signalBasis,
                     chunkSize = policy.chunkSize,
                     parallelism = policy.parallelism,
+                    candleProvider = candleProvider,
+                    tradeDateIndex = tradeDateIndex,
                 )
                 previousHoldings = result.holdings
 
@@ -111,6 +118,42 @@ object PostMarketOrchestrator {
         }
         logger.info("策略状态推演追平完成，共处理 ${tradeDates.size} 个交易日。")
         return ExecutionResult(processedDates = processedDates)
+    }
+
+    /**
+     * 全历史区间重建入口——RebuildStrategyRange 专用，与在线盘后追平 [executeTradeDatesCatching] 区分：
+     *
+     * 1. 强制清表：逐日推进前 deleteByDateRange([start..end]) 清空区间内残留旧持仓链，消除链式污染。
+     * 2. 严格串行：复用 [executeTradeDatesCatching] 的逐日 forEach（previousHoldings 链依赖，不并行/乱序）。
+     * 3. 滑窗供给器：注入 [SlidingWindowCandleProvider]，按 ~250 交易日分段预取日线，段内逐日复用，
+     *    消除「同日被持仓推进取两次（当日 + 次日作信号日）」的 2 倍冗余 DB 往返。
+     *
+     * 区间外（start 前一交易日的链初值、各因子/情绪滚动状态预热窗）不清、不动。
+     */
+    suspend fun rebuildTradeDatesCatching(
+        tradeDates: List<LocalDate>,
+        policy: PostMarketRebuildPolicy = PostMarketRebuildPolicy.default(),
+        onTradeDateFailure: ((LocalDate, Throwable) -> Unit)? = null,
+    ): ExecutionResult {
+        if (tradeDates.isEmpty()) {
+            logger.info("[策略区间重建] 无待重建交易日。")
+            return ExecutionResult(processedDates = emptyList())
+        }
+        val start = tradeDates.first()
+        val end = tradeDates.last()
+
+        // 强制清表：区间内整段持仓行先清，再逐日重算覆盖，避免旧链残留。
+        val cleared = DailyStrategyHoldingRepository.deleteByDateRange(start, end)
+        logger.info("[策略区间重建] 已清空持仓区间 [$start..$end] 残留行=$cleared，开始逐日严格串行重算")
+
+        val candleProvider = SlidingWindowCandleProvider(tradeDates)
+        return executeTradeDatesCatching(
+            tradeDates = tradeDates,
+            policy = policy,
+            onTradeDateFailure = onTradeDateFailure,
+            candleProvider = candleProvider,
+            tradeDateIndex = tradeDates,
+        )
     }
 
     private fun computeStartDate(tradeDate: LocalDate, historyLookbackDays: Long): LocalDate {

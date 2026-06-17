@@ -29,6 +29,7 @@ import org.shiroumi.strategy.client.LocalStrategySnapshotHub
 import org.shiroumi.strategy.contract.StrategySnapshotEnvelope
 import org.shiroumi.strategy.contract.StrategyTopic
 import org.shiroumi.strategy.core.audit.StrategyAuditSummary
+import org.shiroumi.strategy.service.postmarket.BreakdownRerankService
 import org.shiroumi.strategy.service.postmarket.HoldingStateMachine
 import utils.logger
 
@@ -159,7 +160,20 @@ class StrategyPositionTrackingRuntime(
                 replayedHoldings[date] = emptyList()
                 continue
             }
-            val newEntries = candidatesByDate[date].orEmpty().map { selection ->
+            val candidates = candidatesByDate[date].orEmpty()
+            // 破位加分：与生产推进 PostMarketPreparationJob 同源注入同一判定——同一开关、同一信号日 T 锚
+            // （selection.tradeDate = previousTradeDate）、同一连续有效收盘序列。否则跟踪页重放与生产持仓分叉。
+            // 同一 date 下所有候选 tradeDate 一致（= 信号日 T），取首条 tradeDate 作锚；空候选不取窗。
+            val breakdownFlags: Map<String, Boolean> =
+                if (holdingStateMachine.entryCapEnabled && candidates.isNotEmpty()) {
+                    BreakdownRerankService.evaluate(
+                        candidates.map { it.tsCode },
+                        candidates.first().tradeDate,
+                    )
+                } else {
+                    emptyMap()
+                }
+            val newEntries = candidates.map { selection ->
                 val signalBar = rawBar(selection.tsCode, selection.tradeDate)
                 HoldingStateMachine.EntryCandidate(
                     tsCode = selection.tsCode,
@@ -167,6 +181,7 @@ class StrategyPositionTrackingRuntime(
                     signalDateClose = signalBar?.getPrice()?.toDouble() ?: 0.0,
                     // 入场优先级 = 模型分（与生产推进 PostMarketPreparationJob 同口径：模型分降序取前 maxDailyEntries 只）。
                     entryPriority = if (holdingStateMachine.entryCapEnabled) selection.modelScore else 0.0,
+                    breakdownFlag = breakdownFlags[selection.tsCode] ?: false,
                 )
             }
             val result = holdingStateMachine.advance(

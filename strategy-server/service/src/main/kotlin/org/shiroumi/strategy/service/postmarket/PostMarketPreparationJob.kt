@@ -95,6 +95,12 @@ object PostMarketPreparationJob {
         signalBasis: PriceBasis = PriceBasis.HFQ,
         chunkSize: Int = 300,
         parallelism: Int? = null,
+        // 持仓推进的逐日蜡烛供给器（重建编排层注入滑窗预取，避免「同日被扫两次」2 倍冗余）。
+        // 默认 null：在线盘后链路回退 StockDailyCandleRepository.findByTradeDate，零行为变化。
+        candleProvider: ((LocalDate) -> Map<String, Candle>)? = null,
+        // 重建区间有序交易日索引（升序）：持仓推进 tradingDaysSince 段内二分定位用，不改数值。
+        // 默认 null：回退 TradingCalendarRepository.findOpenDates 查库。
+        tradeDateIndex: List<LocalDate>? = null,
     ): PostMarketPreparationResult {
         logger.info(
             "[策略预处理] 开始执行 | tradeDate=$tradeDate, startDate=$startDate, endDate=$endDate, " +
@@ -420,6 +426,9 @@ object PostMarketPreparationJob {
                 "totalPositions=${targets.size}, exposure=${sentimentSnapshot.sentimentExposure}"
         )
 
+        // selection 复现断言：全链重算会覆盖 daily_profit_prediction_selection；覆盖前先与历史落库逐票比对，
+        // 不一致时由 SelectionDriftGuard 决策（默认拒绝写库并抛错，除非显式放行漂移）。
+        SelectionDriftGuard.assertReproducible(tradeDate, targets)
         DailyProfitPredictionSelectionRepository.deleteByDate(tradeDate)
         DailyProfitPredictionSelectionRepository.replaceForDate(
             tradeDate = tradeDate,
@@ -432,6 +441,8 @@ object PostMarketPreparationJob {
             tradeDate = tradeDate,
             previousTradeDate = previousTradeDate,
             previousHoldings = previousHoldings,
+            candleProvider = candleProvider,
+            tradeDateIndex = tradeDateIndex,
         )
         DailyStrategyHoldingRepository.replaceForDate(tradeDate, holdingResult.holdings)
 
@@ -470,10 +481,18 @@ object PostMarketPreparationJob {
         tradeDate: LocalDate,
         previousTradeDate: LocalDate?,
         previousHoldings: List<DailyHoldingState>,
+        candleProvider: ((LocalDate) -> Map<String, Candle>)? = null,
+        tradeDateIndex: List<LocalDate>? = null,
     ): HoldingStateMachine.DayResult {
-        val todayCandles = StockDailyCandleRepository.findByTradeDate(tradeDate).associateBy { it.tsCode }
+        // 逐日蜡烛取数：供给器存在时走滑窗预取（已按 ts_code 索引），否则回退按交易日查库。
+        // 两条路共用 toCandle() 不裁列，advance 数值严格一致。
+        val candlesFor: (LocalDate) -> Map<String, Candle> = { date ->
+            candleProvider?.invoke(date)
+                ?: StockDailyCandleRepository.findByTradeDate(date).associateBy { it.tsCode }
+        }
+        val todayCandles = candlesFor(tradeDate)
         val signalDayCandleByCode: Map<String, model.Candle> = if (previousTradeDate != null) {
-            StockDailyCandleRepository.findByTradeDate(previousTradeDate).associateBy { it.tsCode }
+            candlesFor(previousTradeDate)
         } else {
             emptyMap()
         }
@@ -482,21 +501,41 @@ object PostMarketPreparationJob {
         // 每日入场上限开启时，入场优先级 = 模型分（selection.modelScore），advance 按 entryPriority 降序
         // 取前 maxDailyEntries 只，即每日入场模型分最高的若干只（findSelectionsByTargetDate 已按模型分降序）。
         val entryCapEnabled = holdingStateMachine.entryCapEnabled
-        val newEntries = DailyProfitPredictionSelectionRepository
-            .findSelectionsByTargetDate(tradeDate)
-            .map { selection ->
-                val signalBar = signalDayCandleByCode[selection.tsCode]
-                HoldingStateMachine.EntryCandidate(
-                    tsCode = selection.tsCode,
-                    signalDateLow = signalBar?.getLow()?.toDouble() ?: 0.0,
-                    signalDateClose = signalBar?.getPrice()?.toDouble() ?: 0.0,
-                    entryPriority = if (entryCapEnabled) selection.modelScore else 0.0,
-                )
+        val selections = DailyProfitPredictionSelectionRepository.findSelectionsByTargetDate(tradeDate)
+        // 破位加分：开关开启时锚信号日 T=previousTradeDate 现算破位事件，破位票入场排序前置。
+        // 与持仓跟踪重放（StrategyPositionTrackingRuntime）同源注入同一判定，避免生产持仓与重放分叉。
+        val breakdownFlags: Map<String, Boolean> =
+            if (entryCapEnabled && previousTradeDate != null) {
+                BreakdownRerankService.evaluate(selections.map { it.tsCode }, previousTradeDate)
+            } else {
+                emptyMap()
             }
+        val newEntries = selections.map { selection ->
+            val signalBar = signalDayCandleByCode[selection.tsCode]
+            HoldingStateMachine.EntryCandidate(
+                tsCode = selection.tsCode,
+                signalDateLow = signalBar?.getLow()?.toDouble() ?: 0.0,
+                signalDateClose = signalBar?.getPrice()?.toDouble() ?: 0.0,
+                entryPriority = if (entryCapEnabled) selection.modelScore else 0.0,
+                breakdownFlag = breakdownFlags[selection.tsCode] ?: false,
+            )
+        }
 
+        // 交易日间隔（不含 entry，含 date）。重建注入有序交易日索引时段内二分定位，省去逐次查库；
+        // 二分仅在 entryDate 与 date 均落在索引内时生效（索引是区间内连续交易日，差值即间隔），
+        // 否则（如携带入场日早于区间的初值持仓）回退查库，数值严格一致。
         val tradingDaysSince: (LocalDate, LocalDate) -> Int = { entryDate, date ->
-            if (date <= entryDate) 0
-            else (TradingCalendarRepository.findOpenDates(entryDate, date).size - 1).coerceAtLeast(0)
+            if (date <= entryDate) {
+                0
+            } else {
+                val viaIndex = tradeDateIndex?.let { index ->
+                    val entryPos = binarySearchExact(index, entryDate)
+                    val datePos = binarySearchExact(index, date)
+                    if (entryPos >= 0 && datePos >= 0) (datePos - entryPos).coerceAtLeast(0) else null
+                }
+                viaIndex
+                    ?: (TradingCalendarRepository.findOpenDates(entryDate, date).size - 1).coerceAtLeast(0)
+            }
         }
         val candleFor: (String, LocalDate) -> model.Candle? = { tsCode, date ->
             if (date == tradeDate) todayCandles[tsCode] else null
@@ -605,6 +644,25 @@ object PostMarketPreparationJob {
             missingCandleCodes = missingCandleCodes,
             missingFirstAdjCodes = missingFirstAdjCodes,
         )
+    }
+
+    /**
+     * 在升序交易日列表里二分查找 [target] 的精确下标；命中返回下标，未命中返回 -1。
+     * 列表是区间内连续交易日，下标差即交易日间隔。
+     */
+    private fun binarySearchExact(sorted: List<LocalDate>, target: LocalDate): Int {
+        var lo = 0
+        var hi = sorted.size - 1
+        while (lo <= hi) {
+            val mid = (lo + hi) ushr 1
+            val cmp = sorted[mid].compareTo(target)
+            when {
+                cmp < 0 -> lo = mid + 1
+                cmp > 0 -> hi = mid - 1
+                else -> return mid
+            }
+        }
+        return -1
     }
 
     private fun logFirstAdjCoverage(
