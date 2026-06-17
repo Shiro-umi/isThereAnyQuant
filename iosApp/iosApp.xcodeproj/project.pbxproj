@@ -151,7 +151,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "cd \"$SRCROOT/..\"\nif [ \"$ACTION\" = \"clean\" ]; then exit 0; fi\n./gradlew :compose-app:embedAndSignAppleFrameworkForXcode\n";
+			shellScript = "cd \"$SRCROOT/..\"\nif [ \"$ACTION\" = \"clean\" ]; then exit 0; fi\n# 出包链路源头锁定：按 Xcode 注入的 $CONFIGURATION 在 Build Phase 自身钉死 quant.mode。\n# Release 配置 -> release（生产 host bigsmart.space），Debug 配置 -> debug（本地真机调试连本机）。\n# -Pquant.mode 是 generateAppEnvironment 优先级链最高位，覆盖 embedAndSign 任务名不含 release\n# 导致的默认 debug 兜底。无论 Xcode 直接 Run/Archive、命令行 xcodebuild、还是 build-ios-ipa.sh，\n# 三条路径在源头统一 mode，不再依赖调用方 shell 的 QUANT_MODE 环境变量。\ncase \"$CONFIGURATION\" in *[Rr]elease*) QUANT_MODE_ARG=release ;; *) QUANT_MODE_ARG=debug ;; esac\n./gradlew :compose-app:embedAndSignAppleFrameworkForXcode -Pquant.mode=\"$QUANT_MODE_ARG\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

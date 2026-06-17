@@ -6,15 +6,14 @@ import androidx.compose.material.icons.outlined.CandlestickChart
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.ShowChart
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.adaptive.navigation3.ListDetailSceneStrategy
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -193,23 +192,20 @@ fun Navigation() = MultiPlatform {
  * 始终大半可见）。情绪页 / 设置页是仅有的「根容器透明」顶级页（其余页各自带不透明
  * Scaffold / containerColor），完全依赖这里兜底。
  *
- * 关键：必须把不透明底色作为该进入图层的【第一条绘制指令】原子落地。早先用
- * `Surface(color = ...)` 包裹时，Surface 的背景填充与子内容是各自的绘制/合成节点，
- * 在 iOS Metal 合成路径上会出现「页面子内容已现、本图层背景却晚一帧」的一帧，于是
- * 透出下层旧页——正是「先透明透出上一页、随后背景闪现」的来源。
- *
- * 改用 `drawBehind { drawRect(background) }`：drawBehind 在子内容之前提交绘制，背景与
- * 内容同属一个图层、同一帧落地，进入图层无论被怎样平移，自身首帧即不透明。clipToBounds
- * 把绘制裁进图层边界。一处治本，覆盖情绪 / 设置及未来新增页面。
+ * 用 `Surface(color = background)` 铺底：Surface 是持有背景的真实 layout 节点，与行情 /
+ * 分析页内部 Scaffold（其 containerColor 同样落在 Surface 上）走完全一致的合成路径。
+ * 行情 / 分析页在 iOS 转场图层上始终不透明，正是因为这一层 Surface；情绪 / 设置页此前
+ * 改用 `drawBehind { drawRect(...) }` 铺底，转场平移的进入图层在 iOS Metal 合成路径上
+ * 不能可靠承载这条裸绘制指令，于是首帧透出下层旧页。换回与正常页同构的 Surface 铺底，
+ * 一处治本，覆盖情绪 / 设置及未来新增页面。
  */
 @Composable
 private fun OpaquePage(content: @Composable () -> Unit) {
-    val background = MaterialTheme.colorScheme.background
-    Box(
+    Surface(
         modifier = Modifier
             .fillMaxSize()
-            .clipToBounds()
-            .drawBehind { drawRect(background) },
+            .clipToBounds(),
+        color = MaterialTheme.colorScheme.background,
         content = { content() },
     )
 }

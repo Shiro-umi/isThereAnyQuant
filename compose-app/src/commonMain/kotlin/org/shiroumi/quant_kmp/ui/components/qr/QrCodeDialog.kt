@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -91,6 +92,8 @@ fun QrCodeDialog(
         Surface(
             modifier = Modifier
                 .padding(32.dp)
+                // 窄屏（手机）铺满可用宽度；宽屏（Web 大屏）收敛到 360dp 并居中，避免二维码撑满整屏。
+                .widthIn(max = 360.dp)
                 .fillMaxWidth()
                 .graphicsLayer {
                     alpha = appear.value

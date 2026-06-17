@@ -274,13 +274,62 @@ tasks.register("generateAppEnvironment") {
             }
         }
     inputs.property("quant.mode", quantMode)
-    
+
+    // 出包链路源头不变量：客户端出包/分发任务（release 打包、Android assemble/bundle、
+    // Web 生产分发、iOS embedAndSign、server package 等）绝不允许把内网/LAN/回环地址烧进产物。
+    //
+    // 触发条件四连乘，缺一不拦，确保只钉死真正的漏点、不误伤本地开发：
+    //   ① 本次请求了出包/分发类任务（看 startParameter.taskNames）
+    //   ② 既无 -Pquant.mode 也无 QUANT_MODE —— mode 完全靠任务名兜底（无人显式声明）
+    //   ③ 解析出的 host 命中 RFC1918 私有段 / loopback（说明兜底落到了 debug 内网分支）
+    // 显式声明（无论 -Pquant.mode=debug 还是 =release）一律放行：显式 debug 是开发者主动选择
+    // （deploy.sh debug / iOS Debug Run），显式 release 不会落内网。唯一被拦的是「绕过 deploy.sh
+    // 手动/IDE 出 release 包却没传 mode → 兜底落 debug → 内网地址」这个真实漏点。
+    // 等价于把 iOS verify_ipa 二进制门禁前移到编译期，且零运行时成本、不触碰本地开发链路。
+    val packagingTaskRequested = gradle.startParameter.taskNames.any { taskName ->
+        val lower = taskName.lowercase()
+        lower.contains("release") ||
+            lower.contains("assemble") ||
+            lower.contains("bundle") ||
+            lower.contains("wasmjsbrowserdistribution") ||
+            lower.contains("embedandsign") ||
+            lower.contains("package")
+    }
+    val explicitModeDeclared = providers.gradleProperty("quant.mode").orNull != null ||
+        providers.environmentVariable("QUANT_MODE").orNull != null
+
+    // 把断言的两个判定纳入增量 key：否则当 quant.mode 与 config.yaml 不变时任务命中 UP-TO-DATE，
+    // Gradle 会整体跳过 doLast（含断言），让"先 compile 缓存出 debug 内网产物、再裸跑出包任务"
+    // 这一窗口静默旁路断言。纳入后，请求出包任务或显式声明状态一变化即缓存失效、doLast 重跑，
+    // 断言始终参与求值。host 内网性由 quant.mode + config.yaml 决定，二者已是 inputs，无需再加。
+    inputs.property("quant.packagingTaskRequested", packagingTaskRequested)
+    inputs.property("quant.explicitModeDeclared", explicitModeDeclared)
+
     val generatedDir = layout.buildDirectory.dir("generated/sources/kotlin/main")
     outputs.dir(generatedDir)
 
     doLast {
         val mode = quantMode.get()
         val environment = resolveDeploymentModeEnvironment(configFile, mode)
+
+        // 出包级不变量断言：出包任务 + 无显式 mode 声明 + host 内网 → 构建期硬失败。
+        if (packagingTaskRequested && !explicitModeDeclared) {
+            val host = environment.publicHost
+            val isIntranetHost = host == "localhost" ||
+                host == "127.0.0.1" ||
+                host.startsWith("10.") ||
+                host.startsWith("192.168.") ||
+                Regex("^172\\.(1[6-9]|2[0-9]|3[0-1])\\.").containsMatchIn(host)
+            if (isIntranetHost) {
+                error(
+                    "出包/分发任务解析出内网 host（mode=$mode, host=$host），且未显式声明 -Pquant.mode/QUANT_MODE。" +
+                        "客户端出包必须显式 -Pquant.mode=release（或 QUANT_MODE=release），禁止把内网地址烧进产物。" +
+                        "本地开发请使用 wasmJsBrowserDevelopmentRun / iOS Debug / deploy.sh debug；" +
+                        "本地 debug 装机（如 assembleDebug）请显式加 -Pquant.mode=debug。"
+                )
+            }
+        }
+
         val clientDownloadUrl = readYamlScalar(configFile, listOf("client", "downloadUrl")) ?: ""
 
         val packageName = "org.shiroumi.config"

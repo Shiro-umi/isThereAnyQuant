@@ -15,7 +15,7 @@ BUNDLE_ID = org.shiroumi.quant
 // 版本号：对齐 compose-app/version.properties。
 // MARKETING_VERSION 对应 versionName，CURRENT_PROJECT_VERSION 对应 versionCode。
 APP_VERSION = 0.0.1
-APP_BUILD = 47
+APP_BUILD = 51
 
 // 最低支持系统：iOS 14（Compose Multiplatform iOS 运行时下限）。
 MIN_IOS_VERSION = 14.0
