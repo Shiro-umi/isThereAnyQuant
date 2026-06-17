@@ -26,4 +26,9 @@ object AppConfig {
      * 获取最终的 WebSocket 基础 URL
      */
     val wsBaseUrl: String = AppEnvironment.wsBaseUrl
+
+    /**
+     * 客户端安装包夸克网盘固定分享页地址（编译期由 config.yaml 的 client.downloadUrl 注入）
+     */
+    val clientDownloadUrl: String = AppEnvironment.CLIENT_DOWNLOAD_URL
 }

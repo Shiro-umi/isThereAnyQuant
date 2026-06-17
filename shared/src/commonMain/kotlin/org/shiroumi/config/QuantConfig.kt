@@ -19,7 +19,15 @@ data class QuantConfig(
     val externalApis: ExternalApisConfig = ExternalApisConfig(),
     val strategy: StrategyConfig = StrategyConfig(),
     val auth: AuthConfig = AuthConfig(),
-    val agent: AgentConfig = AgentConfig()
+    val agent: AgentConfig = AgentConfig(),
+    val client: ClientConfig = ClientConfig()
+)
+
+@Serializable
+@SerialName("client")
+data class ClientConfig(
+    /** 客户端安装包夸克网盘固定分享页地址，编译期经 AppEnvironment 注入前端二维码 */
+    val downloadUrl: String = ""
 )
 
 @Serializable

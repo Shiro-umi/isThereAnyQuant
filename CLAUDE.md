@@ -15,6 +15,7 @@
 - **研究层强制触发**：只要涉及 `:strategy-server:research` 模块、七段研究管线（Source / Transform / Input / Study / Output / Compare / Conclusion）、`ResearchContext`、`ResearchStage`、`ResearchPipeline`、`ResearchStudy`、`ResearchEvaluation`、`SentimentResonanceStudy`、`SentimentEvaluation`、`ResonanceEvaluator`、`ResonanceCardWriter`、研究工作区 `research/sentiment_factor/`、`{workspace}/tuner/{runId}/` 产物、参数自动调优（`BlackBoxOptimizer`、`NelderMeadOptimizer`、`HillClimbingOptimizer`、`SimulatedAnnealingOptimizer`）或 PyTorch 训练产物，必须读取 `.claude/skills/research-pipeline-architect/SKILL.md`。对 research 模块的 pipeline / study / eval / output / tuner 任意一段做修改时，必须同步检查并维护 `.claude/skills/research-pipeline-architect/references/research-pipeline-architecture.md`；若无需更新，最终输出说明依据。
 - **部署相关强制触发**：只要涉及部署、发布、debug/release 模式、`deploy.sh`、Gradle deployment/distribution 任务、Ktor 启停脚本、部署包、Docker、端口 `9870/9871`、`QUANT_MODE`、运行时配置、日志/PID/data 目录、生产域名或本地调试地址，必须读取 `.claude/skills/deployment-architect/SKILL.md`。对部署功能和上下游做修改时，必须同步检查并维护 `.claude/skills/deployment-architect/references/deployment-architecture.md`；若无需更新，最终输出说明依据。
 - 数学计算不是 Skill；不要查找 `evaluate-math-expressions`，也不要调用 `evaluateMathExpressions`。所有数学计算统一使用 shell 命令 `bc`。
+- **Skill 链接生效强制规范**：`.claude/skills` 是目录级 symlink，指向 `private/claude-skills`，两侧 inode 同源。放在 `private/claude-skills/<name>/` 下的新 skill 自动在主工程被原生发现机制触发。新增 skill 默认放在 `private/claude-skills/` 下。新 skill 放在其他位置时，必须立即 symlink 到 `.claude/skills/<name>` 使其被原生发现机制触发。
 
 ## Development Commands
 

@@ -9,6 +9,11 @@ server:
   # 数据更新通知 WebSocket 路径
   dataUpdateWsPath: /ws/data-update
 
+# ==================== 客户端分发配置 ====================
+# 客户端安装包夸克网盘固定分享页，编译期注入前端二维码下载入口
+client:
+  downloadUrl: "https://pan.quark.cn/s/667221bcabd6"
+
 # ==================== 部署模式配置 ====================
 # 跨平台客户端环境、Ktor 运行时 QUANT_MODE 覆盖、部署包模式都从这里解析。
 deployment:

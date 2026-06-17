@@ -281,7 +281,8 @@ tasks.register("generateAppEnvironment") {
     doLast {
         val mode = quantMode.get()
         val environment = resolveDeploymentModeEnvironment(configFile, mode)
-        
+        val clientDownloadUrl = readYamlScalar(configFile, listOf("client", "downloadUrl")) ?: ""
+
         val packageName = "org.shiroumi.config"
         val fileName = "AppEnvironment.kt"
         val file = generatedDir.get().asFile.resolve("${packageName.replace('.', '/')}/$fileName")
@@ -301,7 +302,8 @@ tasks.register("generateAppEnvironment") {
                 const val PORT = ${environment.port}
                 const val API_BASE_URL = "${environment.apiBaseUrl}"
                 const val WS_BASE_URL = "${environment.wsBaseUrl}"
-                
+                const val CLIENT_DOWNLOAD_URL = "${kotlinStringLiteral(clientDownloadUrl)}"
+
                 val apiBaseUrl: String = API_BASE_URL
                 val wsBaseUrl: String = WS_BASE_URL
             }

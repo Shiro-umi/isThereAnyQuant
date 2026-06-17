@@ -409,3 +409,23 @@ elif [ "$MODE_FAMILY" = "release" ]; then
         echo "ℹ️  跳过 iOS ipa 出包：当前非 macOS（$(uname -s)），iOS 出包需在 macOS 上执行 scripts/build-ios-ipa.sh。"
     fi
 fi
+
+# 客户端安装包上传夸克网盘：仅 release，且仅在非 server-only 时执行。
+# server 已起、本次客户端产物（APK 始终出，ipa 仅 macOS 出）已就绪，统一收敛后上传到固定目录
+# /quant-client。固定分享链接不变。
+# server-only 跳过上传：该模式本就跳过客户端出包（line 270 -x assembleRelease/copyApk + line 394
+# 跳过 iOS ipa），本次没有新客户端产物。此时若上传，collect 要么撞构建目录里上一版残留 APK
+# 把陈旧包当本次新包传，要么因找不到包硬失败且手动重跑同样失败（server-only 永不构建 APK）。
+# 因此与 iOS ipa 守卫段保持一致，整条客户端出包+分发链路在 server-only 下统一跳过。
+# 上传依赖 kuake 二进制 + KUAKE_COOKIE，失败不回滚已完成的 server 部署，仅提示手动重跑
+# （沿用 iOS 守卫的 if-then-else 容错范式）。
+if [ "$MODE_FAMILY" = "release" ] && [ "$SERVER_ONLY" != true ]; then
+    echo ""
+    echo "☁️  Uploading client packages to Quark drive (release)..."
+    if "$SCRIPT_DIR/scripts/upload-client-packages.sh"; then
+        echo "   客户端安装包已上传：固定分享页 https://pan.quark.cn/s/667221bcabd6"
+    else
+        echo "⚠️  客户端安装包上传失败；server 部署不受影响。"
+        echo "   手动重试：$SCRIPT_DIR/scripts/upload-client-packages.sh"
+    fi
+fi

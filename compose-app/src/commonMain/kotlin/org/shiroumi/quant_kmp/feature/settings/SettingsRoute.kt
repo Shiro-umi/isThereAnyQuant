@@ -30,9 +30,13 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.outlined.QrCode2
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -41,10 +45,13 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import model.agent.AgentModelSelectionMode
+import org.shiroumi.config.AppConfig
 import org.shiroumi.quant_kmp.di.HttpClientProvider
+import org.shiroumi.quant_kmp.platform.isWebPlatform
 import org.shiroumi.quant_kmp.ui.animation.ExpandVerticallyAnimation
 import org.shiroumi.quant_kmp.ui.agent.state.AgentContract
 import org.shiroumi.quant_kmp.ui.core.adaptive.AdaptivePageContainer
+import org.shiroumi.quant_kmp.ui.components.qr.QrCodeDialog
 import org.shiroumi.quant_kmp.ui.core.viewmodel.LocalAgentViewModel
 import org.shiroumi.quant_kmp.ui.theme.AppColorTheme
 import org.shiroumi.quant_kmp.ui.theme.LocalAppThemeState
@@ -97,7 +104,47 @@ fun SettingsRoute(
                 onCancelSwitch = agentConfigViewModel::cancelPendingSwitch,
                 onRetry = agentConfigViewModel::load,
             )
+
+            // 客户端下载入口仅在 Web 端、且分享链接已注入时展示。
+            if (isWebPlatform() && AppConfig.clientDownloadUrl.isNotEmpty()) {
+                ClientDownloadSection(downloadUrl = AppConfig.clientDownloadUrl)
+            }
         }
+    }
+}
+
+@Composable
+private fun ClientDownloadSection(
+    downloadUrl: String,
+) {
+    var showQrDialog by remember { mutableStateOf(false) }
+
+    SettingsCard {
+        Text(
+            text = "客户端",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = "扫码下载 Android / iOS 安装包。",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Button(
+            onClick = { showQrDialog = true },
+            modifier = Modifier.align(Alignment.End)
+        ) {
+            Icon(imageVector = Icons.Outlined.QrCode2, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("下载客户端")
+        }
+    }
+
+    if (showQrDialog) {
+        QrCodeDialog(
+            url = downloadUrl,
+            onDismiss = { showQrDialog = false },
+        )
     }
 }
 

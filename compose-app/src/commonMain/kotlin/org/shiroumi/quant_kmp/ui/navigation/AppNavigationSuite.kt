@@ -43,7 +43,6 @@ import androidx.navigation3.scene.Scene
 import androidx.navigation3.ui.NavDisplay
 import org.shiroumi.quant_kmp.MultiPlatform
 import org.shiroumi.quant_kmp.NavDest
-import org.shiroumi.quant_kmp.platform.downloadApk
 import org.shiroumi.quant_kmp.platform.isAndroidPlatform
 import org.shiroumi.quant_kmp.service.DataUpdateService
 import org.shiroumi.quant_kmp.service.GlobalWebSocketClient
@@ -321,10 +320,7 @@ private fun CompactContent(
                 defaultTitle = (currentRoute as? NavDest)?.label ?: "Quant",
                 globalActions = {
                     DataUpdateStatusIndicator()
-                    AppMenu(
-                        canDownloadApk = !isAndroidPlatform(),
-                        onDownloadApk = { downloadApk("${AppConfig.apiBaseUrl}/api/download/apk") },
-                    )
+                    AppMenu(clientDownloadUrl = AppConfig.clientDownloadUrl)
                 },
                 agentExpanded = agentSidebarState.isExpanded,
                 onAgentCollapse = { agentSidebarViewModel.toggleExpand() },
@@ -455,10 +451,7 @@ private fun ExpandedContent(
                             defaultTitle = (currentRoute as? NavDest)?.label ?: "Quant",
                             globalActions = {
                                 DataUpdateStatusIndicator()
-                                AppMenu(
-                                    canDownloadApk = !isAndroidPlatform(),
-                                    onDownloadApk = { downloadApk("${AppConfig.apiBaseUrl}/api/download/apk") },
-                                )
+                                AppMenu(clientDownloadUrl = AppConfig.clientDownloadUrl)
                             },
                         )
                     }
