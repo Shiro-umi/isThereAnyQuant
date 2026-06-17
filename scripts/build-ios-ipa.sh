@@ -17,6 +17,13 @@
 #
 set -euo pipefail
 
+# QUANT_MODE 陷阱（deployment-architecture.md §6.5）：xcodebuild archive 的 Build Phase 会调
+# :compose-app:embedAndSignAppleFrameworkForXcode（任务名不含 release），无 QUANT_MODE 时
+# generateAppEnvironment 落默认 debug 分支，把内嵌 API host 写成内网 LAN IP（auto-lan 检测）、
+# versionCode 也不对，release ipa 连不上生产 bigsmart.space。mode 优先级 -Pquant.mode >
+# QUANT_MODE > 任务名默认值，这里强制 release 压过 embedAndSign 任务名的 debug 默认值。
+export QUANT_MODE=release
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"

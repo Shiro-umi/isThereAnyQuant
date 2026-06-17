@@ -53,6 +53,7 @@ APP_OPTS="${APP_OPTS:-"
     -Dserver.data.dir=${DATA_DIR}
     -Dquant.project.root=${PROJECT_ROOT}
     -Dquant.profitPrediction.servicePort=${PROFIT_PREDICTION_INFER_PORT}
+    -Dquant.strategy.holding.breakdownRerank=true
 "}"
 
 mkdir -p "$LOG_DIR"

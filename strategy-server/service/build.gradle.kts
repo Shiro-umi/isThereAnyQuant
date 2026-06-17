@@ -67,3 +67,31 @@ tasks.register<JavaExec>("backfillProfitPredictionSelections") {
     )
     jvmArgs("-Xmx4g")
 }
+
+tasks.register<JavaExec>("importFusionScores") {
+    group = "application"
+    description = "Import fusion model walk-forward OOS scores (Top3/day CSV) into daily_profit_prediction_selection for backtest"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.shiroumi.strategy.service.ImportFusionScoresToSelectionKt")
+    systemProperties(
+        System.getProperties()
+            .stringPropertyNames()
+            .filter { it.startsWith("quant.fusion.") || it == "quant.projectRoot" || it == "quant.project.root" }
+            .associateWith { System.getProperty(it) }
+    )
+    jvmArgs("-Xmx2g")
+}
+
+tasks.register<JavaExec>("exportStNames") {
+    group = "application"
+    description = "Export ST stock names (±5% limit, non-tradable) to CSV for research dataset ST-exclusion"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.shiroumi.strategy.service.ExportStNamesKt")
+    systemProperties(
+        System.getProperties()
+            .stringPropertyNames()
+            .filter { it.startsWith("quant.st.") || it == "quant.projectRoot" || it == "quant.project.root" }
+            .associateWith { System.getProperty(it) }
+    )
+    jvmArgs("-Xmx1g")
+}
