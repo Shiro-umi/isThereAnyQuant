@@ -109,6 +109,31 @@ class StrategyCommandHandler(
                 )
             }
 
+            // 强制重发布：不重算，只从 DB 重读最新落库审计与持仓，重新 publish POSITIONS / POSITION_TRACKING。
+            // 用于外部直接改库后让内存快照追平已落库状态（无条件刷新，不依赖审计日是否变新）。
+            is StrategyCommand.RepublishLatestSnapshot -> runCatching {
+                val result = postMarketRuntime.publishLatestPositions(command.reason)
+                publishHealth(
+                    status = if (result.accepted) "SNAPSHOT_REPUBLISHED" else "SNAPSHOT_REPUBLISH_FAILED",
+                    topic = StrategyTopic.POSITIONS,
+                    version = result.positionsEnvelope?.version,
+                    sourceInstanceId = result.positionsEnvelope?.sourceInstanceId,
+                )
+                StrategyCommandAck(
+                    accepted = result.accepted,
+                    message = result.message,
+                    sourceInstanceId = serviceInstanceId,
+                    contractVersion = STRATEGY_CONTRACT_VERSION,
+                )
+            }.getOrElse { error ->
+                StrategyCommandAck(
+                    accepted = false,
+                    message = "强制刷新快照失败：${error.message}",
+                    sourceInstanceId = serviceInstanceId,
+                    contractVersion = STRATEGY_CONTRACT_VERSION,
+                )
+            }
+
             is StrategyCommand.LoadRealtimeDailyCandles -> StrategyCommandAck(
                 accepted = false,
                 message = "LoadRealtimeDailyCandles must be handled by ktor-server",

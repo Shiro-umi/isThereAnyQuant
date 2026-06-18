@@ -90,6 +90,13 @@ object StrategyRuntimeBridge {
             )
         )
 
+    /**
+     * 强制重发布最新内存快照：请求 strategy-service 从 DB 重读最新落库审计与持仓、重新发布快照（不重算）。
+     * 用于外部改库后让在跑 service 的内存快照追平已落库状态，前端订阅随即收到新快照。
+     */
+    suspend fun republishLatestSnapshot(reason: String): StrategyCommandAck =
+        sendCommand(StrategyCommand.RepublishLatestSnapshot(reason = reason))
+
     private fun createRemoteRuntimeClient(): SocketStrategyRuntimeClient? {
         val enabled = System.getenv("STRATEGY_SOCKET_CONSUME_ENABLED")
             ?.equals("false", ignoreCase = true) != true

@@ -89,6 +89,11 @@ class LocalStrategySnapshotHub<T>(
                 message = "local strategy runtime does not own calibrated tracking replay",
                 sourceInstanceId = sourceInstanceId
             )
+            is StrategyCommand.RepublishLatestSnapshot -> StrategyCommandAck(
+                accepted = false,
+                message = "local strategy runtime does not own snapshot republish",
+                sourceInstanceId = sourceInstanceId
+            )
         }
     }
 

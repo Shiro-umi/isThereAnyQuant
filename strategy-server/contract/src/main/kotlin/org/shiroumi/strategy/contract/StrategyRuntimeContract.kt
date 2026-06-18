@@ -95,6 +95,20 @@ sealed interface StrategyCommand {
     @SerialName("rebuild-range")
     data class RebuildRange(val startDate: String, val endDate: String, val reason: String? = null) : StrategyCommand
 
+    /**
+     * 强制重发布内存快照：不重算（不跑因子/情绪/模型选股/状态机推进），只从 DB 重读最新落库的
+     * 审计与持仓，重新 publish POSITIONS / POSITION_TRACKING 快照。
+     *
+     * 用途：外部直接改库（重刷持仓、回填买点、离线脚本落库等）后，在跑的 service 内存快照仍是旧的，
+     * 前端手动触发本命令即可让内存快照追平已落库状态，无需重启 service。与 [RebuildDate] 区分——
+     * 后者会重算整条盘后链路（慢、且触发 selection 复现断言）；本命令是纯重读重发布。
+     * 与 service 内部的「审计追平」（仅当 DB 审计日比内存新时刷新）区分——本命令无条件强制刷新，
+     * 覆盖「审计日未变但库内数据已改」（如重刷同一交易日持仓口径）的场景。
+     */
+    @Serializable
+    @SerialName("republish-latest-snapshot")
+    data class RepublishLatestSnapshot(val reason: String = "manual-refresh") : StrategyCommand
+
     @Serializable
     @SerialName("load-realtime-daily-candles")
     data class LoadRealtimeDailyCandles(

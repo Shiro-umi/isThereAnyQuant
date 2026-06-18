@@ -18,6 +18,7 @@ import org.shiroumi.strategy.contract.StrategySnapshotEnvelope
 import org.shiroumi.strategy.contract.StrategyTopic
 import org.shiroumi.strategy.service.runtime.IntradayRefreshResult
 import org.shiroumi.strategy.service.runtime.IntradayRuntime
+import org.shiroumi.strategy.service.runtime.PostMarketPositionPublishResult
 import org.shiroumi.strategy.service.runtime.PostMarketRebuildResult
 import org.shiroumi.strategy.service.runtime.PostMarketRuntime
 import org.shiroumi.strategy.service.runtime.StrategyPositionTrackingDataSource
@@ -209,7 +210,55 @@ class StrategyCommandHandlerTest {
         val ack = handler.handle(StrategyCommand.BuildCalibratedTracking("not-a-date"))
 
         assertFalse(ack.accepted)
-        assertTrue(ack.message!!.contains("invalid BuildCalibratedTracking"))
+        // 解析失败时 handler 返回面向用户的中文文案（技术细节只进日志），断言与实现保持一致。
+        assertTrue(
+            ack.message!!.contains("该跟随起始日无法校准"),
+            "expected user-facing 校准失败 message, got=${ack.message}"
+        )
+    }
+
+    @Test
+    fun `republish latest snapshot delegates to runtime and publishes health`() = runTest {
+        val hub = LocalStrategySnapshotHub<JsonElement>(serviceInstanceId)
+        val runtime = FakePostMarketRuntime(
+            publishLatestResult = PostMarketPositionPublishResult(
+                accepted = true,
+                message = "latest positions published tradeDate=2026-06-17",
+                positionsEnvelope = hub.publish(StrategyTopic.POSITIONS, buildPayload("positions")),
+            )
+        )
+        val handler = createHandler(postMarketRuntime = runtime, hub = hub)
+
+        val ack = handler.handle(StrategyCommand.RepublishLatestSnapshot("manual-refresh"))
+
+        assertTrue(ack.accepted)
+        assertEquals(1, runtime.publishLatestCallCount)
+        assertEquals("manual-refresh", runtime.lastPublishReason)
+
+        val health = hub.current(StrategyTopic.HEALTH)
+        assertNotNull(health)
+        assertEquals("SNAPSHOT_REPUBLISHED", health!!.payload.jsonObject["status"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `republish latest snapshot failure publishes failed health and rejected ack`() = runTest {
+        val hub = LocalStrategySnapshotHub<JsonElement>(serviceInstanceId)
+        val runtime = FakePostMarketRuntime(
+            publishLatestResult = PostMarketPositionPublishResult(
+                accepted = false,
+                message = "no historical strategy audit found",
+            )
+        )
+        val handler = createHandler(postMarketRuntime = runtime, hub = hub)
+
+        val ack = handler.handle(StrategyCommand.RepublishLatestSnapshot("manual-refresh"))
+
+        assertFalse(ack.accepted)
+        assertEquals("no historical strategy audit found", ack.message)
+
+        val health = hub.current(StrategyTopic.HEALTH)
+        assertNotNull(health)
+        assertEquals("SNAPSHOT_REPUBLISH_FAILED", health!!.payload.jsonObject["status"]?.jsonPrimitive?.content)
     }
 }
 
@@ -248,11 +297,14 @@ private class FakeIntradayRuntime(
 private class FakePostMarketRuntime(
     private val rebuildDateResult: PostMarketRebuildResult? = null,
     private val rebuildRangeResult: PostMarketRebuildResult? = null,
+    private val publishLatestResult: PostMarketPositionPublishResult? = null,
 ) : PostMarketRuntime {
     var lastRebuildDate: LocalDate? = null
     var lastReason: String? = null
     var lastRangeStart: LocalDate? = null
     var lastRangeEnd: LocalDate? = null
+    var lastPublishReason: String? = null
+    var publishLatestCallCount: Int = 0
 
     override suspend fun rebuildDate(tradeDate: LocalDate, reason: String?): PostMarketRebuildResult {
         lastRebuildDate = tradeDate
@@ -269,5 +321,11 @@ private class FakePostMarketRuntime(
         lastRangeEnd = endDate
         lastReason = reason
         return rebuildRangeResult ?: PostMarketRebuildResult(accepted = true, message = "ok")
+    }
+
+    override suspend fun publishLatestPositions(reason: String): PostMarketPositionPublishResult {
+        lastPublishReason = reason
+        publishLatestCallCount += 1
+        return publishLatestResult ?: PostMarketPositionPublishResult(accepted = true, message = "republished")
     }
 }

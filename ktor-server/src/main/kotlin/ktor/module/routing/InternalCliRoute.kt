@@ -2,6 +2,7 @@ package ktor.module.routing
 
 import io.ktor.server.application.*
 import io.ktor.server.plugins.*
+import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.http.*
@@ -20,6 +21,7 @@ import org.shiroumi.network.apis.tushare
 import org.shiroumi.server.data.bootstrap.DataLayerBootstrap
 import org.shiroumi.server.dto.ApiResponse
 import org.shiroumi.server.route.StrategySentimentResponse
+import org.shiroumi.server.runtime.strategy.StrategyRuntimeBridge
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -487,6 +489,37 @@ fun Route.internalCliRoutes() {
                 )
             } catch (e: Exception) {
                 call.respondText("错误: ${e.message}", status = HttpStatusCode.InternalServerError)
+            }
+        }
+
+        /**
+         * POST /api/internal/cli/strategy/republish-snapshot
+         *
+         * 强制令 strategy-service 从 DB 重读最新落库的审计与持仓，重新发布快照（不重算）。
+         * 用于外部改库（离线脚本回填买点、重刷持仓等）后让在跑服务的内存快照追平已落库状态。
+         *
+         * 可选 JSON body: {"reason": "自定义原因"}
+         * 仅限 127.0.0.1 loopback 访问（由外层 intercept 保障）。
+         */
+        post("/strategy/republish-snapshot") {
+            try {
+                @Serializable
+                data class RepublishRequest(val reason: String = "manual-refresh")
+                val body = runCatching { call.receive<RepublishRequest>() }.getOrElse { RepublishRequest() }
+                val ack = StrategyRuntimeBridge.republishLatestSnapshot(body.reason)
+                if (ack.accepted) {
+                    call.respond(ApiResponse.success(mapOf("message" to (ack.message ?: "快照已重发布"))))
+                } else {
+                    call.respond(
+                        HttpStatusCode.ServiceUnavailable,
+                        ApiResponse.error<Unit>("REPUBLISH_FAILED", ack.message ?: "快照重发布失败")
+                    )
+                }
+            } catch (e: Exception) {
+                call.respond(
+                    HttpStatusCode.InternalServerError,
+                    ApiResponse.error<Unit>("INTERNAL_ERROR", e.message ?: "服务器内部错误")
+                )
             }
         }
 

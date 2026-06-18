@@ -27,7 +27,7 @@ class PostMarketStrategyRuntime(
 ) : PostMarketRuntime {
     private val logger by logger("PostMarketStrategyRuntime")
 
-    suspend fun publishLatestPositions(reason: String): PostMarketPositionPublishResult {
+    override suspend fun publishLatestPositions(reason: String): PostMarketPositionPublishResult {
         val latestSummary = dataSource.loadLatestAuditSummary()
             ?: return PostMarketPositionPublishResult(
                 accepted = false,
