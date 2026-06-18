@@ -207,6 +207,14 @@ fun StrategyPositionTrackingScreen(
     if (!useSplitPanes) {
         ProvideMobileTitleBar(
             title = "策略持仓跟踪",
+            // 叹号是标题的附属说明入口，紧贴标题文字呈现，与大屏 TrackingPageHeader 形态一致；
+            // 右侧 actions 区只保留跟随校准这类页面级动作。
+            titleTrailing = {
+                DisclaimerIcon(
+                    expanded = disclaimerVisible,
+                    onClick = { disclaimerVisible = true },
+                )
+            },
             actions = {
                 IconButton(onClick = { calibrationPickerVisible = true }) {
                     Icon(
@@ -219,10 +227,6 @@ fun StrategyPositionTrackingScreen(
                         },
                     )
                 }
-                DisclaimerIcon(
-                    expanded = disclaimerVisible,
-                    onClick = { disclaimerVisible = true },
-                )
             },
         )
     }
@@ -632,7 +636,7 @@ private fun TrackingPageHeader(
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.sm),
     ) {
         Text(
             text = "策略持仓跟踪",
@@ -997,11 +1001,50 @@ private fun DisclaimerIcon(
     }
 }
 
-private val DisclaimerItems = listOf(
-    "策略选股结果仅供跟踪参考，不构成投资建议",
-    "次日大幅低开时，建议观望而非追入",
-    "入选当日最高涨幅已大幅偏离成本区时，追高风险较大",
-    "潜在追高空间接近或超过 50% 时，建议谨慎买入",
+/** 操作策略说明的标题文案，叹号弹窗 / 抽屉共用。 */
+private const val StrategyGuideTitle = "操作策略"
+
+/** 一组操作说明：组标题 + 若干条目。 */
+private data class StrategyGuideGroup(
+    val title: String,
+    val items: List<String>,
+)
+
+/**
+ * 叹号弹窗的操作策略说明。从用户视角讲清「这套跟踪每天怎么买、怎么卖」，
+ * 数值与真实持仓规则一致（次日开盘买入 / 跳空超 3% 放弃 / 每天最多买 3 只 /
+ * 涨到 +8% 止盈 / 买入后头两个交易日触及 +2.5% 落袋 / 买入后第 2 个交易日收盘到期清仓），
+ * 不暴露任何选股模型或算法细节。机制说明在前，风险提示在后。
+ *
+ * 天数口径统一为「买入后第 N 个交易日」（买入当天不计）：买入后第 1、2 个交易日是保盈窗口，
+ * 买入后第 2 个交易日收盘即到期强制清仓——它也是保盈窗口的最后一天，二者是同一天。
+ */
+private val StrategyGuideGroups = listOf(
+    StrategyGuideGroup(
+        title = "什么时候买",
+        items = listOf(
+            "每天收盘后产出次日的选股结果，第二天开盘时买入。",
+            "如果某只票开盘价比前一天收盘高出 3% 以上，说明已经追高，当天放弃买入。",
+            "一天最多买入 3 只，按当日评分从高到低优先成交。",
+        ),
+    ),
+    StrategyGuideGroup(
+        title = "什么时候卖",
+        items = listOf(
+            "盘中涨到买入价的 +8% 就止盈卖出，这是最优先的卖出条件。",
+            "买入后第 1、2 个交易日里，只要盘中摸到 +2.5% 就先落袋保住浮盈。",
+            "最迟持有到买入后第 2 个交易日，当天收盘没卖出的一律清仓，不恋战。",
+        ),
+    ),
+    StrategyGuideGroup(
+        title = "风险提示",
+        items = listOf(
+            "选股与跟踪结果仅供参考，不构成投资建议。",
+            "次日大幅低开时，建议观望而非追入。",
+            "入选当日已大幅偏离成本区时，追高风险较大。",
+            "潜在追高空间接近或超过 50% 时，建议谨慎买入。",
+        ),
+    ),
 )
 
 @Composable
@@ -1011,20 +1054,30 @@ private fun DisclaimerList(
 ) {
     Column(
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.md),
     ) {
-        DisclaimerItems.forEach { item ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        StrategyGuideGroups.forEach { group ->
+            Column(verticalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.sm)) {
                 Text(
-                    text = "·",
-                    style = textStyle,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = group.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
-                Text(
-                    text = item,
-                    style = textStyle,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                group.items.forEach { item ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.sm)) {
+                        Text(
+                            text = "·",
+                            style = textStyle,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = item,
+                            style = textStyle,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
         }
     }
@@ -1074,7 +1127,7 @@ private fun DisclaimerBottomSheet(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "跟踪说明",
+                text = StrategyGuideTitle,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -1097,6 +1150,11 @@ private fun DisclaimerBottomSheet(
         DisclaimerList(
             modifier = Modifier
                 .fillMaxWidth()
+                // 分组说明已扩成 13 行，小屏 / 横屏下高度可能超过 sheet 可用区；
+                // ModalBottomSheet 的 ColumnScope 默认不滚动，必须限高 + 自滚保证末条可达，
+                // 与 CalibrationPickerBottomSheet 同款长内容处理对齐。
+                .heightIn(max = 480.dp)
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 16.dp),
             textStyle = MaterialTheme.typography.bodyMedium,
         )
@@ -1113,13 +1171,18 @@ private fun DisclaimerDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = "跟踪说明",
+                text = StrategyGuideTitle,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
             )
         },
         text = {
-            DisclaimerList(textStyle = MaterialTheme.typography.bodyMedium)
+            DisclaimerList(
+                modifier = Modifier
+                    .heightIn(max = 480.dp)
+                    .verticalScroll(rememberScrollState()),
+                textStyle = MaterialTheme.typography.bodyMedium,
+            )
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {

@@ -143,7 +143,7 @@ internal fun TrackingOverviewListPanel(
                     TrackingListSectionHeader(
                         title = "选股结果",
                         tint = MaterialTheme.colorScheme.secondary,
-                        caption = "次日按波动率优先入场 1 只",
+                        caption = "次日开盘按评分优先买入，最多 3 只",
                     )
                 }
                 if (observedDay.selection.isEmpty()) {
@@ -197,7 +197,7 @@ private fun TrackingDateNavigator(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = AgentTheme.Spacing.xs),
+            .padding(vertical = AgentTheme.Spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.sm),
     ) {
@@ -226,7 +226,10 @@ private fun TrackingDateNavigator(
                     text = "回到最新",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                    modifier = Modifier.padding(
+                        horizontal = AgentTheme.Spacing.md,
+                        vertical = AgentTheme.Spacing.xs,
+                    ),
                 )
             }
         }
@@ -246,16 +249,23 @@ private fun NavArrow(
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
-    val tint = if (enabled) {
-        MaterialTheme.colorScheme.onSurfaceVariant
+    // 翻页箭头、回到最新、跟随校准三个交互控件统一走 secondaryContainer 次级强调族，
+    // 深浅一致；禁用态对容器与图标同步降 alpha，弱化但不改变所属色族。
+    val container = if (enabled) {
+        MaterialTheme.colorScheme.secondaryContainer
     } else {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f)
+    }
+    val tint = if (enabled) {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.38f)
     }
     Box(
         modifier = Modifier
             .size(36.dp)
             .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .background(container)
             .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center,
     ) {

@@ -13,6 +13,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -67,6 +68,8 @@ data class MobileTitleBarSpec(
     val large: Boolean = false,
     val scrollBehavior: TopAppBarScrollBehavior? = null,
     val titleMotion: MobileTitleMotion = MobileTitleMotion.None,
+    /** 紧贴标题文字右侧的附属控件（如说明叹号），与标题同处一行而非右侧 actions 区。 */
+    val titleTrailing: (@Composable () -> Unit)? = null,
 )
 
 enum class MobileTitleMotion {
@@ -105,6 +108,7 @@ fun ProvideMobileTitleBar(
     onBack: (() -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
     titleMotion: MobileTitleMotion = MobileTitleMotion.None,
+    titleTrailing: (@Composable () -> Unit)? = null,
 ) {
     val controller = LocalMobileTitleBarController.current ?: return
     DisposableEffect(controller, title, subtitle, onBack, titleMotion) {
@@ -114,6 +118,7 @@ fun ProvideMobileTitleBar(
             onBack = onBack,
             actions = actions,
             titleMotion = titleMotion,
+            titleTrailing = titleTrailing,
         )
         controller.setSpec(spec)
         onDispose { controller.clearIf(spec) }
@@ -184,6 +189,7 @@ fun MobileNavTitleBar(
             collapsedFraction = collapsedFraction,
             titleMotion = spec?.titleMotion ?: MobileTitleMotion.None,
             startPadding = titleStartPadding,
+            titleTrailing = spec?.titleTrailing,
         )
     }
     val actionsContent: @Composable RowScope.() -> Unit = {
@@ -279,8 +285,10 @@ private fun MobileTitleBarTitle(
     collapsedFraction: Float,
     titleMotion: MobileTitleMotion,
     startPadding: Dp,
+    titleTrailing: (@Composable () -> Unit)? = null,
 ) {
     if (large) {
+        // large 形态有展开/收起叠层动画，trailing 暂不参与；本项目 large 页面均未使用 titleTrailing。
         Box(modifier = Modifier.padding(start = startPadding)) {
             LargeMobileTitleBarTitle(
                 title = title,
@@ -289,17 +297,29 @@ private fun MobileTitleBarTitle(
             )
         }
     } else if (subtitle.isNullOrBlank()) {
-        Box(modifier = Modifier.padding(start = startPadding)) {
+        Row(
+            modifier = Modifier.padding(start = startPadding),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            // 标题占剩余宽度并在过长时 ellipsis，titleTrailing 始终按本征宽度占位，
+            // 不会被长标题挤成零宽（fill = false 让短标题不强行撑满，trailing 紧贴标题尾）。
             MobileTitleText(
                 text = title,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
                 motion = titleMotion,
+                modifier = Modifier.weight(1f, fill = false),
             )
+            titleTrailing?.invoke()
         }
     } else {
-        Box(modifier = Modifier.padding(start = startPadding)) {
-            Column {
+        Row(
+            modifier = Modifier.padding(start = startPadding),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f, fill = false)) {
                 MobileTitleText(
                     text = title,
                     style = MaterialTheme.typography.titleLarge,
@@ -314,6 +334,7 @@ private fun MobileTitleBarTitle(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            titleTrailing?.invoke()
         }
     }
 }
@@ -324,16 +345,20 @@ private fun MobileTitleText(
     style: TextStyle,
     fontWeight: FontWeight,
     motion: MobileTitleMotion,
+    modifier: Modifier = Modifier,
 ) {
     when (motion) {
         MobileTitleMotion.None -> Text(
             text = text,
+            modifier = modifier,
             style = style,
             fontWeight = fontWeight,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
 
+        // Staggered 是整行逐字标题动画，内部自铺满整行，不与 titleTrailing 共存（本项目无此组合），
+        // 故不接收外部 weight modifier。
         MobileTitleMotion.StaggeredHorizontal -> StaggeredMobileTitleText(
             text = text,
             style = style,
