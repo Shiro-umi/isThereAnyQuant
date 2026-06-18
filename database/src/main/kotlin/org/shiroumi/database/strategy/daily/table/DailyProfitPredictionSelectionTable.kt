@@ -15,6 +15,12 @@ object DailyProfitPredictionSelectionTable : Table(name = "daily_profit_predicti
     val selectionReason = varchar("selection_reason", 255).nullable()
     val candidateMode = varchar("candidate_mode", 32).nullable()
 
+    /**
+     * Agent 量价分析买点限价（QFQ 口径，与信号日 K 线、持仓状态机入场撮合同标系）。
+     * 选股入库后由 agent 并发分析回填；null = 无买点（agent 失败/缺买点），持仓推进回退开盘价无条件建仓。
+     */
+    val limitPrice = double("limit_price").nullable()
+
     init {
         uniqueIndex("uk_daily_profit_prediction_selection", tradeDate, targetDate, tsCode)
         index(

@@ -484,6 +484,89 @@ class HoldingStateMachineTest {
         assertEquals(d1, result.holdings.first().entryDate) // 保持原入场日
     }
 
+    // ===== Agent 买点 LIMIT 触达入场（与回测 LimitOrderMatching BUY 分支同口径）=====
+
+    @Test
+    fun `LIMIT买点_当日最低触达限价_成交价取min开盘限价`() {
+        // 限价 9.8；开盘 10.0、最低 9.7（low<=limit 触达）→ 入场，成交价 = min(10.0, 9.8) = 9.8
+        val bars = mapOf("A.SZ" to candle(open = 10.0f, high = 10.2f, low = 9.7f, close = 9.9f))
+        val result = machine.advance(
+            tradeDate = d2,
+            previousHoldings = emptyList(),
+            newEntries = listOf(HoldingStateMachine.EntryCandidate("A.SZ", signalDateLow = 9.0, signalDateClose = 9.95, entryLimitPrice = 9.8)),
+            tradingDaysSince = ::tradingDaysSince,
+            candleFor = { code, _ -> bars[code] },
+        )
+        assertEquals(listOf("A.SZ"), result.entered)
+        assertEquals(9.8, result.holdings.first().entryPrice, 1e-6)
+    }
+
+    @Test
+    fun `LIMIT买点_限价高于开盘_成交价取开盘`() {
+        // 限价 10.5 高于开盘 10.0；最低 9.9 触达 → 成交价 = min(10.0, 10.5) = 10.0（不会高于实际开盘）
+        val bars = mapOf("A.SZ" to candle(open = 10.0f, high = 10.4f, low = 9.9f, close = 10.2f))
+        val result = machine.advance(
+            tradeDate = d2,
+            previousHoldings = emptyList(),
+            newEntries = listOf(HoldingStateMachine.EntryCandidate("A.SZ", signalDateLow = 9.0, signalDateClose = 9.95, entryLimitPrice = 10.5)),
+            tradingDaysSince = ::tradingDaysSince,
+            candleFor = { code, _ -> bars[code] },
+        )
+        assertEquals(listOf("A.SZ"), result.entered)
+        assertEquals(10.0, result.holdings.first().entryPrice, 1e-6)
+    }
+
+    @Test
+    fun `LIMIT买点_当日最低未触达限价_当日不入场`() {
+        // 限价 9.5；当日最低 9.7 > 9.5（超容差）→ 未触达，当日放弃入场
+        val bars = mapOf("A.SZ" to candle(open = 10.0f, high = 10.2f, low = 9.7f, close = 9.9f))
+        val result = machine.advance(
+            tradeDate = d2,
+            previousHoldings = emptyList(),
+            newEntries = listOf(HoldingStateMachine.EntryCandidate("A.SZ", signalDateLow = 9.0, signalDateClose = 9.95, entryLimitPrice = 9.5)),
+            tradingDaysSince = ::tradingDaysSince,
+            candleFor = { code, _ -> bars[code] },
+        )
+        assertTrue(result.entered.isEmpty())
+        assertTrue(result.holdings.isEmpty())
+    }
+
+    @Test
+    fun `LIMIT买点_首选未触达不占名额_顺延次选入场`() {
+        // B 优先级最高但限价 18.0 未被当日最低 19.0 触达 → 不占名额；名额顺延给 A（限价触达）
+        val bars = mapOf(
+            "A.SZ" to candle(open = 10.0f, high = 10.2f, low = 9.7f, close = 9.9f),
+            "B.SZ" to candle(open = 20.0f, high = 20.2f, low = 19.0f, close = 19.5f),
+        )
+        val result = machine.advance(
+            tradeDate = d2,
+            previousHoldings = emptyList(),
+            newEntries = listOf(
+                HoldingStateMachine.EntryCandidate("A.SZ", 9.0, 9.95, entryPriority = 0.03, entryLimitPrice = 9.8),
+                HoldingStateMachine.EntryCandidate("B.SZ", 19.0, 19.95, entryPriority = 0.05, entryLimitPrice = 18.0),
+            ),
+            tradingDaysSince = ::tradingDaysSince,
+            candleFor = { code, _ -> bars[code] },
+        )
+        assertEquals(listOf("A.SZ"), result.entered)
+        assertEquals(9.8, result.holdings.first().entryPrice, 1e-6)
+    }
+
+    @Test
+    fun `LIMIT买点_缺买点回退开盘价无条件建仓`() {
+        // entryLimitPrice 为 null（agent 失败/缺买点兜底）→ 行为同历史：开盘价无条件建仓
+        val bars = mapOf("A.SZ" to candle(open = 10.0f, high = 10.2f, low = 9.7f, close = 9.9f))
+        val result = machine.advance(
+            tradeDate = d2,
+            previousHoldings = emptyList(),
+            newEntries = listOf(HoldingStateMachine.EntryCandidate("A.SZ", signalDateLow = 9.0, signalDateClose = 9.95, entryLimitPrice = null)),
+            tradingDaysSince = ::tradingDaysSince,
+            candleFor = { code, _ -> bars[code] },
+        )
+        assertEquals(listOf("A.SZ"), result.entered)
+        assertEquals(10.0, result.holdings.first().entryPrice, 1e-6)
+    }
+
     // ===== evaluateExit 判决（原因 + 规则口径离场价），持仓跟踪展示链路共用 =====
 
     private val holdingAt10 = DailyHoldingState(d1, "A.SZ", entryDate = d1, entryPrice = 10.0, signalDateLow = 9.0)

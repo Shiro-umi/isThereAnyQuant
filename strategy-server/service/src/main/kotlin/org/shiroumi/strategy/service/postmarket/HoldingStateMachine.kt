@@ -157,6 +157,15 @@ class HoldingStateMachine(
          * 开关关闭（默认）时恒为 false，入场排序行为与历史一致（纯模型分降序）。
          */
         val breakdownFlag: Boolean = false,
+        /**
+         * Agent 量价买点限价（QFQ 口径，与信号日 K 线同标系）；null = 无买点。
+         *
+         * 有值时入场走 LIMIT 触达语义，与回测撮合 [org.shiroumi.backtest.match.LimitOrderMatching] 完全对齐：
+         * 当日 QFQ 最低价触达限价（low <= limit + 容差）才入场，成交价 = min(开盘, 限价)；未触达当日不入场、
+         * 不占当日入场名额，由后续交易日重新判定。null 时回退原开盘价无条件建仓（保留历史口径，
+         * 也是 agent 分析失败/缺买点票的兜底）。
+         */
+        val entryLimitPrice: Double? = null,
     )
 
     /** 离场原因，按退出优先级排列。 */
@@ -194,7 +203,8 @@ class HoldingStateMachine(
      * @param tradeDate 当前交易日（盘后处理日）
      * @param previousHoldings 前一交易日收盘后的持仓状态
      * @param newEntries 当日新入场候选（前一日选股、target_date=tradeDate 的 selected 票）；
-     *   入场价取当日开盘价、入场日记为 tradeDate
+     *   入场价：有 [EntryCandidate.entryLimitPrice] 走 LIMIT 触达语义（触达取 min(开盘,限价)、未触达当日不入场），
+     *   否则取当日开盘价无条件建仓；入场日记为 tradeDate
      * @param tradingDaysSince 计算两个交易日之间的交易日数（不含 start，含 end）
      * @param candleFor 取某 tsCode 在某交易日的日 K；缺失返回 null
      */
@@ -241,13 +251,17 @@ class HoldingStateMachine(
             if (config.maxDailyEntries > 0 && entered.size >= config.maxDailyEntries) break
             if (candidate.tsCode in previousCodes) continue // 已持有，不重复入场
             val bar = candleFor(candidate.tsCode, tradeDate) ?: continue
-            val entryPrice = bar.getOpen().toDouble()
-            if (entryPrice <= 0.0) continue
+            val open = bar.getOpen().toDouble()
+            if (open <= 0.0) continue
             // 入场跳空过滤：开盘较信号日收盘跳空超限 → 放弃入场（跳空利润属于昨日持有者）
             if (config.entryGapMaxPct > 0.0 && candidate.signalDateClose > 0.0) {
-                val gap = entryPrice / candidate.signalDateClose - 1.0
+                val gap = open / candidate.signalDateClose - 1.0
                 if (gap > config.entryGapMaxPct + EPS) continue
             }
+            // 入场成交价：有 agent 买点 → LIMIT 触达语义（与回测 LimitOrderMatching 同口径）；否则开盘价无条件建仓。
+            // 未触达返回 null，当日放弃入场且不占名额，由后续交易日重新判定。
+            val entryPrice = resolveEntryPrice(candidate.entryLimitPrice, open, bar.getLow().toDouble())
+                ?: continue
             survivors += DailyHoldingState(
                 tradeDate = tradeDate,
                 tsCode = candidate.tsCode,
@@ -318,7 +332,30 @@ class HoldingStateMachine(
         return null
     }
 
+    /**
+     * 计算一只票当日的入场成交价。
+     *
+     * - [limit] 为 null：无 agent 买点，回退开盘价无条件建仓（历史口径）。
+     * - [limit] 有值：LIMIT 触达语义，与回测 [org.shiroumi.backtest.match.LimitOrderMatching] BUY 分支一字对齐：
+     *   当日最低价高于限价（超出 [TOUCH_EPS] 容差）→ 未触达，返回 null（当日放弃入场）；
+     *   触达则成交价 = min(开盘, 限价)，不突破限价约束。
+     *
+     * @return 入场成交价；未触达限价返回 null
+     */
+    private fun resolveEntryPrice(limit: Double?, open: Double, low: Double): Double? {
+        if (limit == null || limit <= 0.0) return open
+        if (low > limit + TOUCH_EPS) return null
+        return minOf(open, limit)
+    }
+
     private companion object {
         const val EPS = 1e-6
+
+        /**
+         * 限价触达判定容差，与回测 [org.shiroumi.backtest.match.LimitOrderMatching.TOUCH_EPS] 同值。
+         * QFQ 换算后的 low/limit 为 Float，`low == limit` 的精确触及会因二进制误差被误判为未触及；
+         * 1e-4 远小于最小报价单位 0.01，吸收换算误差而不放入真正未触及（差 ≥0.01）的单。
+         */
+        const val TOUCH_EPS = 1e-4
     }
 }

@@ -9,6 +9,7 @@ import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.jdbc.batchUpsert
 import org.jetbrains.exposed.v1.jdbc.deleteWhere
 import org.jetbrains.exposed.v1.jdbc.selectAll
+import org.jetbrains.exposed.v1.jdbc.update
 import org.shiroumi.database.stockDb
 import org.shiroumi.database.strategy.daily.table.DailyProfitPredictionSelectionTable
 import org.shiroumi.database.transaction
@@ -25,6 +26,8 @@ data class ProfitPredictionSelection(
     val selectionReason: String?,
     val modelId: String?,
     val candidateMode: String?,
+    /** Agent 量价分析买点限价（QFQ 口径）；null = 无买点，持仓推进回退开盘价无条件建仓。 */
+    val limitPrice: Double? = null,
 )
 
 object DailyProfitPredictionSelectionRepository {
@@ -65,9 +68,29 @@ object DailyProfitPredictionSelectionRepository {
                         ?.substringAfter(':', "")
                         ?.substringBefore(':')
                         ?.takeIf { it.isNotBlank() }
+                this[DailyProfitPredictionSelectionTable.limitPrice] = position.limitPrice
             }
         }
     }
+
+    /**
+     * 回填某 (target_date, ts_code) 的 agent 买点限价，只更新 selected=true 行的 limit_price 列，其余列不动。
+     *
+     * 用于选股入库后由 agent 异步分析产出买点再回填（与 [replaceForDate] 整行覆盖区分——
+     * 回填不能覆盖 model_score/selection_reason 等已落库事实）。限定 selected=true：买点只对入选票有意义，
+     * 且避免回填期间若该票被新一轮选股剔除（selected=false）时误更新旧行。
+     * 返回受影响行数（命中 selected 票为 1，未命中/已剔除为 0）。
+     */
+    fun updateLimitPrice(targetDate: LocalDate, tsCode: String, limitPrice: Double): Int =
+        stockDb.transaction(DailyProfitPredictionSelectionTable) {
+            DailyProfitPredictionSelectionTable.update({
+                (DailyProfitPredictionSelectionTable.targetDate eq targetDate) and
+                    (DailyProfitPredictionSelectionTable.tsCode eq tsCode) and
+                    (DailyProfitPredictionSelectionTable.selected eq true)
+            }) {
+                it[DailyProfitPredictionSelectionTable.limitPrice] = limitPrice
+            }
+        }
 
     fun findSelectionsByTradeDates(tradeDates: List<LocalDate>): Map<LocalDate, List<ProfitPredictionSelection>> {
         if (tradeDates.isEmpty()) return emptyMap()
@@ -139,6 +162,7 @@ object DailyProfitPredictionSelectionRepository {
             selectionReason = row[DailyProfitPredictionSelectionTable.selectionReason],
             modelId = row[DailyProfitPredictionSelectionTable.modelId],
             candidateMode = row[DailyProfitPredictionSelectionTable.candidateMode],
+            limitPrice = row[DailyProfitPredictionSelectionTable.limitPrice],
         )
 
     private fun parseSelectionReason(selectionReason: String?, prefix: String): String? =

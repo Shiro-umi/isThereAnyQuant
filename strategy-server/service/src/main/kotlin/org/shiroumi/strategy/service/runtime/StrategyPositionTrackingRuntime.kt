@@ -51,11 +51,12 @@ private const val MAX_TRACKING_SLOT_COUNT = 6
  * - 跨日流转边：持有主干 / 选股→次日买入 / 持有→清仓三类边及各自盈亏百分比
  *   （持有边=目标日当日涨跌、买入边=入场日开盘→收盘、卖出边=规则口径已实现收益）。
  *
- * 行情口径：DB 日 K 取前复权优先（[Candle.getOpen] 系访问器，锚 = 库内最新行 adj）；
- * 盘中实时 K 由注入方（IntradayStrategyRuntime）经 withRuntimeQfq 重锚到同一基准后传入，
- * 除权除息日盘中亦同基准。离场判决重建使用 raw 对 raw 基准（与生产推进的决策基准一致，
- * 见 [fillExitVerdict]）。价格止损（生产默认关闭）的判决重建不还原信号日最低价，
- * 无法命中 PRICE_STOP 的清仓节点按收盘口径回退展示且不带原因标签。
+ * 行情口径：统一前复权（QFQ），全部经 [Candle.getOpen] 系访问器（默认 useAdjusted=true，优先取 *_qfq 列，
+ * *_qfq=0 缺失时回退原始列）。与生产推进 advanceHoldings（findByTradeDate 原样 Candle，getLow 取 lowQfq）、
+ * agent 买点 limitPrice 同口径——三方都读 DB 同一份 *_qfq 列（同源、同锚），入场 LIMIT 触达/跳空过滤/离场判决与生产持仓完全一致。
+ * 盘中实时 K 由注入方（IntradayStrategyRuntime）经 withRuntimeQfq 重锚到同一基准后传入：实时 K 是当日 adj 锚，
+ * DB QFQ 序列锚在库内最新行 adj，不重锚则除权除息日盘中实时盈亏失真（adj 缺失的票丢弃，宁缺毋错）。
+ * 价格止损（生产默认关闭）的判决重建不还原信号日最低价，无法命中 PRICE_STOP 的清仓节点按收盘口径回退展示且不带原因标签。
  */
 class StrategyPositionTrackingRuntime(
     private val snapshotHub: LocalStrategySnapshotHub<JsonElement>,
@@ -129,8 +130,8 @@ class StrategyPositionTrackingRuntime(
      * [HoldingStateMachine]、同一入场候选来源（前一交易日选股 target_date=当日的 selected 票，
      * 行自带信号日）、同一入场优先级与跳空过滤，仅把书本起点换成 followStartDate 空仓逐日推进。
      *
-     * 行情口径与生产推进一致：推进判定与入场跳空过滤取 raw 基准（[asRawBar]，各自当日锚）；
-     * 展示盈亏仍由 [enrich] 按前复权口径计算。重放仅覆盖已确认交易日，不含盘中实时投影。
+     * 行情口径与生产推进一致：推进判定、入场 LIMIT 触达与跳空过滤均走前复权（QFQ）访问器（[barOf] 返回原始 DB Candle，
+     * getXxx 默认取 *_qfq 列），与 advanceHoldings 同源同锚；展示盈亏由 [enrich] 同口径计算。重放仅覆盖已确认交易日，不含盘中实时投影。
      *
      * @return null = 无审计窗口或 followStartDate 不在窗口交易日内。
      */
@@ -150,8 +151,11 @@ class StrategyPositionTrackingRuntime(
             ?.let { minOf(it, followStartDate) }
             ?: followStartDate
         val replayCandles = dataSource.loadCandles(candidateCodes, replayStart, tradeDates.last())
-        fun rawBar(tsCode: String, date: LocalDate): Candle? =
-            replayCandles[tsCode]?.get(date)?.asRawBar()
+        // 行情口径统一前复权（QFQ）：取价访问器 getOpen/getLow/getHigh/getPrice 默认 useAdjusted=true，
+        // 与生产推进 advanceHoldings（findByTradeDate 原样 Candle）、agent 买点 limitPrice 同口径——
+        // 三方都读 DB low_qfq 等列（同源、同锚），LIMIT 触达/跳空过滤/离场判决与生产持仓完全一致。
+        fun barOf(tsCode: String, date: LocalDate): Candle? =
+            replayCandles[tsCode]?.get(date)
 
         var book = emptyList<DailyHoldingState>()
         val replayedHoldings = mutableMapOf<LocalDate, List<DailyHoldingState>>()
@@ -174,7 +178,7 @@ class StrategyPositionTrackingRuntime(
                     emptyMap()
                 }
             val newEntries = candidates.map { selection ->
-                val signalBar = rawBar(selection.tsCode, selection.tradeDate)
+                val signalBar = barOf(selection.tsCode, selection.tradeDate)
                 HoldingStateMachine.EntryCandidate(
                     tsCode = selection.tsCode,
                     signalDateLow = signalBar?.getLow()?.toDouble() ?: 0.0,
@@ -182,6 +186,8 @@ class StrategyPositionTrackingRuntime(
                     // 入场优先级 = 模型分（与生产推进 PostMarketPreparationJob 同口径：模型分降序取前 maxDailyEntries 只）。
                     entryPriority = if (holdingStateMachine.entryCapEnabled) selection.modelScore else 0.0,
                     breakdownFlag = breakdownFlags[selection.tsCode] ?: false,
+                    // Agent 买点：与生产推进同源注入 selection.limitPrice，否则跟踪页 LIMIT 入场口径与生产持仓分叉。
+                    entryLimitPrice = selection.limitPrice,
                 )
             }
             val result = holdingStateMachine.advance(
@@ -189,7 +195,7 @@ class StrategyPositionTrackingRuntime(
                 previousHoldings = book,
                 newEntries = newEntries,
                 tradingDaysSince = dataSource::tradingDaysSince,
-                candleFor = ::rawBar,
+                candleFor = ::barOf,
             )
             book = result.holdings
             replayedHoldings[date] = result.holdings
@@ -417,8 +423,8 @@ class StrategyPositionTrackingRuntime(
     /**
      * 清仓节点：按生产持仓规则重建离场判决，填充离场原因与规则口径已实现收益。
      *
-     * 价格基准 = raw 对 raw：生产推进的 entry_price 与判决 bar 都是「各自当日锚」价（≈raw），
-     * 重建若用当前锚 QFQ，持仓窗口内发生除权时比值会与生产决策分叉（错标原因或丢失判决）。
+     * 价格基准 = 前复权（QFQ）：入场价 getOpen 与判决 bar 的 getHigh/getPrice/getLow 均走 *_qfq 列，
+     * 与生产推进 HoldingStateMachine.evaluateExit 读同一份 DB *_qfq 列（同源、同锚），判决比值不与生产分叉。
      */
     private fun fillExitVerdict(
         node: StrategyTrackingStockNode,
@@ -427,8 +433,8 @@ class StrategyPositionTrackingRuntime(
     ): StrategyTrackingStockNode {
         val buyDate = node.buyDate?.let(LocalDate::parse) ?: return node
         val series = candles[node.stockCode] ?: return node
-        val buyPrice = series[buyDate]?.open?.takeIf { it > 0f } ?: return node
-        val bar = series[exitDate]?.asRawBar() ?: return node
+        val buyPrice = series[buyDate]?.getOpen()?.takeIf { it > 0f } ?: return node
+        val bar = series[exitDate] ?: return node
         val daysSinceEntry = dataSource.tradingDaysSince(buyDate, exitDate)
         val verdict = holdingStateMachine.evaluateExit(
             holding = DailyHoldingState(
@@ -447,11 +453,6 @@ class StrategyPositionTrackingRuntime(
             exitPnl = ((verdict.exitPrice - buyPrice) / buyPrice * 100.0).toFloat(),
         )
     }
-
-    /** 清空 QFQ 字段使取价访问器回退 raw，与生产推进的当日锚基准一致。 */
-    @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
-    private fun Candle.asRawBar(): Candle =
-        copy(openQfq = 0f, highQfq = 0f, lowQfq = 0f, closeQfq = 0f)
 
     /**
      * 持有节点：按当前生效的持仓规则推导「下一个可执行卖点」。

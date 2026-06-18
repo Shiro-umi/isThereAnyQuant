@@ -518,6 +518,8 @@ object PostMarketPreparationJob {
                 signalDateClose = signalBar?.getPrice()?.toDouble() ?: 0.0,
                 entryPriority = if (entryCapEnabled) selection.modelScore else 0.0,
                 breakdownFlag = breakdownFlags[selection.tsCode] ?: false,
+                // Agent 量价买点：有值走 LIMIT 触达入场，缺值（未分析/失败）回退开盘价无条件建仓。
+                entryLimitPrice = selection.limitPrice,
             )
         }
 
