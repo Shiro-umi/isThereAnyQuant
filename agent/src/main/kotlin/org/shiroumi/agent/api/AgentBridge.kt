@@ -71,6 +71,8 @@ interface AgentBridge {
         val workDir: String = System.getProperty("user.dir"),
         val claudeCommand: String? = null,
         val isolated: Boolean = true,
+        /** 回测模式：true 时底层命令白名单切换为回测专用白名单（仅 as-of 历史取数 + bc）。默认 false。 */
+        val backtestMode: Boolean = false,
         val preferZedAcpAgent: Boolean = true,
         /** 注入到 claude 进程的 ANTHROPIC_API_KEY，空字符串时不覆盖环境变量 */
         val apiKey: String = "",

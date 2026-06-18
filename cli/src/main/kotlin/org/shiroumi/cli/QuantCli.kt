@@ -3,6 +3,7 @@ package org.shiroumi.cli
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.subcommands
 import org.shiroumi.cli.commands.BacktestCommand
+import org.shiroumi.cli.commands.BatchAgentDriverCommand
 import org.shiroumi.cli.commands.EmotionCommand
 import org.shiroumi.cli.commands.GetCandlesCommand
 import org.shiroumi.cli.commands.GetIntradayCommand
@@ -20,6 +21,7 @@ fun main(args: Array<String>) {
             GetCandlesCommand(),
             GetIntradayCommand(),
             BacktestCommand(),
+            BatchAgentDriverCommand(),
         )
         .main(args)
 }

@@ -112,6 +112,8 @@ class AcpClient(
         val claudeCommand: String? = null,
         val workDir: String = System.getProperty("user.dir"),
         val isolated: Boolean = true,
+        /** 回测模式：true 时命令白名单切换为回测专用白名单（仅 as-of 历史取数 + bc）。默认 false。 */
+        val backtestMode: Boolean = false,
         val preferZedAcpAgent: Boolean = true,
         val apiKey: String = "",
         val configDir: String? = null,
@@ -217,6 +219,7 @@ class AcpClient(
             autoApproveTools = true,
             stateManager = effectiveStateManager,
             workDir = config?.workDir ?: cwd,
+            backtestMode = config?.backtestMode ?: false,
         )
         clientOperations = operations
 
@@ -384,6 +387,8 @@ class QuantClientSessionOperations(
     private val autoApproveTools: Boolean = false,
     private val stateManager: StateManager? = null,
     workDir: String = System.getProperty("user.dir"),
+    /** 回测模式：true 时命令白名单切换为回测专用白名单（仅 as-of 历史取数 + bc）。 */
+    private val backtestMode: Boolean = false,
 ) : ClientSessionOperations, FileSystemOperations, TerminalOperations {
 
     private val sanitizer = org.shiroumi.agent.security.PathSanitizer(workDir)
@@ -504,7 +509,14 @@ class QuantClientSessionOperations(
             (listOf(command) + args).joinToString(" ")
         }
 
-        val validation = org.shiroumi.agent.security.CommandWhitelist.validate(fullCmdString)
+        // 命令白名单按运行模式切换：回测模式只放行 as-of 历史取数（get-candles / get-intraday-candles /
+        // get-limit-list）+ bc，不放行 market-emotion / 研报工具，且禁止 agent 追加日期类参数。
+        val whitelistMode = if (backtestMode) {
+            org.shiroumi.agent.security.CommandWhitelist.Mode.BACKTEST
+        } else {
+            org.shiroumi.agent.security.CommandWhitelist.Mode.LIVE
+        }
+        val validation = org.shiroumi.agent.security.CommandWhitelist.validate(fullCmdString, whitelistMode)
         if (validation is org.shiroumi.agent.security.CommandWhitelist.Result.Denied) {
             logger.warn { "[QuantOps] ⛔ BLOCKED command: ${fullCmdString.take(200)} reason=${validation.reason}" }
             return createDeniedTerminal(validation.reason)

@@ -1467,6 +1467,20 @@ fun runLocal(workspace: BacktestWorkspace, config: BacktestConfig): SimulationRe
 
 仅在 `--operating-point` 或 `--take-profit` 给定时启用上述两者；否则保持原有每日目标组合调仓行为。
 
+**Agent 买点价限价入场**（`AgentEntryPriceFeed` + 闸门 LIMIT 注入）：
+
+- `AgentEntryPriceFeed` 从独立目录 `{agentEntryDir}/{执行日}.json`（复用 `DecisionFileJson` 反序列化
+  `DecisionFile`）只取 `TradeIntentDecision`（side=BUY、hint=LIMIT、`limitPrice` 非空）的买点价，
+  构造 (执行日, 标的) → 买点价 映射；文件缺失返回空映射；解析失败抛原始异常；读取按执行日缓存。
+  该目录与引擎 `decisions/` 完全独立，不读写引擎决策目录。
+- 闸门构造器注入 `agentEntryPrices` 后，选中标的若有 agent 买点价 → 输出 hint=LIMIT + `limitPrice`=买点价，
+  T+1 开盘按限价撮合（`LimitOrderMatching`：当日最低价触达买点价才成交，成交价不突破买点价）；
+  无买点价 → 放弃该标的入场（不回退 OPEN，不占名额，名额让给次优有价候选）。
+- `OrderSizer` BUY 分支对 LIMIT 单用买点价折股并作为订单限价；`requiredCash` 与 `scaleBuysIfNeeded`
+  按买点价保守估现金，撮合成交价 ≤ 买点价 → 永不超支。
+- 防未来函数口径：买点价是 agent 在信号日 T 盘后一次性产出快照后锁定，回测执行日 T+1 直接复用，
+  不在盘中重算，因此不引入未来函数。`agentEntryPrices`=null 时维持原 OPEN 入场行为。
+
 **CLI 选项**：
 
 ```bash
@@ -1494,6 +1508,7 @@ fun runLocal(workspace: BacktestWorkspace, config: BacktestConfig): SimulationRe
 | `--entry-gap` | 0.03 | 入场跳空上限（非正数关闭） |
 | `--max-daily-entries` | 1 | 每日新入场上限（0 不限 = V3 全入场） |
 | `--profit-ladder` | `1:0.025,2:0.025` | 保盈阶梯 `day:level,...`（空串关闭） |
+| `--agent-entry-prices` | 未设 | Agent 买点价目录（独立于 `decisions/`）：读 `{dir}/{执行日}.json` 中 BUY/LIMIT 决策的 `limitPrice`，闸门据此按限价买点入场（T+1 开盘限价撮合）；不设则按开盘价入场 |
 
 **仓位口径边界**：生产持仓状态机是纯持仓跟踪器（不含现金/数量/权重），不提供 sizing 真值；
 闸门只做入场过滤，选中标的沿用选股决策原始权重，由 `OrderSizer` 折股。

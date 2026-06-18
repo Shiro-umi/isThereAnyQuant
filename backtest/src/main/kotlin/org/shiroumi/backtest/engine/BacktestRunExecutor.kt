@@ -4,6 +4,7 @@ import java.nio.file.Path
 import java.util.UUID
 import kotlinx.datetime.LocalDate
 import org.shiroumi.backtest.config.BacktestConfig
+import org.shiroumi.backtest.feed.AgentEntryPriceFeed
 import org.shiroumi.backtest.feed.DbBackedDecisionFeed
 import org.shiroumi.backtest.feed.DecisionFileExporter
 import org.shiroumi.backtest.feed.ExportResult
@@ -72,6 +73,11 @@ class BacktestRunExecutor(
         entryOrdering: EntryOrdering = EntryOrdering.VOLATILITY,
         /** 入场仓位是否按当日实际入场只数等权（各 1/N）。仅 fullPositionPerEntry=false 时生效。 */
         equalWeightAcrossEntries: Boolean = false,
+        /**
+         * Agent 买点价喂入。非空时入场闸门按 agent 限价买点（hint=LIMIT + limitPrice）下单，
+         * T+1 开盘按限价撮合；为 null 时保持 OPEN 入场。仅入场闸门生效时有意义。
+         */
+        agentEntryPriceFeed: AgentEntryPriceFeed? = null,
     ): LocalBacktestResult {
         val dates = calendar.tradingDays(config.startDate, config.endDate)
 
@@ -131,6 +137,7 @@ class BacktestRunExecutor(
                 fullPositionPerEntry = fullPositionPerEntry,
                 entryOrdering = entryOrdering,
                 equalWeightAcrossEntries = equalWeightAcrossEntries,
+                agentEntryPrices = agentEntryPriceFeed,
             )
         }
         val scheduler = BacktestScheduler(

@@ -65,6 +65,9 @@ object AgentWebSocketService {
         val baseUrl: String?,
         val provider: String,
         val apiKeyFingerprint: String,
+        // 回测模式纳入运行时身份：回测会话与实盘会话即便其他配置相同，也必须落在不同进程，
+        // 否则会复用对方进程里已写死的 CLAUDE.md / 命令白名单 / skill 软链，导致取数口径与隔离策略串味。
+        val backtestMode: Boolean,
     )
 
     private data class AgentRuntimeSession(
@@ -100,14 +103,16 @@ object AgentWebSocketService {
         val tsCode: String? = null,
         val stockName: String? = null,
         val analysisType: String? = null,
-        val tradeDate: LocalDate? = null
+        val tradeDate: LocalDate? = null,
+        // 回测模式标记随上下文流转，终态落库逻辑据此跳过持久化，保证回测产物只进 out/decisions，不入库。
+        val backtestMode: Boolean = false,
     )
 
     private val sessionContexts = ConcurrentHashMap<String, SessionContext>()
     private val lastSessionStatus = ConcurrentHashMap<String, AgentStatus>()
     private val promptContextQueue = ConcurrentHashMap<String, ArrayDeque<SessionContext>>()
 
-    private data class CliToolSpec(
+    internal data class CliToolSpec(
         val toolName: String,
         val installRelativePath: String,
         val gradleTask: String
@@ -116,12 +121,15 @@ object AgentWebSocketService {
     fun createSession(
         webSocketSession: DefaultWebSocketServerSession,
         workDir: String?,
-        userId: UUID
+        userId: UUID,
+        // 回测模式开关：true 时强制隔离、skill 走回测源、CLAUDE.md 写回测版、CLI 指向 *-asof 产物、
+        // 写 .claude/settings.json 禁联网、终态不落库。默认 false 维持实盘行为，老调用方零改动。
+        backtestMode: Boolean = false,
     ) {
         val defaultWorkDir = "${System.getProperty("user.home")}/.quant_agents/${userId.toString().take(8)}"
         val effectiveWorkDir = workDir ?: defaultWorkDir
         val sessionId = java.util.UUID.randomUUID().toString()
-        sessionContexts[sessionId] = SessionContext(userId = userId)
+        sessionContexts[sessionId] = SessionContext(userId = userId, backtestMode = backtestMode)
 
         scope.launch {
             try {
@@ -152,7 +160,13 @@ object AgentWebSocketService {
                 val workDirFile = File(resolvedWorkDir).absoluteFile
                 resolvedWorkDir = workDirFile.absolutePath
 
-                val isolated = dbConfig?.isolated ?: agentConfig.isolated
+                // 回测模式强制隔离：无论 db / 全局配置如何，回测会话一律 isolated=true，
+                // 覆盖 dbConfig.isolated，确保只加载 workDir/.claude 下的隔离配置与禁联网 settings。
+                val isolated = if (backtestMode) true else (dbConfig?.isolated ?: agentConfig.isolated)
+                // fail-fast 不变式：回测模式必须隔离，违反即抛出，杜绝隔离被意外关闭后 agent 读到全局配置或联网。
+                check(!backtestMode || isolated) {
+                    "backtestMode 必须隔离运行：isolated 被解析为 false，回测会话拒绝启动"
+                }
                 val effectiveModel = AgentModelConfigResolver.resolve(
                     quantConfig = ConfigManager.getConfig(),
                     userConfig = dbConfig
@@ -165,17 +179,20 @@ object AgentWebSocketService {
                     modelId = effectiveModel.modelId,
                     baseUrl = effectiveModel.baseUrl,
                     provider = effectiveModel.provider,
-                    apiKey = effectiveModel.apiKey
+                    apiKey = effectiveModel.apiKey,
+                    backtestMode = backtestMode
                 )
 
                 // --- 动态技能沙盒 (Skill Sandbox Provisioning) ---
                 if (isolated) {
                     try {
                         val projectRoot = File(System.getProperty("quant.project.root") ?: System.getProperty("user.dir"))
-                        val baseSkillsDir = listOf(
-                            File(projectRoot, "private/agent-analysis-skills"),
-                            File(projectRoot, "agent/analysis-skills")
-                        ).firstOrNull { it.isDirectory }
+                        // skill 来源按运行模式二选一（纯逻辑在 BacktestAgentProvisioning）：
+                        //  - 回测模式：private/agent-backtest-skills（回测衍生版，禁实时取数/禁报告/只产买点价 JSON）
+                        //  - 实盘模式：private/agent-analysis-skills（生产分析 skill），缺失时回退 agent/analysis-skills
+                        // 清空重建逻辑保留不变，仅来源目录随模式切换，杜绝两套 skill 串味。
+                        val skillSourceCandidates = BacktestAgentProvisioning.skillSourceCandidates(projectRoot, backtestMode)
+                        val baseSkillsDir = skillSourceCandidates.firstOrNull { it.isDirectory }
                         val userSkillsDir = File(workDirFile, ".claude/skills")
                         userSkillsDir.mkdirs() // 确保目录存在
 
@@ -205,8 +222,8 @@ object AgentWebSocketService {
                             )
                         } else {
                             logger.warning(
-                                "[AgentWebSocketService] No agent analysis skill directory found; " +
-                                    "expected private/agent-analysis-skills or agent/analysis-skills"
+                                "[AgentWebSocketService] No agent skill directory found (backtestMode=$backtestMode); " +
+                                    "expected one of: ${skillSourceCandidates.joinToString(", ") { it.path }}"
                             )
                         }
 
@@ -228,6 +245,18 @@ object AgentWebSocketService {
 
                         // Write CLAUDE.md to override system prompt and hide native arbitrary tools.
                         val claudeMdFile = File(resolvedWorkDir, "CLAUDE.md")
+                        if (backtestMode) {
+                            // 回测版 CLAUDE.md：禁实时取数、取数走 *-asof（宿主注入 --as-of，agent 不写日期）、
+                            // 唯一产物是 out/decisions/{执行日}.json 的买点价 JSON、不写任何 Markdown 报告、不入库、
+                            // 每只分析的股票都必须给出主推买点入场价（不允许"无买点"）。
+                            claudeMdFile.writeText(BacktestAgentProvisioning.backtestClaudeMd(skillIndexMarkdown))
+                            // 回测模式写 .claude/settings.json：用 permissions.deny 在应用层禁断联网与外部抓取，
+                            // 与 isolated 的 --setting-sources project 配合生效。
+                            val settingsFile = BacktestAgentProvisioning.writeBacktestSettingsJson(resolvedWorkDir)
+                            logger.info(
+                                "[AgentWebSocketService] Wrote backtest permissions.deny settings.json at ${settingsFile.absolutePath}"
+                            )
+                        } else {
                         claudeMdFile.writeText(
                             """
                             # 角色设定
@@ -559,6 +588,7 @@ object AgentWebSocketService {
                             2. 结果导向：在被要求查询数据或执行计算动作时，你**必须**第一步直接且静默地调用相关的能力工具。只有在拿到底层工具的返回结果后，再组织并输出唯一一次完整专业的结论。
                         """.trimIndent()
                         )
+                        }
 
                         // Provision CLI tools with correct server port
                         val projectDir = System.getProperty("quant.project.root")
@@ -566,38 +596,12 @@ object AgentWebSocketService {
                         val serverPort = ConfigManager.load().let { cfg ->
                             cfg.server.port
                         }
-                        val tools = listOf(
-                            CliToolSpec(
-                                toolName = "get-candles",
-                                installRelativePath = "tools/get-candles/build/install/get-candles/bin/get-candles",
-                                gradleTask = ":tools:get-candles:installDist"
-                            ),
-                            CliToolSpec(
-                                toolName = "get-intraday-candles",
-                                installRelativePath = "tools/get-intraday-candles/build/install/get-intraday-candles/bin/get-intraday-candles",
-                                gradleTask = ":tools:get-intraday-candles:installDist"
-                            ),
-                            CliToolSpec(
-                                toolName = "get-research-reports",
-                                installRelativePath = "tools/get-research-reports/build/install/get-research-reports/bin/get-research-reports",
-                                gradleTask = ":tools:get-research-reports:installDist"
-                            ),
-                            CliToolSpec(
-                                toolName = "get-industry-research-reports",
-                                installRelativePath = "tools/get-industry-research-reports/build/install/get-industry-research-reports/bin/get-industry-research-reports",
-                                gradleTask = ":tools:get-industry-research-reports:installDist"
-                            ),
-                            CliToolSpec(
-                                toolName = "get-limit-list",
-                                installRelativePath = "tools/get-limit-list/build/install/get-limit-list/bin/get-limit-list",
-                                gradleTask = ":tools:get-limit-list:installDist"
-                            ),
-                            CliToolSpec(
-                                toolName = "market-emotion",
-                                installRelativePath = "tools/market-emotion/build/install/market-emotion/bin/market-emotion",
-                                gradleTask = ":tools:market-emotion:installDist"
-                            )
-                        )
+                        // CLI 工具集按模式选取（纯逻辑在 BacktestAgentProvisioning）：
+                        //  - 回测模式：只挂 get-candles / get-intraday-candles / get-limit-list，且 toolName 保持不变，
+                        //    installRelativePath/gradleTask 指向 *-asof 产物（宿主 wrapper 注入 --as-of，agent 无感知）；
+                        //    不挂 market-emotion（无历史快照）、不挂研报工具。
+                        //  - 实盘模式：维持原有 6 个裸工具 spec 不变。
+                        val tools = BacktestAgentProvisioning.cliTools(backtestMode)
 
                         tools.forEach { spec ->
                             val toolSource = File(projectDir, spec.installRelativePath)
@@ -859,7 +863,9 @@ object AgentWebSocketService {
             modelId = modelId,
             baseUrl = baseUrl,
             provider = provider,
-            apiKey = apiKey
+            apiKey = apiKey,
+            // 漂移检测沿用当前运行时的回测标记：模型/Key 改动不会改变运行模式。
+            backtestMode = runtime.configKey.backtestMode
         )
         return runtime.configKey != desired
     }
@@ -873,6 +879,7 @@ object AgentWebSocketService {
         baseUrl: String?,
         provider: String,
         apiKey: String,
+        backtestMode: Boolean,
     ): AgentRuntimeConfigKey = AgentRuntimeConfigKey(
         workDir = workDir,
         isolated = isolated,
@@ -881,7 +888,8 @@ object AgentWebSocketService {
         modelId = modelId,
         baseUrl = baseUrl,
         provider = provider,
-        apiKeyFingerprint = apiKeyFingerprint(apiKey)
+        apiKeyFingerprint = apiKeyFingerprint(apiKey),
+        backtestMode = backtestMode
     )
 
     private fun apiKeyFingerprint(apiKey: String): String {
@@ -1503,6 +1511,13 @@ object AgentWebSocketService {
         ) {
             val ctx = promptContextQueue[sessionId]?.pollFirst() ?: sessionContexts[sessionId]
             ctx?.let {
+                // 回测模式终态不入库：回测产物只写 out/decisions/{执行日}.json，分析结果表只存实盘报告。
+                if (!BacktestAgentProvisioning.shouldPersistOnCompleted(it.backtestMode)) {
+                    logger.info(
+                        "[AgentWebSocketService] backtestMode COMPLETED, skip persistence sessionId=$sessionId"
+                    )
+                    return@let
+                }
                 try {
                     val title = buildAnalysisTitle(it, state.output)
                     val now = kotlin.time.Clock.System.now().toLocalDateTime(TimeZone.UTC)

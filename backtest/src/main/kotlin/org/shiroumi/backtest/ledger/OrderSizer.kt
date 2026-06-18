@@ -56,7 +56,16 @@ class OrderSizer(
                     blocked += blockedOrder(intent, ctx, BlockReason.ALREADY_HOLDING, "${intent.tsCode} 已持仓 $currentQty 股，禁止加仓")
                 }
                 currentQty == 0L && intent.targetWeight > 0.0 -> {
-                    val price = ctx.bar(intent.tsCode)?.open?.toDouble() ?: continue
+                    // 买入定价口径：
+                    //  - LIMIT（agent 买点价）：用 intent.limitPrice 折股并作为订单限价。
+                    //    撮合成交价 <= 限价（LimitOrderMatching 保证），用限价保守估现金 → 永不超支。
+                    //  - 否则（OPEN/VWAP/CLOSE 市价提示）：用次开盘价折股，作为撮合参考价。
+                    val price = if (intent.hint == ExecutionHint.LIMIT && intent.limitPrice != null) {
+                        intent.limitPrice
+                    } else {
+                        ctx.bar(intent.tsCode)?.open?.toDouble()
+                    } ?: continue
+                    if (price <= 0.0) continue
                     val quantity = buyQuantity(ledger.equity(priceMap(ctx)), intent.targetWeight, price)
                     if (quantity >= LOT) {
                         drafts += DraftOrder(

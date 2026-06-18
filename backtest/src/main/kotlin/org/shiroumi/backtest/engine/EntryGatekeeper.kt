@@ -6,6 +6,7 @@ import kotlinx.datetime.plus
 import org.shiroumi.backtest.domain.ExecutionHint
 import org.shiroumi.backtest.domain.Side
 import org.shiroumi.backtest.domain.StrategyDecision
+import org.shiroumi.backtest.feed.AgentEntryPriceFeed
 
 /**
  * 入场闸门——逐分支复刻生产持仓状态机 `advance` 的入场逻辑。
@@ -56,6 +57,14 @@ class EntryGatekeeper(
      * - true：当日入场 N 只时各分配 1/N 仓位（与 maxDailyEntries 配合，如每日 3 只各 1/3）。仅 fullPositionPerEntry=false 时生效。
      */
     private val equalWeightAcrossEntries: Boolean = false,
+    /**
+     * Agent 买点价喂入。非空时入场口径切换为 agent 限价买点：
+     * 选中标的若在该执行日有 agent 买点价 → 输出 hint=LIMIT + limitPrice=agentPrice（T+1 开盘按限价撮合）；
+     * 若无买点价 → 放弃该标的入场（不回退 OPEN，记录原因），由 OrderSizer 不生成订单。
+     * 用户口径下 agent 对每只选出股票都给价（覆盖率 100%），无价分支仅作防御。
+     * 为 null 时保持原 hint=OPEN 行为不变。
+     */
+    private val agentEntryPrices: AgentEntryPriceFeed? = null,
 ) {
 
     /**
@@ -114,8 +123,9 @@ class EntryGatekeeper(
                 .map { it.first }
         }
 
-        // 先筛出当日实际入场候选（已持有/开盘无效/跳空均跳过且不占名额），再统一赋权重（等权需先知道 N）。
-        val accepted = mutableListOf<EntryCandidate>()
+        // 先筛出当日实际入场候选（已持有/开盘无效/跳空/无 agent 买点价均跳过且不占名额），
+        // 再统一赋权重（等权需先知道 N）。每个候选携带其 agent 买点价（无喂入时为 null）。
+        val accepted = mutableListOf<AcceptedEntry>()
         for (candidate in ordered) {
             if (accepted.size >= config.maxDailyEntries) break
             if (candidate.tsCode in heldTsCodes) continue // 已持有，不重复入场
@@ -130,12 +140,22 @@ class EntryGatekeeper(
                     if (gap > config.entryGapMaxPct + EPS) continue
                 }
             }
-            accepted += candidate
+            // Agent 买点价口径：喂入非空时按执行日逐只解析买点价。无价（或非正价）→ 放弃该标的
+            // 入场（不回退 OPEN），且不占名额，名额自然让给次优有价候选。
+            // 用户口径下 agent 对每只票都给价（覆盖率 100%），无价分支仅作防御，避免凭空回退 OPEN 引入未来函数偏差。
+            val agentPrice = if (agentEntryPrices != null) {
+                val price = agentEntryPrices.entryPrice(date, candidate.tsCode)
+                if (price == null || price <= 0.0) continue
+                price
+            } else {
+                null // 无 agent 喂入：保持原 OPEN 入场行为
+            }
+            accepted += AcceptedEntry(candidate = candidate, agentPrice = agentPrice)
         }
 
-        // 等权口径：当日实际入场 N 只各分配 1/N（仅 fullPositionPerEntry=false 时生效）。
+        // 等权口径：基于「最终入场只数」各分配 1/N（无价票已被剔除，不再占名额）。
         val equalWeight = if (equalWeightAcrossEntries && accepted.isNotEmpty()) 1.0 / accepted.size else null
-        val entries = accepted.map { candidate ->
+        val entries = accepted.map { (candidate, agentPrice) ->
             StrategyDecision.TradeIntentDecision(
                 effectiveDate = date,
                 reason = "入场闸门(maxDailyEntries=${config.maxDailyEntries}): ${candidate.reason}",
@@ -148,7 +168,9 @@ class EntryGatekeeper(
                     equalWeight != null -> equalWeight
                     else -> candidate.weight
                 },
-                hint = ExecutionHint.OPEN,
+                // 有 agent 买点价 → LIMIT 限价入场（T+1 开盘按限价撮合）；否则沿用 OPEN。
+                hint = if (agentPrice != null) ExecutionHint.LIMIT else ExecutionHint.OPEN,
+                limitPrice = agentPrice,
             )
         }
 
@@ -165,6 +187,12 @@ class EntryGatekeeper(
         val tsCode: String,
         val reason: String,
         val weight: Double?,
+    )
+
+    /** 已通过入场闸门的候选 + 其 agent 买点价（无 agent 喂入时为 null，按 OPEN 入场）。 */
+    private data class AcceptedEntry(
+        val candidate: EntryCandidate,
+        val agentPrice: Double?,
     )
 
     private companion object {

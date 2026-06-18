@@ -45,16 +45,24 @@ object ClosePriceMatching : MatchingPolicy {
  * 成交价不突破限价约束，滑点只在限价允许范围内生效。
  */
 object LimitOrderMatching : MatchingPolicy {
+    /**
+     * 价格触达判定容差。行情价为分（0.01）级，limit 与 low/high 经 QFQ 换算后是 Float，
+     * `low == limit` 的精确触及会因 Float 二进制表示误差被误判为「未触及」（如 low_qfq=7.01 的 Float
+     * 实际略大于 7.01 → 7.01>7.01 成立 → 漏单）。用 1e-4（远小于最小报价单位 0.01）吸收换算误差，
+     * 不会把真正未触及（差 ≥0.01）的单纳入成交。
+     */
+    private const val TOUCH_EPS = 1e-4
+
     override fun matchPrice(order: ValidatedOrder, bar: Candle, slippage: SlippageModel): Double? {
         val limit = order.limitPrice
         return when (order.side) {
             Side.BUY -> {
-                if (bar.low.toDouble() > limit) return null
+                if (bar.low.toDouble() > limit + TOUCH_EPS) return null
                 val reference = minOf(bar.open.toDouble(), limit)
                 minOf(slippage.apply(reference, order.side), limit)
             }
             Side.SELL -> {
-                if (bar.high.toDouble() < limit) return null
+                if (bar.high.toDouble() < limit - TOUCH_EPS) return null
                 val reference = maxOf(bar.open.toDouble(), limit)
                 maxOf(slippage.apply(reference, order.side), limit)
             }

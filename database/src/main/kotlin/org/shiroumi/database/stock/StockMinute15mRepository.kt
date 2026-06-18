@@ -108,6 +108,46 @@ object StockMinute15mRepository {
                 }
         }
 
+    /**
+     * 历史取数：读取指定股票截止到信号日收盘时刻的最近 [limit] 根 15 分钟 K 线。
+     *
+     * 防未来函数口径：上界 [tradeTimeUpperBoundInclusive] 是「信号日 T 当日收盘」时间戳
+     * （形如 "2024-01-02 15:00:00"）。所有返回行的 `trade_time` 不超过该上界，
+     * 因此不会泄漏信号日盘后或 T+1 的任何分钟数据。
+     *
+     * `trade_time` 是 ISO 风格定长字符串，字典序即时间序，可直接用 `lessEq` 截断。
+     * 取最近 [limit] 根后按时间正序返回，与现有 K 线展示口径一致。
+     */
+    fun findRecentForCodeAsOf(
+        tsCode: String,
+        tradeTimeUpperBoundInclusive: String,
+        limit: Int,
+    ): List<Minute15mRow> =
+        stockDb.transaction(StockMinute15mTable, log = false) {
+            StockMinute15mTable.selectAll()
+                .where {
+                    (StockMinute15mTable.tsCode eq tsCode) and
+                        (StockMinute15mTable.tradeTime lessEq tradeTimeUpperBoundInclusive)
+                }
+                .orderBy(StockMinute15mTable.tradeTime to org.jetbrains.exposed.v1.core.SortOrder.DESC)
+                .limit(limit)
+                .map {
+                    Minute15mRow(
+                        tsCode = it[StockMinute15mTable.tsCode],
+                        tradeDate = it[StockMinute15mTable.tradeDate],
+                        tradeTime = it[StockMinute15mTable.tradeTime],
+                        open = it[StockMinute15mTable.open],
+                        high = it[StockMinute15mTable.high],
+                        low = it[StockMinute15mTable.low],
+                        close = it[StockMinute15mTable.close],
+                        vol = it[StockMinute15mTable.vol],
+                        amount = it[StockMinute15mTable.amount],
+                        updatedAtMillis = it[StockMinute15mTable.updatedAtMillis],
+                    )
+                }
+                .reversed()
+        }
+
     fun streamDailyStructurePage(
         startDate: LocalDate,
         endDate: LocalDate,

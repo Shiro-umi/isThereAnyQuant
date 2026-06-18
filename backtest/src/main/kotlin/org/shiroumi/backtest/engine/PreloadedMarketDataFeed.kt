@@ -53,7 +53,9 @@ class PreloadedMarketDataFeed private constructor(
                 ?.let { openDates.getOrElse((it - 2).coerceAtLeast(0)) { from } }
                 ?: from
 
+            // 加载后立即收敛到 QFQ 坐标系（与 agent 买点、asof 路由同标系），杜绝送转标的的 low 列基差漏单。
             val allCandles = StockDailyCandleRepository.findByDateRange(candleFrom, to)
+                .mapValues { (_, candles) -> candles.toQfqBasis() }
 
             // 股票基础信息
             val stockProfiles = StockBasicRepository.findBacktestProfiles()

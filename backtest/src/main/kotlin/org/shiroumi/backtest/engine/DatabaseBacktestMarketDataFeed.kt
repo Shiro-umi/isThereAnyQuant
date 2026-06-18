@@ -11,7 +11,10 @@ import org.shiroumi.database.stock.StockDailyCandleRepository
 /**
  * stock_db 日线事实到回测执行行情的只读适配器。
  *
- * 回测执行口径固定 RAW，因此这里直接返回 `stock_daily_data` 原始 OHLCV；
+ * 回测执行口径固定 QFQ（前复权），与上游 agent 买点价、asof 历史取数路由（InternalCliAsofRoute）
+ * 同一价格坐标系：agent 在 QFQ K 线上推演买点限价，撮合也必须用 QFQ OHLC 判 `low<=limit`，
+ * 否则除权/价差标的的 RAW low 系统性高于 QFQ 限价，导致限价永不触发的系统性漏单。
+ * QFQ 字段缺失（=0）时回退 RAW，与 asof 路由 `if (lowQfq>0) lowQfq else low` 完全同口径。
  * 策略信号口径仍由策略侧确认表决定，不在此处重新计算。
  */
 class DatabaseBacktestMarketDataFeed(
@@ -70,8 +73,11 @@ class DatabaseBacktestMarketDataFeed(
         )
     }
 
+    // 加载后统一收敛到 QFQ 坐标系（共享 [toQfqBasis]），与 agent 买点、asof 路由同标系。
     private fun candlesFor(date: LocalDate): List<model.Candle> =
-        candlesByDate.getOrPut(date) { StockDailyCandleRepository.findByTradeDate(date) }
+        candlesByDate.getOrPut(date) {
+            StockDailyCandleRepository.findByTradeDate(date).toQfqBasis()
+        }
 
     private fun statusesFor(date: LocalDate): BacktestStockStatuses =
         statusesByDate.getOrPut(date) {

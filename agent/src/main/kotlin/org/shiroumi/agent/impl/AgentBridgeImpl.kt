@@ -62,6 +62,7 @@ class AgentBridgeImpl : AgentBridge {
                     claudeCommand = config.claudeCommand,
                     workDir = config.workDir,
                     isolated = config.isolated,
+                    backtestMode = config.backtestMode,
                     preferZedAcpAgent = config.preferZedAcpAgent,
                     apiKey = config.apiKey,
                     configDir = config.configDir,

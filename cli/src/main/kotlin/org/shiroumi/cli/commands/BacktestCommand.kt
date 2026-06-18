@@ -22,6 +22,7 @@ import org.shiroumi.backtest.config.SlippageConfig
 import org.shiroumi.backtest.domain.Money
 import org.shiroumi.backtest.engine.BacktestRunExecutor
 import org.shiroumi.backtest.engine.EntryOrdering
+import org.shiroumi.backtest.feed.AgentEntryPriceFeed
 import org.shiroumi.backtest.engine.ExitRulesConfig
 import org.shiroumi.backtest.engine.LocalBacktestResult
 import org.shiroumi.backtest.feed.ExportResult
@@ -157,6 +158,11 @@ class BacktestRunCommand : CliktCommand(
         "--equal-weight-entries",
         help = "入场仓位按当日实际入场只数等权（各 1/N，如每日 3 只各 1/3）；仅 --position-sizing equal 时生效。",
     ).flag(default = false)
+    private val agentEntryPricesDir by option(
+        "--agent-entry-prices",
+        help = "Agent 买点价目录（独立于引擎 decisions/）：读取 {dir}/{执行日}.json 中 BUY/LIMIT 决策的 limitPrice，" +
+            "入场闸门据此按限价买点（T+1 开盘按限价撮合）入场；不指定则按开盘价入场。仅启用入场闸门时生效。",
+    ).path()
 
     override fun run() {
         ConfigManager.load()
@@ -186,6 +192,10 @@ class BacktestRunCommand : CliktCommand(
                 "T+1 禁售${if (exitRules.t1NoSell) "开启" else "关闭"} / " +
                 "仓位口径 ${if (positionSizing) "单票满仓" else "等权切片"}")
         }
+        val agentEntryPriceFeed = agentEntryPricesDir?.let { AgentEntryPriceFeed(it) }
+        if (agentEntryPriceFeed != null) {
+            echo("       Agent 买点价目录：$agentEntryPricesDir（按 BUY/LIMIT limitPrice 限价入场）")
+        }
         val result = executor.runLocal(
             workspace = workspace,
             config = config,
@@ -196,6 +206,7 @@ class BacktestRunCommand : CliktCommand(
             fullPositionPerEntry = positionSizing,
             entryOrdering = entryOrder,
             equalWeightAcrossEntries = equalWeightEntries,
+            agentEntryPriceFeed = agentEntryPriceFeed,
         )
         if (!noExport) {
             echo("       决策导出：${result.export.writtenDays}/${result.export.totalDays} 个交易日，" +

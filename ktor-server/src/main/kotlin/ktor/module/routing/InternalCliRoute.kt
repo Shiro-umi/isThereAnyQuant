@@ -489,6 +489,9 @@ fun Route.internalCliRoutes() {
                 call.respondText("错误: ${e.message}", status = HttpStatusCode.InternalServerError)
             }
         }
+
+        // L0 地基层：历史取数 endpoint（回测专用，强制 as_of 截断，绝不读 live 快照）。
+        internalCliAsofRoutes()
     }
 }
 
