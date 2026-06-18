@@ -20,25 +20,20 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.minus
 import kotlinx.serialization.encodeToString
-import org.shiroumi.agent.api.AgentBridge
-import org.shiroumi.agent.impl.AgentBridgeImpl
 import org.shiroumi.backtest.domain.ExecutionHint
 import org.shiroumi.backtest.domain.Side
 import org.shiroumi.backtest.domain.StrategyDecision
 import org.shiroumi.backtest.feed.DecisionFile
 import org.shiroumi.backtest.feed.DecisionFileJson
-import org.shiroumi.cli.batch.BatchAgentProvisioning
+import org.shiroumi.cli.batch.AgentEntryPriceAnalyzer
 import org.shiroumi.config.AgentModelResolution
 import org.shiroumi.config.ConfigManager
 import org.shiroumi.database.common.repository.TradingCalendarRepository
 import org.shiroumi.database.strategy.daily.repository.DailyProfitPredictionSelectionRepository
-import org.shiroumi.database.strategy.daily.repository.ProfitPredictionSelection
-import model.ws.AgentStatus
 
 /**
  * `./cli batch-agent-driver` —— 并发驱动回测 agent 为每日选股逐只产出买点价 JSON。
@@ -192,7 +187,7 @@ class BatchAgentDriverCommand : CliktCommand(
         // effectiveDate=target_date；EntryGatekeeper / AgentEntryPriceFeed 也按同一 target_date 读
         // {date}.json。因此 driver 产物文件名必须 = target_date，不能再 +1 个交易日，否则与回测引擎
         // 决策日期键错位，LIMIT 回测读不到买点 → 全放弃入场。as-of 取到 signalDate 当天为止的历史。
-        val tasks: List<StockTask> = signalDates.flatMap { signalDate ->
+        val tasks: List<AgentEntryPriceAnalyzer.StockTask> = signalDates.flatMap { signalDate ->
             val topPicks = selectionsBySignalDate[signalDate].orEmpty().take(topN)
             if (topPicks.isEmpty()) {
                 echo("[batch] 信号日 $signalDate 无已选股票，跳过")
@@ -201,7 +196,7 @@ class BatchAgentDriverCommand : CliktCommand(
                 val done = existingByDate[signalDate].orEmpty()
                 topPicks
                     .filter { it.tsCode !in done }
-                    .map { StockTask(signalDate = signalDate, executionDate = signalDate, tsCode = it.tsCode) }
+                    .map { AgentEntryPriceAnalyzer.StockTask(signalDate = signalDate, executionDate = signalDate, tsCode = it.tsCode) }
             }
         }
         echo(
@@ -212,18 +207,20 @@ class BatchAgentDriverCommand : CliktCommand(
 
         // 全局并发池：单只股票 = 一个任务 = 一个独立 workDir + 独立 bridge + 独立 ACP 进程。
         // 一个全局信号量统一限流到 effectiveParallelism，跨信号日真正并行，峰值 = 核心数个 ACP 进程。
-        val results: List<StockResult> = runBlocking {
+        val results: List<AgentEntryPriceAnalyzer.StockResult> = runBlocking {
             val gate = Semaphore(effectiveParallelism)
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
             tasks.map { task ->
                 scope.async {
                     gate.withPermit {
-                        analyzeOneStock(
+                        AgentEntryPriceAnalyzer.analyzeOneStock(
                             projectRoot = projectRoot,
                             workspaceBase = workspaceBase,
                             serverPort = serverPort,
                             model = model,
                             task = task,
+                            perStockTimeoutSec = perStockTimeoutSec,
+                            onLog = { echo("[batch]   $it") },
                         )
                     }
                 }
@@ -260,13 +257,6 @@ class BatchAgentDriverCommand : CliktCommand(
         return result
     }
 
-    /** 全局并发任务单元：单只股票。signalDate=executionDate=库 target_date。 */
-    private class StockTask(
-        val signalDate: LocalDate,
-        val executionDate: LocalDate,
-        val tsCode: String,
-    )
-
     /**
      * 阶段二：合并某信号日各单票产物为 {执行日}.json，算覆盖率。在该信号日全部股票任务跑完后调用。
      *
@@ -275,7 +265,7 @@ class BatchAgentDriverCommand : CliktCommand(
      */
     private fun finalizeSignalDay(
         signalDate: LocalDate,
-        dayResults: List<StockResult>,
+        dayResults: List<AgentEntryPriceAnalyzer.StockResult>,
         outputDir: Path,
         mergeExisting: Boolean = false,
     ): SignalDateCoverage {
@@ -306,97 +296,6 @@ class BatchAgentDriverCommand : CliktCommand(
             failures = dayResults.filter { !it.ok }.map { it.tsCode },
         )
     }
-
-    /**
-     * 驱动 agent 分析单只股票，失败重试 1 次。
-     *
-     * agent 完成后会把买点写到 out/decisions/{执行日}-{ts}.json；本函数据该文件是否产出判定单只成败。
-     * 单只失败不影响其他股票（每只独立 session + try-catch + 重试）。
-     */
-    private suspend fun analyzeOneStock(
-        projectRoot: File,
-        workspaceBase: File,
-        serverPort: Int,
-        model: AgentModelResolution.Resolved,
-        task: StockTask,
-    ): StockResult {
-        val signalDate = task.signalDate
-        val executionDate = task.executionDate
-        val tsCode = task.tsCode
-
-        // 进程级隔离：每只票一个独立 workDir（{base}/{信号日}/{ts}/）+ 独立 as-of wrapper + 独立 ACP 进程。
-        // 不同票互不共享 .claude-isolated / skills，无并发写竞态；as-of 各自写死该信号日，互不污染。
-        val signalDateYyyymmdd = signalDate.toString().replace("-", "")
-        val workDir = File(File(workspaceBase, signalDate.toString()), tsCode)
-        val provision = BatchAgentProvisioning.provision(
-            projectRoot = projectRoot,
-            workDir = workDir,
-            signalDateYyyymmdd = signalDateYyyymmdd,
-            serverPort = serverPort,
-        )
-        if (provision.missingTools.isNotEmpty()) {
-            echo("[batch]   ⚠ $tsCode 缺失工具 ${provision.missingTools}（先 installDist）")
-        }
-        val decisionsDir = File(workDir, "out/decisions")
-        val perStockFile = File(decisionsDir, "$executionDate-$tsCode.json")
-
-        val bridge = AgentBridgeImpl()
-        try {
-            bridge.launch(
-                AgentBridge.Config(
-                    workDir = workDir.absolutePath,
-                    claudeCommand = null,
-                    isolated = true,
-                    backtestMode = true, // 启用回测命令白名单：禁日期参数 / 禁 market-emotion / 禁研报
-                    preferZedAcpAgent = true,
-                    apiKey = model.apiKey,
-                    configDir = null,
-                    modelId = model.modelId,
-                    baseUrl = model.baseUrl,
-                    provider = model.provider,
-                )
-            )
-            repeat(2) { attempt ->
-                try {
-                    perStockFile.delete() // 重试前清残留，确保产出判定干净
-                    val sessionId = bridge.createSession(workDir.absolutePath)
-                    try {
-                        bridge.sendCommand(
-                            sessionId,
-                            AgentBridge.Command.Prompt(buildPrompt(tsCode, signalDate, executionDate)),
-                        )
-                        val finalState = withTimeoutOrNull(perStockTimeoutSec * 1000L) {
-                            // 只认真正的终态 COMPLETED / ERROR：初始 IDLE 不算（否则 prompt 还没起跑就误判完成）。
-                            bridge.observeState(sessionId).first {
-                                it.status == AgentStatus.COMPLETED || it.status == AgentStatus.ERROR
-                            }
-                        }
-                        val produced = perStockFile.exists() && perStockFile.length() > 0L
-                        if (finalState != null && finalState.status != AgentStatus.ERROR && produced) {
-                            return StockResult(signalDate, tsCode, ok = true, perStockFile = perStockFile)
-                        }
-                        echo(
-                            "[batch]   ✘ $tsCode 第 ${attempt + 1} 次失败：" +
-                                "status=${finalState?.status ?: "TIMEOUT"} 产出=$produced"
-                        )
-                    } finally {
-                        bridge.closeSession(sessionId)
-                    }
-                } catch (e: Exception) {
-                    echo("[batch]   ✘ $tsCode 第 ${attempt + 1} 次异常：${e.message}")
-                }
-            }
-        } finally {
-            bridge.shutdown() // 关掉本票独立 ACP 进程，释放句柄/内存
-        }
-        return StockResult(signalDate, tsCode, ok = false, perStockFile = null)
-    }
-
-    /** 单只股票分析 Prompt。绝不暴露执行日之后信息；执行日仅用于命名产物文件。 */
-    private fun buildPrompt(tsCode: String, signalDate: LocalDate, executionDate: LocalDate): String =
-        "分析股票 $tsCode 在信号日 $signalDate 盘后的主推买点入场价（纯历史 K 线结构，as-of 已锁定为信号日）。" +
-            "分析完成后把买点写到 out/decisions/$executionDate-$tsCode.json，" +
-            "executionDate 与 effectiveDate 都填执行日 $executionDate，side=BUY，hint=LIMIT，limitPrice 必填。"
 
     /**
      * 合并若干单票产物文件为单个 [DecisionFile]。单票产物分散在各自独立 workDir，由 StockResult 携带路径回收。
@@ -449,13 +348,6 @@ class BatchAgentDriverCommand : CliktCommand(
         echo("============================================================")
     }
 
-    /** 单只股票分析结果。perStockFile 为成功时的单票产物文件，失败为 null。 */
-    private data class StockResult(
-        val signalDate: LocalDate,
-        val tsCode: String,
-        val ok: Boolean,
-        val perStockFile: File?,
-    )
 
     /** 单信号日覆盖率明细。 */
     private data class SignalDateCoverage(

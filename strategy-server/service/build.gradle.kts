@@ -82,6 +82,37 @@ tasks.register<JavaExec>("importFusionScores") {
     jvmArgs("-Xmx2g")
 }
 
+tasks.register<JavaExec>("importAgentEntryPrices") {
+    group = "application"
+    description = "Import agent volume-price entry limits ({date}.json) into daily_profit_prediction_selection.limit_price"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.shiroumi.strategy.service.ImportAgentEntryPricesKt")
+    systemProperties(
+        System.getProperties()
+            .stringPropertyNames()
+            .filter { it.startsWith("quant.agentEntry.") || it == "quant.projectRoot" || it == "quant.project.root" }
+            .associateWith { System.getProperty(it) }
+    )
+    jvmArgs("-Xmx2g")
+}
+
+tasks.register<JavaExec>("replayHoldingsFromSelection") {
+    group = "application"
+    description = "Replay holding state machine over a date range from existing selections (no re-selection); applies agent LIMIT entry"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.shiroumi.strategy.service.ReplayHoldingsFromSelectionKt")
+    systemProperties(
+        System.getProperties()
+            .stringPropertyNames()
+            .filter {
+                it.startsWith("quant.replay.") || it.startsWith("quant.strategy.holding.") ||
+                    it == "quant.projectRoot" || it == "quant.project.root"
+            }
+            .associateWith { System.getProperty(it) }
+    )
+    jvmArgs("-Xmx4g")
+}
+
 tasks.register<JavaExec>("exportStNames") {
     group = "application"
     description = "Export ST stock names (±5% limit, non-tradable) to CSV for research dataset ST-exclusion"
