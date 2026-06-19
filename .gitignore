@@ -136,3 +136,24 @@ tools/gh
 .antigravitycli/
 strategy-server/research/pytorch/temp/
 cli/temp/
+
+### 模型权重 / 训练产物 / 大数据文件（扩展名兜底）###
+# PyTorch / ONNX / 通用训练产物动辄数百 MB，禁止入仓（曾误入历史撑爆 .git 至 18G）。
+# 按扩展名全局兜底，补 research/*/models 等目录规则未覆盖的散落产物与临时落盘。
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+*.npy
+*.npz
+*.h5
+*.pkl
+*.pt.tar
+# 大数据导出 / 数据集落盘（CSV / Parquet / 本地 DB）
+*.parquet
+*.feather
+*.sqlite
+*.sqlite3
+# CSV 默认忽略；如确有必须入仓的小样本数据，用 !path/to/sample.csv 显式放行
+*.csv
