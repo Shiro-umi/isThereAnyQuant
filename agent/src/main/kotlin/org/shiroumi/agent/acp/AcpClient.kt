@@ -145,6 +145,15 @@ class AcpClient(
 
         val workDir = java.io.File(config.workDir).also { it.mkdirs() }
 
+        // CLAUDE_CONFIG_DIR 解析必须早于沙箱 profile 生成:isolated 模式下它是 workDir 的【兄弟目录】
+        // (`~/.quant_agents/config_isolated`,与 workDir `~/.quant_agents/<sid>` 同级、不在其 subpath 内),
+        // claude-agent-acp 在 session/new 时往这里写 session 状态。漏放进沙箱 file-write 白名单 → 写被
+        // deny → node 卡在 session/new 永不回 ACP 响应 → newSession 卡死(launch/initialize 不写 config 故不卡)。
+        // 故先把它解析出来,既喂给下面的 execPrefix 入白名单,又喂给 isolated 块设 env,单一真源不二次解析。
+        // 立即 mkdirs:让 execPrefix 里的 canonicalRealPath 能展开 symlink(toRealPath 要求路径已存在),
+        // 保证 profile 放行路径与实际写入路径逐字一致,不因「render 时目录尚未建」退化成未展开的 absolutePath。
+        val resolvedConfigDir = if (config.isolated) resolveConfigDir(config.configDir, workDir).also { it.mkdirs() } else null
+
         // agent 走 macOS sandbox-exec 把整棵子进程树关进 OS 层沙箱(档位见 SandboxTier):
         // process-exec 白名单拦 projectRoot 根下脚本(start-release.sh/deploy.sh/gradlew → exit 126)、
         // 无 network-inbound 让 JVM 绑不了监听端口(起不了 server)、file-write 关押到 workDir、
@@ -152,7 +161,7 @@ class AcpClient(
         // 档位只决定 network 一段:BACKFILL 禁实时外网、USER 放实时外网,其余四道关两档相同。
         // OFF(默认,LIVE 实盘等)零侵入:sandboxPrefix 为空、args 字节等价、env 不收窄。
         val sandboxOn = SandboxProfile.isEnabled(config.sandboxTier)
-        val sandboxPrefix = if (sandboxOn) SandboxProfile.execPrefix(workDir, config.sandboxTier, claudeCmd) else emptyList()
+        val sandboxPrefix = if (sandboxOn) SandboxProfile.execPrefix(workDir, config.sandboxTier, claudeCmd, resolvedConfigDir) else emptyList()
         logger.info { "[AcpClient] sandbox=${if (sandboxPrefix.isNotEmpty()) "ON" else "OFF"} (tier=${config.sandboxTier})" }
 
         val args = buildList {
@@ -187,22 +196,15 @@ class AcpClient(
             // /usr/bin/java + /usr/libexec + $JAVA_HOME 子树兜底。
         }
 
-        if (config.isolated) {
-            // configDir 的 `~` / `~/` 展开为 $HOME —— JVM 不像 shell 那样展开 `~`,
-            // 否则 config.yaml 写的 `~/.quant_agents/config_isolated` 会落成相对 cwd 的字面
-            // `~` 目录(沙箱真开时不在 file-write 白名单,每次 initialize 产 deny 噪声)。
-            // 仅支持当前用户家目录(`~` 与 `~/`),不处理 `~otheruser/`。
-            val resolvedConfigDir = config.configDir?.let { raw ->
-                val expanded = when {
-                    raw == "~" -> System.getProperty("user.home")
-                    raw.startsWith("~/") -> System.getProperty("user.home") + raw.substring(1)
-                    else -> raw
-                }
-                java.io.File(expanded)
-            } ?: workDir.resolve(".claude-isolated")
-            resolvedConfigDir.mkdirs()
-            processBuilder.environment()["CLAUDE_CONFIG_DIR"] = resolvedConfigDir.absolutePath
-            logger.info { "[AcpClient] 🛡 Isolated mode active, CLAUDE_CONFIG_DIR=${resolvedConfigDir.absolutePath}" }
+        if (resolvedConfigDir != null) {
+            // resolvedConfigDir 已在沙箱 profile 生成前解析并 mkdirs(单一真源),此处只负责设 env。
+            // 它同时被 execPrefix 加进 file-write 白名单,session/new 写 config 不再被沙箱 deny。
+            // 用 realpath(展开 symlink)与白名单 canonicalRealPath 同源:env 暴露给子进程的路径与沙箱放行的
+            // 路径走同一条解析链,杜绝「祖先含 symlink 时 env=absolutePath、白名单=realpath」两路漂移。
+            val configEnvPath = runCatching { resolvedConfigDir.toPath().toRealPath().toString() }
+                .getOrElse { resolvedConfigDir.absolutePath }
+            processBuilder.environment()["CLAUDE_CONFIG_DIR"] = configEnvPath
+            logger.info { "[AcpClient] 🛡 Isolated mode active, CLAUDE_CONFIG_DIR=$configEnvPath" }
         }
 
         injectAuthEnv(processBuilder, config)
@@ -675,6 +677,24 @@ class QuantClientSessionOperations(
         return resolved.toFile()
     }
 }
+
+/**
+ * isolated 模式 CLAUDE_CONFIG_DIR 解析:把 config.yaml 写的 `~`/`~/` 展开为 $HOME(JVM 不像 shell
+ * 自动展开 `~`,否则会落成相对 cwd 的字面 `~` 目录)。仅支持当前用户家目录,不处理 `~otheruser/`。
+ * configDir 为空时回退 workDir 下的 `.claude-isolated`。
+ *
+ * 这是 isolated config 目录的【单一真源】:沙箱 profile 用它入 file-write 白名单、env 用它设
+ * CLAUDE_CONFIG_DIR,两处共用同一解析,杜绝「profile 放行路径」与「实际写入路径」漂移。
+ */
+private fun resolveConfigDir(rawConfigDir: String?, workDir: java.io.File): java.io.File =
+    rawConfigDir?.let { raw ->
+        val expanded = when {
+            raw == "~" -> System.getProperty("user.home")
+            raw.startsWith("~/") -> System.getProperty("user.home") + raw.substring(1)
+            else -> raw
+        }
+        java.io.File(expanded)
+    } ?: workDir.resolve(".claude-isolated")
 
 /**
  * 从 ~/.claude/settings.json 读取 env 配置并注入到子进程

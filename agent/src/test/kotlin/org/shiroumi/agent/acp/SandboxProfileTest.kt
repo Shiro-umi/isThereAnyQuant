@@ -187,6 +187,33 @@ class SandboxProfileTest {
     }
 
     @Test
+    fun `回归 file-write 放行 isolated config 目录`() {
+        // 锁住 2026-06-21 部署后用户 newSession 全部卡死的 bug:CLAUDE_CONFIG_DIR=config_isolated 是
+        // workDir 的【兄弟目录】(不在其 subpath 内),claude-agent-acp 在 session/new 往这里写 session 状态。
+        // 漏进 file-write 白名单 → 写被 deny → node 卡在 session/new 永不回响应 → newSession 卡死。
+        val workDir = File.createTempFile("sbx_wd", "").apply { delete(); mkdirs() }
+        // 兄弟目录:与 workDir 同父、不在其 subpath 内,精确复刻生产 ~/.quant_agents/config_isolated 拓扑。
+        val configDir = File(workDir.parentFile, workDir.name + "_config_isolated").apply { mkdirs() }
+        try {
+            val withCfg = SandboxProfile.render(workDir, SandboxTier.USER, acpCmd, configDir)
+            val cfgReal = configDir.toPath().toRealPath().toString()
+            assertTrue(
+                withCfg.contains("(subpath ${'"'}$cfgReal${'"'})"),
+                "file-write 必须放行 isolated config 目录 $cfgReal,否则 newSession 写 config 被 deny 卡死"
+            )
+            // 不传 configDir(非 isolated)时不放行,不无故扩大写面。
+            val noCfg = SandboxProfile.render(workDir, SandboxTier.USER, acpCmd, null)
+            assertFalse(
+                noCfg.contains("(subpath ${'"'}$cfgReal${'"'})"),
+                "未传 configDir 时不应放行该目录"
+            )
+        } finally {
+            workDir.deleteRecursively()
+            configDir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `render 含临时目录放行 TMPDIR 父目录在 file-write 内`() {
         // 不依赖 sandbox-exec,纯文本断言:JNA/JVM 临时目录必须在写白名单(否则取数挂)。
         val tmpdir = System.getenv("TMPDIR")

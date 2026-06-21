@@ -87,8 +87,8 @@ object SandboxProfile {
      * 写失败(目录不可写/磁盘满/路径解析异常)整体 runCatching 降级为空前缀 → 裸跑不崩,
      * 与「sandbox-exec 缺失」同一容错语义,不把单票打成失败。
      */
-    fun execPrefix(workDir: File, tier: SandboxTier, claudeCmd: String): List<String> = runCatching {
-        val profileText = render(workDir, tier, claudeCmd)
+    fun execPrefix(workDir: File, tier: SandboxTier, claudeCmd: String, configDir: File? = null): List<String> = runCatching {
+        val profileText = render(workDir, tier, claudeCmd, configDir)
         val profileFile = File(workDir, ".sandbox/agent.sb").apply {
             parentFile?.mkdirs()
             writeText(profileText)
@@ -110,8 +110,12 @@ object SandboxProfile {
      * 档位只影响 network 一段:[SandboxTier.BACKFILL] 走端口白名单(DNS+443+localhost,禁实时外网),
      * [SandboxTier.USER] 走全放出站(覆盖 DNS/外网任意端口/localhost)。其余所有段两档逐字相同。
      * [SandboxTier.OFF] 不应到达此处(isEnabled 已拦),防御性按回填档渲染。
+     *
+     * @param configDir isolated 模式的 CLAUDE_CONFIG_DIR(workDir 的兄弟目录,不在其 subpath 内)。
+     *   claude-agent-acp 在 session/new 往这里写 session 状态;非空时必须进 file-write 白名单,
+     *   否则写被 deny → node 卡在 session/new 永不回响应 → newSession 卡死。null(非 isolated)时不放行。
      */
-    fun render(workDir: File, tier: SandboxTier, claudeCmd: String): String {
+    fun render(workDir: File, tier: SandboxTier, claudeCmd: String, configDir: File? = null): String {
         val workDirReal = workDir.canonicalRealPath()
         val projectRoot = resolveProjectRoot().canonicalRealPath()
         val toolsDir = File(projectRoot, "tools").canonicalRealPath()
@@ -133,11 +137,14 @@ object SandboxProfile {
             addAll(acpDirs)                     // claude-agent-acp 真身目录(软链展开)+ node_modules 根
         }.distinct()
 
-        // file-write 收窄:仅 workDir + 临时目录(/private/tmp + /tmp 双保险 + $TMPDIR 父)+ 必要字符设备。
+        // file-write 收窄:workDir + isolated config 目录(CLAUDE_CONFIG_DIR,session/new 写 session 状态)
+        // + 临时目录(/private/tmp + /tmp 双保险 + $TMPDIR 父)+ 必要字符设备。
+        // configDir 是 workDir 的兄弟目录(不在其 subpath 内),漏放行 → newSession 写 config 被 deny 卡死。
         val writeSubtrees = buildList {
             add("/private/tmp")
             add("/tmp")
             add(workDirReal)
+            configDir?.let { add(it.canonicalRealPath()) }
             darwinUserDir?.let { add(it) }
         }.distinct()
 
