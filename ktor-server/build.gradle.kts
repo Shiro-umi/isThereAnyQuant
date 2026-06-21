@@ -403,14 +403,19 @@ tasks.register<Copy>("copyJar") {
     rename { "${appName}.jar" }
 }
 
-// 复制 APK 文件到部署包
+// 复制 APK 文件到部署包。按 quantMode 只取对应变体子目录，杜绝跨变体 flatten：
+// 旧实现 from("outputs/apk") + include("**/*.apk") 递归捞所有变体，debug deploy 时会把
+// outputs/apk/release/ 残留的旧 release apk 一起拷进 data/apk → /api/download/apk 路由下到错包。
+// release → 只取 release 变体；其余（debug）→ 只取 debug 变体。
 tasks.register<Copy>("copyApk") {
     group = "deployment"
     description = "Copies Android APK to deploy directory for download route"
     dependsOn("createDeployStructure")
-    mustRunAfter(":compose-app:assembleRelease")
+    val apkVariant = if (quantMode.get() == "release") "release" else "debug"
+    val assembleTask = if (quantMode.get() == "release") ":compose-app:assembleRelease" else ":compose-app:assembleDebug"
+    mustRunAfter(assembleTask)
 
-    val apkOutputDir = project(":compose-app").layout.buildDirectory.dir("outputs/apk")
+    val apkOutputDir = project(":compose-app").layout.buildDirectory.dir("outputs/apk/$apkVariant")
     from(apkOutputDir) {
         include("**/*.apk")
     }
@@ -428,10 +433,13 @@ tasks.register<Tar>("packageDeploy") {
         "copyJar",
         "copyStrategyServiceDistribution"
     )
-    if (quantMode.get() == "release") {
+    // release 与 debug 都打 APK 进部署包（debug-wan 不出客户端包，保持现状）。copyApk 必须由本任务
+    // 自己 dependsOn，强制它先于 from(deployDir) 整目录打包——否则与 packageDebug 下的 copyApk 是
+    // 无序兄弟节点，tar.gz 可能漏掉 APK。
+    if (quantMode.get() == "release" || quantMode.get() == "debug") {
         dependsOn("copyApk")
     }
-    
+
     archiveBaseName.set(quantMode.map { "${appName}-${appVersion}-$it" })
     archiveExtension.set("tar.gz")
     compression = Compression.GZIP
@@ -453,10 +461,11 @@ tasks.register<Zip>("packageDeployZip") {
         "copyJar",
         "copyStrategyServiceDistribution"
     )
-    if (quantMode.get() == "release") {
+    // 与 packageDeploy 一致：release/debug 都把 APK 打进 zip，copyApk 自依赖强制排序。
+    if (quantMode.get() == "release" || quantMode.get() == "debug") {
         dependsOn("copyApk")
     }
-    
+
     archiveBaseName.set(quantMode.map { "${appName}-${appVersion}-$it" })
     archiveExtension.set("zip")
     destinationDirectory.set(distDir)
@@ -491,6 +500,14 @@ tasks.register("packageDebug") {
     group = "distribution"
     description = "Builds the debug deployment package. Run with -Pquant.mode=debug."
     dependsOn("prepareDeploy", "packageDeploy", "packageDeployZip")
+    // 与 packageRelease 对称：debug 部署包内附 Android debug APK（供 /api/download/apk 内网直下）。
+    // assembleDebug 在 -Pquant.mode=debug 下连内网 host；variantFilter 不 ignore debug 变体。
+    // copyApk 仅 mustRunAfter assembleDebug（排序），故 packageDebug 必须自己 dependsOn assembleDebug
+    // 把它纳入任务图，否则 APK 源目录为空。
+    if (quantMode.get() == "debug") {
+        dependsOn(":compose-app:assembleDebug")
+        dependsOn("copyApk")
+    }
 
     doFirst {
         check(quantMode.get() == "debug") {

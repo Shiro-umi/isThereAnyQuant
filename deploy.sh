@@ -430,3 +430,45 @@ if [ "$MODE_FAMILY" = "release" ] && [ "$SERVER_ONLY" != true ]; then
         echo "   手动重试：$SCRIPT_DIR/scripts/upload-client-packages.sh"
     fi
 fi
+
+# debug 客户端出包：debug 家族（debug / debug-wan），且仅在非 server-only 时执行。与 release 段
+# 对称，但绝不上传夸克——debug 包内嵌内网/DDNS host，上传会污染生产固定分享页 667221bcabd6
+# （仅供生产 bigsmart.space 包）。debug 包只本地产出，供开发者自取 sideload/装机。
+#   Android debug APK：已由 :ktor-server:packageDebug（gradle dependsOn assembleDebug + copyApk）
+#     在上方 staged 构建段产出并复制进 data/apk，与 release 段「APK 由 packageRelease 负责」对称，
+#     此处不再单独触发 Android 出包。
+#   iOS debug ipa：build-ios-ipa.sh debug（-configuration Debug + 关签名出未签名包，门禁反转禁
+#     生产 host）。debug 与 debug-wan 的 iOS 都走 -configuration Debug → 内嵌内网 IP（pbxproj
+#     Build Phase 只有 Debug/Release 两档，看不到 debug-wan；debug-wan iOS 内嵌内网 IP 是已接受的
+#     取舍，仅局域网装机，Android debug-wan 才连公网 DDNS）。仅 macOS。
+#   collect：收敛到 build/client-packages/debug/（独立子目录），绝不调 upload-client-packages.sh。
+# 出包失败不回滚已完成的 server 部署（server 已起），仅提示手动重试（沿用 release 段容错范式）。
+if [ "$MODE_FAMILY" = "debug" ] && [ "$SERVER_ONLY" = true ]; then
+    echo ""
+    echo "⏭️  跳过 debug 客户端出包：server-only 模式。需要出包时手动执行 scripts/build-ios-ipa.sh debug 与 scripts/collect-client-packages.sh debug。"
+elif [ "$MODE_FAMILY" = "debug" ]; then
+    if [ "$(uname -s)" = "Darwin" ]; then
+        echo ""
+        echo "🍎 Building unsigned iOS ipa (debug)..."
+        if "$SCRIPT_DIR/scripts/build-ios-ipa.sh" debug; then
+            echo "   iOS debug ipa ready: $SCRIPT_DIR/build/ios-ipa/debug/Quant.ipa（用户自行签名 sideload）"
+        else
+            echo "⚠️  iOS debug ipa 出包失败；server 部署不受影响。"
+            echo "   手动重试：$SCRIPT_DIR/scripts/build-ios-ipa.sh debug"
+        fi
+    else
+        echo ""
+        echo "ℹ️  跳过 iOS debug ipa 出包：当前非 macOS（$(uname -s)），iOS 出包需在 macOS 上执行 scripts/build-ios-ipa.sh debug。"
+    fi
+
+    echo ""
+    echo "📦 收敛 debug 客户端产物到本地（不上传夸克）..."
+    if "$SCRIPT_DIR/scripts/collect-client-packages.sh" debug; then
+        echo "   debug 客户端包已收敛到本地：$SCRIPT_DIR/build/client-packages/debug/"
+        echo "   Android APK 亦随部署落在：$DEPLOY_DIR/data/apk/（内网直下：http://<LAN-IP>:$TARGET_PORT/api/download/apk）"
+        echo "   debug 包内嵌内网/DDNS 地址，仅供开发自取，绝不上传夸克（生产分享页零污染）。"
+    else
+        echo "⚠️  debug 客户端产物收敛失败；server 部署不受影响。"
+        echo "   手动重试：$SCRIPT_DIR/scripts/collect-client-packages.sh debug"
+    fi
+fi
