@@ -70,12 +70,35 @@ data class AdaptiveLayoutConfig(
     val isAtLeastExpanded: Boolean get() = isExpanded || isLarge || isXLarge
 
     /**
+     * 是否用卡片做功能区拆分。
+     *
+     * 手机（Compact）只保留 Material3 标准边距、不用卡片分隔功能区，把空间留给内容；
+     * 更宽屏用大卡片拆分功能区。各功能区容器统一用 [org.shiroumi.quant_kmp.ui.core.adaptive.FunctionalRegion]
+     * 消费该语义，禁止各页自行写死外层 Card / Surface。
+     */
+    val useFunctionalCards: Boolean get() = !isCompact
+
+    /**
      * 页面外层统一内边距。
      *
-     * Compact 只留水平边距、纵向交给沉浸式内容；Medium 24dp 四周；更宽 40dp 四周。
+     * Compact 只留水平边距并补一档底部呼吸（可滚动页不再手搓末尾 Spacer）；
+     * Medium 24dp 四周；更宽 40dp 四周。
      * 取代 Sentiment / StrategyTracking 各自重写的 pagePadding when 表达式。
      */
     val pagePadding: PaddingValues get() = when {
+        isCompact -> PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp)
+        isMedium -> PaddingValues(24.dp)
+        else -> PaddingValues(40.dp)
+    }
+
+    /**
+     * 沉浸式页面外层内边距：水平边距同 [pagePadding]，但不补底部呼吸。
+     *
+     * 用于内容需贴底铺满的页面（StrategyTracking 全景流转图 + 常驻底部切换按钮）：
+     * 底部留白由页面自身的悬浮按钮 / lazyRow 末尾间距负责，外层再叠 bottom 会把全景图上移、
+     * 把底部按钮抬离屏幕底。可滚动内容页（Settings / Sentiment）仍用含底部呼吸的 [pagePadding]。
+     */
+    val immersivePagePadding: PaddingValues get() = when {
         isCompact -> PaddingValues(horizontal = 16.dp)
         isMedium -> PaddingValues(24.dp)
         else -> PaddingValues(40.dp)

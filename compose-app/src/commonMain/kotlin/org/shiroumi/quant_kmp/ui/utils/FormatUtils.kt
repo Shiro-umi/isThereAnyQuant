@@ -10,10 +10,15 @@ import kotlin.math.round
  * @return 格式化后的价格字符串，保留2位小数
  */
 fun formatPriceRaw(price: Float): String {
-    val rounded = round(price * 100) / 100
-    val intPart = rounded.toInt()
-    val decimal = abs((rounded - intPart) * 100).toInt()
-    return "$intPart.${decimal.toString().padStart(2, '0')}"
+    // 全程整数分运算：先四舍五入到「分」，再拆元/分，避免「除以 100 引回浮点误差 + toInt 截断」
+    // 导致的少显示一分（如 1.01 被误显 1.00）。负数符号单独承载，保证 -0.05 显示为 -0.05。
+    // 分级整数用 Long 承载，阈值回到 Long 级，永不被任何 Float 价格触达溢出饱和。
+    val totalCents = round(price * 100).toLong()
+    val sign = if (totalCents < 0) "-" else ""
+    val absCents = abs(totalCents)
+    val intPart = absCents / 100
+    val decimal = absCents % 100
+    return "$sign$intPart.${decimal.toString().padStart(2, '0')}"
 }
 
 /**
@@ -24,10 +29,16 @@ fun formatPriceRaw(price: Float): String {
  * @return 格式化后的百分比字符串，保留2位小数
  */
 fun formatPercentRaw(value: Float, showSign: Boolean = false): String {
-    val sign = if (showSign && value >= 0) "+" else ""
-    val rounded = round(value * 100) / 100
-    val intPart = rounded.toInt()
-    val decimal = abs((rounded - intPart) * 100).toInt()
+    // 同 formatPriceRaw 的整数分口径，杜绝截断少显一位；负号由整数符号承载，正号按 showSign 追加。
+    val totalCents = round(value * 100).toLong()
+    val sign = when {
+        totalCents < 0 -> "-"
+        showSign -> "+"
+        else -> ""
+    }
+    val absCents = abs(totalCents)
+    val intPart = absCents / 100
+    val decimal = absCents % 100
     return "$sign$intPart.${decimal.toString().padStart(2, '0')}"
 }
 

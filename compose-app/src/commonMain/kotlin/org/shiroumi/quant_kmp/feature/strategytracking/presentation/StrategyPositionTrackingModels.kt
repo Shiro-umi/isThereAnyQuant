@@ -6,6 +6,7 @@ import model.candle.StrategyTrackingEdge
 import model.candle.StrategyTrackingEdgeKind
 import model.candle.StrategyTrackingExitReason
 import model.candle.StrategyTrackingSection
+import org.shiroumi.quant_kmp.ui.utils.formatPriceRaw
 
 // 6 = 每日入场 3 只 × H3（持仓存活 daysSinceEntry 0/1，第 2 日离场）→ 同一交易日并发在手最多 6 只。
 // selection 仍是 Top5（≤6）、cleared 一日离场亦 ≤6，统一用 6 覆盖三列上限，避免第 6 只持仓被静默截断。
@@ -121,3 +122,6 @@ internal fun formatPnlPercent(value: Float): String {
     val decimalStr = if (decimal < 10) "0$decimal" else "$decimal"
     return "$sign$intPart.$decimalStr%"
 }
+
+/** 跟踪页价格两位小数格式化：统一复用 [formatPriceRaw]，列表 / 全景图 / 详情卡共用。 */
+internal fun formatTrackingPrice(value: Float): String = formatPriceRaw(value)

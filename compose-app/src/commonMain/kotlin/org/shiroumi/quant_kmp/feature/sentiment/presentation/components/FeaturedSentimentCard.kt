@@ -28,6 +28,7 @@ import model.candle.StrategySentimentResponse
 import org.shiroumi.quant_kmp.feature.sentiment.presentation.ParameterSpec
 import org.shiroumi.quant_kmp.feature.sentiment.presentation.formatDouble
 import org.shiroumi.quant_kmp.ui.agent.theme.AgentTheme
+import org.shiroumi.quant_kmp.ui.core.adaptive.FunctionalRegion
 import org.shiroumi.quant_kmp.ui.core.adaptive.m3.rememberAdaptiveLayoutConfig
 import org.shiroumi.quant_kmp.ui.theme.quantColors
 
@@ -61,12 +62,12 @@ fun FeaturedSentimentCard(
     val marketVol = latest?.marketVol ?: 0.0
     var isSimpleMode by remember { mutableStateOf(true) }
 
-    Card(
-        modifier = Modifier.fillMaxWidth().height(cardHeight),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        ),
+    // 功能区容器统一走 FunctionalRegion：宽屏 large 大卡，手机退化无卡。
+    // 内部走势图 fillMaxSize + weight 依赖固定高，故 cardHeight 始终保留；手机只去掉卡片背景；内容自带内边距故 padding 取 0。
+    FunctionalRegion(
+        modifier = Modifier.height(cardHeight),
+        config = config,
+        cardPadding = PaddingValues(0.dp),
     ) {
         if (isCompact) {
             FeaturedCompactContent(

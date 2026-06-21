@@ -2,8 +2,10 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <!-- viewport-fit=cover 让内容延伸到刘海/灵动岛区域 -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <!-- viewport-fit=cover 让内容延伸到刘海/灵动岛区域；
+         interactive-widget=resizes-content 让软键盘弹起时收缩视口（100dvh 随之缩小），
+         使居中表单自动上移避开键盘，避免输入框被键盘遮挡。 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
     
     <!-- 主题色：适配浏览器标题栏和系统状态栏 -->
     <!-- 三条 meta 的协同：

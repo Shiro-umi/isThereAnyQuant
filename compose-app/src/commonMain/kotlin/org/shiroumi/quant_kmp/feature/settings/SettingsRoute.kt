@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -51,6 +52,7 @@ import org.shiroumi.quant_kmp.platform.isWebPlatform
 import org.shiroumi.quant_kmp.ui.animation.ExpandVerticallyAnimation
 import org.shiroumi.quant_kmp.ui.agent.state.AgentContract
 import org.shiroumi.quant_kmp.ui.core.adaptive.AdaptivePageContainer
+import org.shiroumi.quant_kmp.ui.core.adaptive.FunctionalRegion
 import org.shiroumi.quant_kmp.ui.components.qr.QrCodeDialog
 import org.shiroumi.quant_kmp.ui.core.viewmodel.LocalAgentViewModel
 import org.shiroumi.quant_kmp.ui.theme.AppColorTheme
@@ -109,6 +111,7 @@ fun SettingsRoute(
             if (isWebPlatform() && AppConfig.clientDownloadUrl.isNotEmpty()) {
                 ClientDownloadSection(downloadUrl = AppConfig.clientDownloadUrl)
             }
+            // 底部呼吸由 AdaptivePageContainer 的 pagePadding（Compact 已含 bottom）统一提供。
         }
     }
 }
@@ -512,15 +515,13 @@ private fun ThemeColorChip(
 private fun SettingsCard(
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
+    // 功能区容器统一走 FunctionalRegion：宽屏 extraLarge 大卡，手机退化为无卡纯内容。
+    FunctionalRegion(
         shape = MaterialTheme.shapes.extraLarge,
-        color = MaterialTheme.colorScheme.surfaceContainerLow
+        cardPadding = PaddingValues(24.dp),
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(24.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(16.dp),
             content = content
         )

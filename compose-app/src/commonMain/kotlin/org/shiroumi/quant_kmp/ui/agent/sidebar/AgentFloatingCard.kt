@@ -15,7 +15,6 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.*
@@ -25,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp as lerpColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
@@ -38,6 +38,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import org.shiroumi.quant_kmp.ui.agent.state.AgentContract
 import kotlin.math.roundToInt
+
+// FAB 展开/收起的动画时序（绝对时间，独立计时）：
+// - Y 轴位移：500ms 全程基准，展开/收起都 0ms 启动
+// - X 轴位移：300ms，展开 0ms 启动；收起 100ms 启动
+// - 共享边界动画：300ms，展开延后 100ms；从 48dp FAB 本体直接形变到展开卡片，触摸外框不参与形变
+private const val Y_AXIS_DURATION_MS = 500
+private const val X_AXIS_DURATION_MS = 300
+private const val X_AXIS_COLLAPSE_DELAY_MS = 100
+private const val SHARED_DURATION_MS = 300
+private const val SHARED_EXPAND_DELAY_MS = 100
 
 /**
  * 移动端 Agent 浮动卡片
@@ -63,8 +73,10 @@ fun AgentFloatingCard(
     val currentOnToggleExpand by rememberUpdatedState(onToggleExpand)
     val currentOnConnect by rememberUpdatedState(onConnect)
 
-    // FAB 触摸区域尺寸（紧凑型，适合手机和平板）
-    val fabTouchSize = 60.dp
+    // FAB 触摸区域尺寸（紧凑型，适合手机和平板）。
+    // 触摸框比内部 48dp 视觉 Surface 大一圈，四周留白用于承载阴影（shadowElevation 溢出）
+    // 与呼吸放大（breathOuterScale 最大 1.22×），避免 FAB 动画时阴影/光晕被容器边界裁切。
+    val fabTouchSize = 76.dp
     val fabTouchSizePx = with(density) { fabTouchSize.toPx() }
     val fabPaddingPx = with(density) { 16.dp.toPx() }
 
@@ -140,69 +152,69 @@ fun AgentFloatingCard(
         innerAlpha = breathInnerAlpha
     )
     val fabBaseSize = 48.dp
+    val fabBaseSizePx = with(density) { fabBaseSize.toPx() }
 
-    // 展开与收起使用不同的贝塞尔曲线：展开时 X/Y 交换，收起保持原样
-    val easingCollapseX = remember { CubicBezierEasing(0.0f, 0.0f, 0.2f, 1f) }
-    val easingCollapseY = remember { CubicBezierEasing(0.0f, 0.0f, 0.0f, 1f) }
-    val easingExpandX = remember { CubicBezierEasing(0.0f, 0.0f, 0.0f, 1f) }
-    val easingExpandY = remember { CubicBezierEasing(0.0f, 0.0f, 0.2f, 1f) }
+    // 统一减速曲线（CLAUDE.md：非线性动画一律减速型，禁止弹跳/回弹）。
+    val axisEasing = remember { CubicBezierEasing(0.0f, 0.0f, 0.2f, 1f) }
+    // 位移两轴共用同一 easing：展开用统一减速曲线，收起用系统减速曲线。
+    val axisDisplacementEasing = if (isExpanded) axisEasing else LinearOutSlowInEasing
 
-    val expandProgressX by animateFloatAsState(
-        targetValue = if (isExpanded) 1f else 0f,
-        animationSpec = tween(
-            durationMillis = 280,
-            easing = if (isExpanded) easingExpandX else easingCollapseX
-        ),
-        label = "expand_progress_x"
-    )
+    // 位移 Y 轴：500ms 全程，展开/收起都 0ms 启动。
     val expandProgressY by animateFloatAsState(
         targetValue = if (isExpanded) 1f else 0f,
         animationSpec = tween(
-            durationMillis = 280,
-            easing = if (isExpanded) easingExpandY else easingCollapseY
+            durationMillis = Y_AXIS_DURATION_MS,
+            easing = axisDisplacementEasing
         ),
         label = "expand_progress_y"
     )
+    // 位移 X 轴更快，展开 0s 启动（起点对齐 Y）；收起延后启动（终点对齐 Y）。
+    val xAxisDelay = if (isExpanded) 0 else X_AXIS_COLLAPSE_DELAY_MS
+    val expandProgressX by animateFloatAsState(
+        targetValue = if (isExpanded) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = X_AXIS_DURATION_MS,
+            delayMillis = xAxisDelay,
+            easing = axisDisplacementEasing
+        ),
+        label = "expand_progress_x"
+    )
+    // 共享边界动画（FAB 本体→展开卡片 + 内容交叉淡变 + 背景 + 圆角）：独立计时，与位移 easing 解耦。
+    val sharedProgress by animateFloatAsState(
+        targetValue = if (isExpanded) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = SHARED_DURATION_MS,
+            delayMillis = if (isExpanded) SHARED_EXPAND_DELAY_MS else 0,
+            easing = axisEasing
+        ),
+        label = "shared_progress"
+    )
 
-    // 内容切换以 X 轴进度为基准
-    val expandProgress = expandProgressX
+    // 内容交叉淡变、背景/圆角/阴影等共享边界动画统一以 sharedProgress 为基准。
+    // 形变从 48dp FAB 视觉面开始，76dp 触摸外框只负责折叠态手势与阴影/光晕溢出。
+    val currentWidthPx = fabBaseSizePx + (screenSize.x - fabBaseSizePx) * sharedProgress
+    val currentHeightPx = fabBaseSizePx + (screenSize.y - fabBaseSizePx) * sharedProgress
+    val currentWidth = with(density) { currentWidthPx.toDp() }
+    val currentHeight = with(density) { currentHeightPx.toDp() }
 
-    val currentWidth = with(density) {
-        androidx.compose.ui.unit.lerp(
-            fabTouchSize,
-            screenSize.x.toDp(),
-            expandProgressX
-        )
-    }
+    // 位移分轴：X/Y 各自插值组件中心点，再按当前尺寸反推左上角。
+    // 动作终点是可用空间中心，因此每个轴的最大动作范围天然是对应可用空间的一半。
+    val collapsedTouchX = screenSize.x + fabOffset.x
+    val collapsedTouchY = screenSize.y + fabOffset.y
+    val collapsedCenterX = collapsedTouchX + fabTouchSizePx / 2f
+    val collapsedCenterY = collapsedTouchY + fabTouchSizePx / 2f
+    val expandedCenterX = screenSize.x / 2f
+    val expandedCenterY = screenSize.y / 2f
+    val currentCenterX = collapsedCenterX + (expandedCenterX - collapsedCenterX) * expandProgressX
+    val currentCenterY = collapsedCenterY + (expandedCenterY - collapsedCenterY) * expandProgressY
+    val currentX = currentCenterX - currentWidthPx / 2f
+    val currentY = currentCenterY - currentHeightPx / 2f
 
-    val currentHeight = with(density) {
-        androidx.compose.ui.unit.lerp(
-            fabTouchSize,
-            screenSize.y.toDp(),
-            expandProgressY
-        )
-    }
-
-    val currentX = with(density) {
-        androidx.compose.ui.unit.lerp(
-            (screenSize.x + fabOffset.x.roundToInt()).toDp(),
-            0.dp,
-            expandProgressX
-        )
-    }
-
-    val currentY = with(density) {
-        androidx.compose.ui.unit.lerp(
-            (screenSize.y + fabOffset.y.roundToInt()).toDp(),
-            0.dp,
-            expandProgressY
-        )
-    }
-
+    // 圆角随共享边界动画走：展开 24dp(FAB 本体纯圆) → 0dp(卡片直角)，收起反向，全程平滑。
     val cornerRadius = androidx.compose.ui.unit.lerp(
-        30.dp,
+        24.dp,
         0.dp,
-        expandProgressX
+        sharedProgress
     )
 
     Box(
@@ -211,11 +223,11 @@ fun AgentFloatingCard(
             .onSizeChanged { screenSize = IntOffset(it.width, it.height) }
     ) {
         // 背景遮罩
-        if (expandProgress > 0f) {
+        if (sharedProgress > 0f) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f * expandProgress))
+                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f * sharedProgress))
                     .zIndex(9f)
                     .pointerInput(Unit) {
                         detectDragGestures { _, _ -> }
@@ -224,65 +236,40 @@ fun AgentFloatingCard(
         }
 
         // FAB / 卡片
+        val cardShape = androidx.compose.foundation.shape.RoundedCornerShape(cornerRadius)
+        val sharedContainerColor = lerpColor(
+            MaterialTheme.colorScheme.surfaceContainerHigh,
+            MaterialTheme.colorScheme.background,
+            sharedProgress
+        )
+        val sharedElevationProgress = 1f - sharedProgress
         Box(
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .offset { IntOffset(currentX.roundToPx(), currentY.roundToPx()) }
+                .offset { IntOffset(currentX.roundToInt(), currentY.roundToInt()) }
                 .size(currentWidth, currentHeight)
                 .zIndex(10f)
-                .then(
-                    if (expandProgress >= 1f) {
-                        Modifier.background(
-                            color = MaterialTheme.colorScheme.background,
-                            shape = androidx.compose.foundation.shape.RoundedCornerShape(cornerRadius)
-                        )
-                    } else Modifier
-                )
-                .pointerInput(isExpanded) {
-                    if (!isExpanded) {
-                        val touchSlop = viewConfiguration.touchSlop
-                        awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
-                            var totalDrag = Offset.Zero
-                            var isDragging = false
-                            drag(down.id) { change ->
-                                val delta = change.positionChange()
-                                totalDrag += delta
-                                if (!isDragging && totalDrag.getDistance() > touchSlop) {
-                                    isDragging = true
-                                }
-                                if (isDragging) {
-                                    change.consume()
-                                    val screenWidth = screenSize.x.toFloat()
-                                    val screenHeight = screenSize.y.toFloat()
-                                    fabOffset = Offset(
-                                        (fabOffset.x + delta.x).coerceIn(
-                                            -screenWidth + fabPaddingPx,
-                                            -fabTouchSizePx
-                                        ),
-                                        (fabOffset.y + delta.y).coerceIn(
-                                            -screenHeight + fabPaddingPx,
-                                            -(fabTouchSizePx + fabPaddingPx)
-                                        )
-                                    )
-                                }
-                            }
-                            if (!isDragging) {
-                                val isFailed = currentConnectionStatus == AgentContract.ConnectionStatus.ERROR ||
-                                        currentConnectionStatus == AgentContract.ConnectionStatus.DISCONNECTED
-                                if (isFailed) currentOnConnect?.invoke() else currentOnToggleExpand()
-                            }
-                        }
-                    }
-                }
         ) {
-            Box(modifier = Modifier.fillMaxSize()) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val breathScale = if (sharedProgress == 0f) breathOuterScale else 1f
+                        scaleX = breathScale
+                        scaleY = breathScale
+                    },
+                shape = cardShape,
+                color = sharedContainerColor,
+                contentColor = MaterialTheme.colorScheme.onBackground,
+                tonalElevation = 3.dp * sharedElevationProgress,
+                shadowElevation = 6.dp * sharedElevationProgress
+            ) {
                 // FAB 内容
-                if (expandProgress < 0.5f) {
+                if (sharedProgress < 0.5f) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .graphicsLayer { alpha = 1f - expandProgress * 2f },
+                            .graphicsLayer { alpha = 1f - sharedProgress * 2f },
                         contentAlignment = Alignment.Center
                     ) {
                         BadgedBox(
@@ -300,45 +287,27 @@ fun AgentFloatingCard(
                                 }
                             }
                         ) {
-                            // 自定义 FAB（外层 Surface 已承担 onClick / drag / sharedTransition 变形动画），
-                            // 视觉对齐 M3 SmallFloatingActionButton：48dp + CircleShape + surfaceContainerHigh
-                            // + tonalElevation=3 + shadowElevation=6。
-                            Surface(
+                            // 视觉共享边界是外层 Surface；这里仅渲染 FAB 内部状态内容。
+                            Box(
                                 modifier = Modifier
-                                    .size(fabBaseSize)
-                                    .semantics {
-                                        role = androidx.compose.ui.semantics.Role.Button
-                                        contentDescription = "Agent 浮动按钮"
-                                    }
-                                    .graphicsLayer {
-                                        scaleX = breathOuterScale
-                                        scaleY = breathOuterScale
-                                    },
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                tonalElevation = 3.dp,
-                                shadowElevation = 6.dp
+                                    .size(fabBaseSize),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Box(
+                                StatusIndicator(
+                                    isProcessing = isProcessing,
+                                    connectionStatus = connectionStatus,
                                     modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    StatusIndicator(
-                                        isProcessing = isProcessing,
-                                        connectionStatus = connectionStatus,
-                                        modifier = Modifier.fillMaxSize(),
-                                        scales = fabIndicatorScales
+                                    scales = fabIndicatorScales
+                                )
+                                val showRetryIcon = connectionStatus == AgentContract.ConnectionStatus.ERROR ||
+                                        connectionStatus == AgentContract.ConnectionStatus.DISCONNECTED
+                                if (showRetryIcon) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Refresh,
+                                        contentDescription = "重新连接",
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.onError
                                     )
-                                    val showRetryIcon = connectionStatus == AgentContract.ConnectionStatus.ERROR ||
-                                            connectionStatus == AgentContract.ConnectionStatus.DISCONNECTED
-                                    if (showRetryIcon) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.Refresh,
-                                            contentDescription = "重新连接",
-                                            modifier = Modifier.size(18.dp),
-                                            tint = MaterialTheme.colorScheme.onError
-                                        )
-                                    }
                                 }
                             }
                         }
@@ -346,16 +315,67 @@ fun AgentFloatingCard(
                 }
 
                 // 卡片内容
-                if (expandProgress > 0.3f) {
+                if (sharedProgress > 0.3f) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .graphicsLayer { alpha = (expandProgress - 0.3f) / 0.7f }
+                            .graphicsLayer { alpha = (sharedProgress - 0.3f) / 0.7f }
                     ) {
                         content()
                     }
                 }
             }
+        }
+
+        if (!isExpanded && sharedProgress < 0.5f) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .offset { IntOffset(collapsedTouchX.roundToInt(), collapsedTouchY.roundToInt()) }
+                    .size(fabTouchSize)
+                    .zIndex(11f)
+                    .semantics {
+                        role = androidx.compose.ui.semantics.Role.Button
+                        contentDescription = "Agent 浮动按钮"
+                    }
+                    .pointerInput(isExpanded) {
+                        if (!isExpanded) {
+                            val touchSlop = viewConfiguration.touchSlop
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                var totalDrag = Offset.Zero
+                                var isDragging = false
+                                drag(down.id) { change ->
+                                    val delta = change.positionChange()
+                                    totalDrag += delta
+                                    if (!isDragging && totalDrag.getDistance() > touchSlop) {
+                                        isDragging = true
+                                    }
+                                    if (isDragging) {
+                                        change.consume()
+                                        val screenWidth = screenSize.x.toFloat()
+                                        val screenHeight = screenSize.y.toFloat()
+                                        fabOffset = Offset(
+                                            (fabOffset.x + delta.x).coerceIn(
+                                                -screenWidth + fabPaddingPx,
+                                                -fabTouchSizePx
+                                            ),
+                                            (fabOffset.y + delta.y).coerceIn(
+                                                -screenHeight + fabPaddingPx,
+                                                -(fabTouchSizePx + fabPaddingPx)
+                                            )
+                                        )
+                                    }
+                                }
+                                if (!isDragging) {
+                                    val isFailed = currentConnectionStatus == AgentContract.ConnectionStatus.ERROR ||
+                                            currentConnectionStatus == AgentContract.ConnectionStatus.DISCONNECTED
+                                    if (isFailed) currentOnConnect?.invoke() else currentOnToggleExpand()
+                                }
+                            }
+                        }
+                    }
+            )
         }
     }
 }

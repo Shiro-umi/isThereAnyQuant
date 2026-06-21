@@ -134,10 +134,11 @@ private fun CompactAuthLayout(
     onShowSnackbar: (String) -> Unit
 ) {
     val colorScheme = MaterialTheme.colorScheme
+    // Web 宿主 #compose-root 用 100dvh，移动浏览器键盘弹起时视口自然收缩、居中表单自动上移；
+    // 不在此处再消费一次 WindowInsets.ime，避免与宿主双重消费导致键盘弹出瞬间的 resize 抢焦
+    // （Compose Web 移动端软键盘掉焦的根因之一）。
     BoxWithConstraints(
-        modifier = Modifier
-            .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.ime),
+        modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
         val w = constraints.maxWidth.toFloat()

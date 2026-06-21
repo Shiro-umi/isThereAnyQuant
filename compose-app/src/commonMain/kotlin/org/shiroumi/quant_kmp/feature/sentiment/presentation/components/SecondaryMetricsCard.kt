@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.sp
 import model.candle.StrategySentimentResponse
 import org.shiroumi.quant_kmp.feature.sentiment.presentation.ParameterSpec
 import org.shiroumi.quant_kmp.ui.agent.theme.AgentTheme
+import org.shiroumi.quant_kmp.ui.core.adaptive.FunctionalRegion
 
 @Composable
 fun SecondaryMetricsCard(
@@ -29,17 +30,13 @@ fun SecondaryMetricsCard(
     val residual = latest?.residualScore ?: 0.0
     val floor = latest?.absoluteFloor ?: 0.0
 
-    Card(
-        modifier = Modifier.fillMaxWidth().height(cardHeight),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        ),
+    // 功能区容器统一走 FunctionalRegion：宽屏 large 大卡，手机退化无卡。
+    // 内部柱状指标以 weight/SpaceBetween 分配高度、依赖固定高，故 cardHeight 始终保留；手机只去掉卡片背景/内边距。
+    FunctionalRegion(
+        modifier = Modifier.height(cardHeight),
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp),
+            modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Row(

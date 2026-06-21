@@ -24,6 +24,7 @@ import model.candle.StrategySentimentResponse
 import org.shiroumi.quant_kmp.feature.sentiment.presentation.ParameterSpec
 import org.shiroumi.quant_kmp.feature.sentiment.presentation.ThresholdLine
 import org.shiroumi.quant_kmp.ui.agent.theme.AgentTheme
+import org.shiroumi.quant_kmp.ui.core.adaptive.FunctionalRegion
 import org.shiroumi.quant_kmp.ui.theme.quantColors
 
 @Composable
@@ -38,18 +39,14 @@ fun MarketSentimentFoundationCard(
     val bullRatioValue = latest?.let { bullRatioSpec.extractor(it) } ?: 0.0
     val ratioNormValue = latest?.let { ratioNormSpec.extractor(it) } ?: 0.0
 
-    Card(
-        modifier = Modifier.fillMaxWidth().height(cardHeight),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        ),
+    // 功能区容器统一走 FunctionalRegion：宽屏 large 大卡，手机退化无卡。
+    // 内部双图表以 weight 分配高度、依赖卡片固定高，故 cardHeight 始终保留；手机只是去掉卡片背景/内边距。
+    FunctionalRegion(
+        modifier = Modifier.height(cardHeight),
     ) {
         if (stacked) {
             Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp),
+                modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.lg)
             ) {
                 FoundationMetricPanel(
@@ -86,9 +83,7 @@ fun MarketSentimentFoundationCard(
             }
         } else {
             Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp),
+                modifier = Modifier.fillMaxSize(),
                 horizontalArrangement = Arrangement.spacedBy(AgentTheme.Spacing.lg)
             ) {
                 FoundationMetricPanel(

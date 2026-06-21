@@ -198,7 +198,9 @@ fun StrategyPositionTrackingScreen(
     val displayError = activeCalibration?.error ?: error
     var calibrationPickerVisible by remember { mutableStateOf(false) }
     val config = rememberAdaptiveLayoutConfig()
-    val pagePadding = config.pagePadding
+    // 跟踪页是沉浸式页：全景流转图贴底铺满 + 底部常驻切换按钮，外层不补底部呼吸，
+    // 否则全景图被上移、FAB 被抬离屏幕底（见 immersivePagePadding 注释）。
+    val pagePadding = config.immersivePagePadding
     var disclaimerVisible by remember { mutableStateOf(false) }
     // ≥840dp（Expanded 及以上）左列表 + 右全景流转图双栏；<840dp 列表为主、底部按钮切换全景图
     val useSplitPanes = config.isAtLeastExpanded
@@ -2158,6 +2160,19 @@ private fun TrackingSlotPnlColumn(
     pnlRise: Color,
     pnlFall: Color,
 ) {
+    // 选股节点无盈亏，右栏改展示模型买点价（无买点的票留空），与持有/清仓节点展示盈亏对称。
+    if (node.section == StrategyTrackingSection.SELECTION) {
+        node.entryHint?.let { hint ->
+            Text(
+                text = "买 ${formatTrackingPrice(hint)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = pnlRise,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
+        }
+        return
+    }
     val primaryPnl = node.exitPnl ?: node.actualPnl
     val secondaryText = node.exitReason?.label()
         ?: node.maxPnl?.let { "最高 ${formatPnlPercent(it)}" }

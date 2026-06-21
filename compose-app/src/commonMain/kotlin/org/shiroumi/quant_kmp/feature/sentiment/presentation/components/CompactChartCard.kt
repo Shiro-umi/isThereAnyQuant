@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import model.candle.StrategySentimentResponse
 import org.shiroumi.quant_kmp.feature.sentiment.presentation.ParameterSpec
 import org.shiroumi.quant_kmp.ui.agent.theme.AgentTheme
+import org.shiroumi.quant_kmp.ui.core.adaptive.FunctionalRegion
 
 @Composable
 fun CompactChartCard(
@@ -38,12 +39,11 @@ fun CompactChartCard(
     val lineColor = spec.color()
     val latestValue = latest?.let { spec.extractor(it) } ?: 0.0
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
+    // 功能区容器统一走 FunctionalRegion：手机（本组件主场景）退化无卡 + 标准边距；宽屏 medium 卡。
+    // 内容自带内边距，故 cardPadding 取 0。
+    FunctionalRegion(
         shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        ),
+        cardPadding = PaddingValues(0.dp),
     ) {
         Column {
             Column(

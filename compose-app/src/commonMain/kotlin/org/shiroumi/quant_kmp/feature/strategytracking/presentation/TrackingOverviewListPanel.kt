@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -43,6 +44,7 @@ import model.candle.StrategyTrackingNextExit
 import model.candle.StrategyTrackingSection
 import model.candle.StrategyTrackingStockNode
 import org.shiroumi.quant_kmp.ui.agent.theme.AgentTheme
+import org.shiroumi.quant_kmp.ui.core.adaptive.m3.rememberAdaptiveLayoutConfig
 import org.shiroumi.quant_kmp.ui.theme.quantColors
 
 /** 清仓记录最多展示的近端笔数。 */
@@ -329,19 +331,30 @@ private fun TrackingListRowContainer(
     onClick: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    Surface(
-        onClick = onClick,
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Box(
-            modifier = Modifier.padding(
-                horizontal = AgentTheme.Spacing.md,
-                vertical = AgentTheme.Spacing.md,
-            ),
+    val config = rememberAdaptiveLayoutConfig()
+    // 宽屏：每行一张色块卡拆分功能区。手机：退化为无卡点击行 + 底部分隔线，标准边距把空间留给内容。
+    if (config.useFunctionalCards) {
+        Surface(
+            onClick = onClick,
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            content()
+            Box(
+                modifier = Modifier.padding(
+                    horizontal = AgentTheme.Spacing.md,
+                    vertical = AgentTheme.Spacing.md,
+                ),
+            ) {
+                content()
+            }
+        }
+    } else {
+        Column(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+            Box(modifier = Modifier.padding(vertical = AgentTheme.Spacing.md)) {
+                content()
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
         }
     }
 }
@@ -599,12 +612,7 @@ private fun TrackingListRowTitle(node: StrategyTrackingStockNode) {
     }
 }
 
-private fun formatListPrice(value: Float): String {
-    val scaled = kotlin.math.round(value * 100).toInt()
-    val intPart = scaled / 100
-    val frac = kotlin.math.abs(scaled % 100)
-    return "$intPart.${frac.toString().padStart(2, '0')}"
-}
+private fun formatListPrice(value: Float): String = formatTrackingPrice(value)
 
 private fun formatModelScore(value: Double): String {
     val scaled = kotlin.math.round(value * 10000).toInt()

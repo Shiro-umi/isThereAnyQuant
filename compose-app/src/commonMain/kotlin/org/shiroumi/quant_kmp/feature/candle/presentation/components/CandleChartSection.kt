@@ -363,13 +363,18 @@ private fun CollapsedStockSummaryCard(
             animatedVisibilityScope = animatedVisibilityScope
         )
     val cardShape = if (isCompact) MaterialTheme.shapes.extraSmall else RoundedCornerShape(AgentTheme.Shapes.large)
-    val horizontalPadding = if (isCompact) 16.dp else 20.dp
+    val horizontalPadding = if (isCompact) AgentTheme.Spacing.md else 20.dp
     val verticalPadding = if (isCompact) 14.dp else 18.dp
+    // 手机：摘要折叠条背景透明（无卡）、Material3 标准水平内边距贴页边距；宽屏：surfaceContainerLow 卡。
+    val summaryColor = if (isCompact) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerLow
 
+    // 折叠态保持平贴（level0 无阴影），与展开态的升起形成 elevation 对比。
     Surface(
         modifier = cardModifier,
         shape = cardShape,
-        color = MaterialTheme.colorScheme.surfaceContainerLow
+        color = summaryColor,
+        shadowElevation = AgentTheme.Elevation.level0,
+        tonalElevation = AgentTheme.Elevation.level0
     ) {
         Row(
             modifier = Modifier
@@ -503,12 +508,18 @@ private fun ExpandedStockSummaryCard(
             animatedVisibilityScope = animatedVisibilityScope
         )
     val cardShape = if (isCompact) MaterialTheme.shapes.extraSmall else RoundedCornerShape(AgentTheme.Shapes.large)
-    val contentPadding = if (isCompact) 16.dp else 20.dp
+    // 手机：Material3 标准 16dp 四边贴页边距；宽屏：四边 20dp 卡片留白（保持原观感）。
+    val contentPadding = if (isCompact) AgentTheme.Spacing.md else 20.dp
+    // 展开抽屉盖住图表，必须用不透明面（否则蜡烛透出、阴影浮在透明面失真）。
+    val summaryColor = MaterialTheme.colorScheme.surfaceContainerLow
 
+    // 展开态抬起（level3 阴影 + compact 下叠一档 tonal），对比折叠态的 level0 形成升起观感。
     Surface(
         modifier = cardModifier,
         shape = cardShape,
-        color = MaterialTheme.colorScheme.surfaceContainerLow
+        color = summaryColor,
+        shadowElevation = AgentTheme.Elevation.level3,
+        tonalElevation = if (isCompact) AgentTheme.Elevation.level2 else AgentTheme.Elevation.level0
     ) {
         Column(
             modifier = Modifier
@@ -1025,15 +1036,17 @@ private fun ChartWorkspaceCard(
     val activeSubChartCount = listOf(showVolume, showRsi, showMacd).count { it }
 
     val cardShape = if (isCompact) RoundedCornerShape(AgentTheme.Shapes.medium) else RoundedCornerShape(AgentTheme.Shapes.large)
-    val outerPadding = if (isCompact) 12.dp else 16.dp
+    val outerPadding = if (isCompact) 0.dp else 16.dp
     val innerSpacing = if (isCompact) 8.dp else 12.dp
     val innerShape = if (isCompact) RoundedCornerShape(AgentTheme.Shapes.small) else RoundedCornerShape(AgentTheme.Shapes.large)
+    // 手机：工作区背景透明（无卡）、零外边距，把空间留给图表；宽屏：surfaceContainerLow 大卡拆分工作区。
+    val workspaceColor = if (isCompact) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerLow
 
     Card(
         modifier = modifier,
         shape = cardShape,
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+            containerColor = workspaceColor
         )
     ) {
         Column(
@@ -1055,7 +1068,8 @@ private fun ChartWorkspaceCard(
                 onToggleRsi = onToggleRsi,
                 onToggleMacd = onToggleMacd,
                 onToggleEma = onToggleEma,
-                onToggleMa = onToggleMa
+                onToggleMa = onToggleMa,
+                isCompact = isCompact
             )
 
             Surface(
@@ -1102,12 +1116,14 @@ private fun ChartControlsSection(
     onToggleRsi: (Boolean) -> Unit,
     onToggleMacd: (Boolean) -> Unit,
     onToggleEma: (Boolean) -> Unit,
-    onToggleMa: (Boolean) -> Unit
+    onToggleMa: (Boolean) -> Unit,
+    isCompact: Boolean
 ) {
+    // 手机：控件行补 Material3 标准 16dp 水平边距贴页边距（图表仍铺满）；宽屏：外层卡已有 16dp，控件仅微缩 2dp。
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 2.dp),
+            .padding(horizontal = if (isCompact) AgentTheme.Spacing.md else 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {

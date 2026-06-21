@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.widthIn
@@ -48,6 +49,7 @@ import org.shiroumi.quant_kmp.ui.components.chart.CandleChartConfig
 import org.shiroumi.quant_kmp.ui.components.chart.CandleChartPanel
 import org.shiroumi.quant_kmp.ui.components.chart.CandleMarker
 import org.shiroumi.quant_kmp.ui.components.chart.MarkerPosition
+import org.shiroumi.quant_kmp.ui.core.adaptive.m3.rememberAdaptiveLayoutConfig
 import org.shiroumi.quant_kmp.ui.theme.quantColors
 
 private const val DetailBoundsDurationMs = 380
@@ -77,6 +79,22 @@ fun StockDetailCard(
     val isLoading = detail?.isLoading ?: true
     val error = detail?.error
 
+    // 手机（Compact）：详情铺满宽度、标准 16dp 边距、低抬升，避免桌面级 680dp 大卡在窄屏溢出，把空间留给内容。
+    // 宽屏：保留 680–780dp 居中大卡 + 高抬升的工作台形态。
+    val config = rememberAdaptiveLayoutConfig()
+    val isCompact = config.isCompact
+    val outerPadding = if (isCompact) {
+        PaddingValues(horizontal = 16.dp, vertical = 16.dp)
+    } else {
+        PaddingValues(horizontal = 40.dp, vertical = 32.dp)
+    }
+    val cardWidthModifier = if (isCompact) {
+        Modifier.fillMaxWidth()
+    } else {
+        Modifier.widthIn(min = 680.dp, max = 780.dp)
+    }
+    val cardElevation = if (isCompact) 2.dp else 8.dp
+
     Box(
         modifier = modifier
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.82f))
@@ -85,12 +103,11 @@ fun StockDetailCard(
                 indication = null,
                 onClick = onDismiss,
             )
-            .padding(horizontal = 40.dp, vertical = 32.dp),
+            .padding(outerPadding),
         contentAlignment = Alignment.Center
     ) {
         ElevatedCard(
-            modifier = Modifier
-                .widthIn(min = 680.dp, max = 780.dp)
+            modifier = cardWidthModifier
                 .sharedElement(
                     sharedContentState = rememberSharedContentState(cardKey),
                     animatedVisibilityScope = sharedAnimatedVisibilityScope,
@@ -108,7 +125,7 @@ fun StockDetailCard(
             colors = CardDefaults.elevatedCardColors(
                 containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
             ),
-            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 8.dp)
+            elevation = CardDefaults.elevatedCardElevation(defaultElevation = cardElevation)
         ) {
             Column(
                 modifier = Modifier
@@ -293,6 +310,16 @@ private fun CardSuccessContent(
                     label = "买点: $buy",
                     color = MaterialTheme.quantColors.bullish
                 )
+            }
+            // 选股节点（尚未买入）展示模型给出的目标买点价，供用户次日下单参考；
+            // 无买点（entryHint == null）的票不展示——按开盘价无条件建仓，无价可参考。
+            if (section == StrategyTrackingSection.SELECTION) {
+                node.entryHint?.let { hint ->
+                    MarkerLabel(
+                        label = "目标买点: ${formatPrice(hint)}",
+                        color = MaterialTheme.quantColors.bullish
+                    )
+                }
             }
             sellDate?.let { sell ->
                 MarkerLabel(
@@ -494,7 +521,7 @@ private fun formatNumber(value: Float): String {
     return "$intPart.$decimalStr"
 }
 
-private fun formatPrice(value: Float): String = formatNumber(value)
+private fun formatPrice(value: Float): String = formatTrackingPrice(value)
 
 private fun formatSignedPrice(value: Float): String {
     val sign = if (value >= 0f) "+" else "-"

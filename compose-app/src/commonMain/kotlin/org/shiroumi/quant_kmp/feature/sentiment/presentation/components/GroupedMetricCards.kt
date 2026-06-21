@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import model.candle.StrategySentimentResponse
 import org.shiroumi.quant_kmp.feature.sentiment.presentation.ParameterSpec
 import org.shiroumi.quant_kmp.ui.agent.theme.AgentTheme
+import org.shiroumi.quant_kmp.ui.core.adaptive.FunctionalRegion
 import org.shiroumi.quant_kmp.ui.theme.quantColors
 
 @Composable
@@ -46,22 +47,15 @@ fun MomentumMetricsCard(
     val accelScoreSpec = specs.first { it.id == "accel_score" }
     val accelZ = latest?.accelZ ?: 0.0
     val accelScore = latest?.accelScore ?: 0.0
-    val contentPadding = if (compactLayout) 20.dp else 24.dp
     val contentSpacing = if (compactLayout) 16.dp else 20.dp
 
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(cardHeight),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        ),
+    // 功能区容器统一走 FunctionalRegion：宽屏 large 大卡，手机退化无卡。
+    // 内部动能面板 fillMaxSize 依赖固定高，故 cardHeight 始终保留；手机只去掉卡片背景/内边距。
+    FunctionalRegion(
+        modifier = modifier.height(cardHeight),
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(contentPadding),
+            modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(contentSpacing)
         ) {
             Row(
