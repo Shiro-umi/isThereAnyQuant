@@ -1,6 +1,7 @@
 package org.shiroumi.database.strategy.daily.repository
 
 import kotlinx.datetime.LocalDate
+import model.ws.StrategySelectionSnapshot
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
@@ -29,6 +30,10 @@ data class ProfitPredictionSelection(
     /** Agent 量价分析买点限价（QFQ 口径）；null = 无买点，持仓推进回退开盘价无条件建仓。 */
     val limitPrice: Double? = null,
 )
+
+/** 选股记录 → WS 选股快照的统一映射，盘后/历史各推送链路共用，避免逐字段散拷。 */
+fun ProfitPredictionSelection.toSelectionSnapshot(): StrategySelectionSnapshot =
+    StrategySelectionSnapshot(tsCode = tsCode, modelScore = modelScore, limitPrice = limitPrice)
 
 object DailyProfitPredictionSelectionRepository {
     fun countByDate(tradeDate: LocalDate): Long {

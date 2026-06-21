@@ -14,6 +14,8 @@ dependencies {
     implementation(project(":strategy-server:breakdown"))
     implementation(project(":database"))
     implementation(project(":shared"))
+    // 盘后选股后自动回填 agent 买点（target_date 的 selected Top-N 并发跑 agent → limit_price）。
+    implementation(project(":agent-entry"))
     implementation(libs.kotlin.coroutines.core)
     implementation(libs.kotlin.serialization.json)
     implementation(libs.kotlin.datetime)
@@ -46,7 +48,7 @@ tasks.register<JavaExec>("rebuildStrategyRange") {
             .stringPropertyNames()
             .filter {
                 it.startsWith("quant.profitPrediction.") || it.startsWith("quant.strategy.rebuild.") ||
-                    it.startsWith("quant.strategy.holding.") ||
+                    it.startsWith("quant.strategy.holding.") || it.startsWith("quant.strategy.entryBackfill.") ||
                     it == "quant.projectRoot" || it == "quant.project.root"
             }
             .associateWith { System.getProperty(it) }

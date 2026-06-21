@@ -3,6 +3,7 @@ package org.shiroumi.server.websocket.service
 import io.ktor.server.websocket.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
@@ -47,6 +48,16 @@ object AgentWebSocketService {
     private val logger by logger("AgentWebSocketService")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val json = Json { encodeDefaults = true }
+
+    // 故障收口专用线程池(与业务 IO 池物理隔离):invalidateRuntime→AcpClient.shutdown 含阻塞
+    // Thread.sleep(最多 5s)的 OS 级强杀。跑在 Dispatchers.IO 会与被卡死的 createSession 协程、
+    // AcpClient read-loop 互抢线程而被饿死,导致 OS kill 永远执行不到。有界 2 线程避免单线程下
+    // 多用户故障期一个卡 5s、N 个串行 5N 秒。用稳定 API(Executors+asCoroutineDispatcher),不引实验性。
+    private val recoveryDispatcher =
+        java.util.concurrent.Executors.newFixedThreadPool(2) { r ->
+            Thread(r, "agent-recovery").apply { isDaemon = true }
+        }.asCoroutineDispatcher()
+    private val recoveryScope = CoroutineScope(SupervisorJob() + recoveryDispatcher)
 
     private data class AgentProcessRuntime(
         val runtimeId: String,
@@ -96,6 +107,8 @@ object AgentWebSocketService {
     private val cleanupJobs = ConcurrentHashMap<String, Job>()
     private val sessionStateJobs = ConcurrentHashMap<String, Job>()
     private const val CLEANUP_DELAY_MS = 180_000L // 3 minutes
+    // ACP runtime 启动(initialize 握手)硬超时:沙箱真开 + 冷启动握手卡死时的兜底上界。
+    private const val LAUNCH_TIMEOUT_MS = 30_000L
 
     // sessionId -> 分析上下文（用户、股票、类型、交易日）
     private data class SessionContext(
@@ -645,6 +658,10 @@ object AgentWebSocketService {
                         workDir = resolvedWorkDir,
                         claudeCommand = agentConfig.claudeCommand,
                         isolated = isolated,
+                        // 用户交互 agent 上 OS 层沙箱放网客档：放实时外网(market-emotion/研报/WebSearch),
+                        // 仍锁 process-exec(拦 start-release.sh)/file-write(关 workDir)/signal target self/no-inbound(起不了 server)。
+                        // backtestMode 仍不传(默认 false)→ 工具集走实盘 6 件套、命令白名单走 LIVE,二者正交。
+                        sandboxTier = org.shiroumi.agent.acp.SandboxTier.USER,
                         apiKey = effectiveModel.apiKey,
                         configDir = agentConfig.configDir,
                         modelId = effectiveModel.modelId,
@@ -660,13 +677,20 @@ object AgentWebSocketService {
                     )
                 )
                 val acpSessionId = try {
-                    withTimeout(10_000L) { runtime.bridge.createSession(resolvedWorkDir) }
+                    val sid = withTimeout(10_000L) { runtime.bridge.createSession(resolvedWorkDir) }
+                    org.shiroumi.agent.acp.SandboxRolloutGuard.recordSuccess(org.shiroumi.agent.acp.SandboxTier.USER)
+                    sid
                 } catch (e: TimeoutCancellationException) {
                     logger.error(
-                        "[AgentWebSocketService] ✘ createSession timed out after 30s sessionId=$sessionId — invalidating broken runtime"
+                        "[AgentWebSocketService] ✘ createSession timed out after 10s sessionId=$sessionId — invalidating broken runtime"
                     )
+                    // 此 runtime 已写入 runtimesByUserId(launch 已成功)。必须【同步摘表】再 throw,否则下一个
+                    // 同 userId 的 createSession 会命中它:isHealthy 只看 process.isAlive,握手卡死的进程仍 alive
+                    // → 误判健康复用一个卡死 runtime。摘表(invalidateRuntime 内的 detach)是纯快操作,只把慢的
+                    // bridge.shutdown 异步;持锁仅覆盖摘表,不阻塞后续 getOrCreateRuntime。
+                    org.shiroumi.agent.acp.SandboxRolloutGuard.recordTimeout(org.shiroumi.agent.acp.SandboxTier.USER)
                     runtimeMutex.withLock { invalidateRuntime(runtime) }
-                    throw RuntimeException("ACP session creation timed out after 30s")
+                    throw RuntimeException("ACP session creation timed out after 10s")
                 }
                 if (!AppWebSocketConnectionManager.isSessionActive(webSocketSession)) {
                     logger.info(
@@ -831,7 +855,24 @@ object AgentWebSocketService {
         }
 
         val bridge = AgentBridgeImpl()
-        bridge.launch(config)
+        // 本次故障的真卡点(场景 A/A2 实测钉死):bridge.launch→AcpClient.initialize→client.initialize()
+        // ACP 握手在沙箱真开 + 冷启动下可能永久阻塞,且这段在 runtimeMutex 锁内、过去【无任何超时】,
+        // 而 createSession 的 withTimeout(10s) 包不到它(卡点在其作用域外)→ 解释线上"4▶0✔、无超时日志、
+        // 3m47s 不返回"。补 LAUNCH_TIMEOUT_MS 硬超时:第一条连接握手卡死≤30s 被打断,另几条阻塞在
+        // runtimeMutex 上最多等 30s 而非永久。冷启动放宽 30s(对齐沙箱 2-5s 基线 + node/SDK/kimi 首包尾延迟)。
+        try {
+            withTimeout(LAUNCH_TIMEOUT_MS) { bridge.launch(config) }
+            org.shiroumi.agent.acp.SandboxRolloutGuard.recordSuccess(config.sandboxTier)
+        } catch (e: TimeoutCancellationException) {
+            logger.error(
+                "[AgentWebSocketService] ✘ bridge.launch timed out after ${LAUNCH_TIMEOUT_MS}ms userId=$userId — killing half-started runtime"
+            )
+            // 仍在 runtimeMutex.withLock 内:收口绝不重入锁。异步在 recoveryScope 上 OS 强杀半启动进程树,
+            // 不写入 runtimesByUserId,喂 guard,rethrow 让外层 createSession 的 catch 统一报错。
+            org.shiroumi.agent.acp.SandboxRolloutGuard.recordTimeout(config.sandboxTier)
+            recoveryScope.launch { runCatching { bridge.shutdown() } }
+            throw RuntimeException("ACP runtime launch timed out after ${LAUNCH_TIMEOUT_MS}ms")
+        }
         val runtime = AgentProcessRuntime(
             runtimeId = runtimeRegistryId(userId),
             userId = userId,
@@ -911,11 +952,12 @@ object AgentWebSocketService {
         }
         runtimeMutex.withLock {
             if (sessionsByRuntimeId[runtime.runtimeId].isNullOrEmpty()) {
+                // 同步摘表(快),bridge.shutdown(含最多 5s 阻塞强杀)异步,避免持 runtimeMutex 久阻塞后续创建。
                 runtimesByUserId.remove(runtime.userId, runtime)
-                runtime.bridge.shutdown()
                 org.shiroumi.server.agent.AgentProcessRegistry.unregister(runtime.runtimeId)
+                recoveryScope.launch { runCatching { runtime.bridge.shutdown() } }
                 logger.info(
-                    "[AgentWebSocketService] Shut down idle runtime after orphan create runtimeId=${runtime.runtimeId}"
+                    "[AgentWebSocketService] Shut down idle runtime after orphan create (async) runtimeId=${runtime.runtimeId}"
                 )
             }
         }
@@ -924,19 +966,31 @@ object AgentWebSocketService {
     /**
      * 清理不健康的 Runtime：从注册表中移除、关闭 bridge、注销进程。
      * 调用方必须持有 runtimeMutex。
+     *
+     * 表项摘除(快)与 bridge.shutdown()(慢,含最多 5s 阻塞强杀)分离:摘表【同步】完成,杜绝
+     * 「runtime 已超时但仍在表中被下一次 getOrCreateRuntime 复用」(isHealthy 只看 process.isAlive,
+     * 握手卡死的进程仍 alive → 会误判健康复用)。bridge.shutdown 挪到 recoveryScope 异步,不阻塞主协程/不持锁久。
      */
     private fun invalidateRuntime(runtime: AgentProcessRuntime) {
+        detachRuntime(runtime)
+        recoveryScope.launch { runCatching { runtime.bridge.shutdown() } }
+        logger.info(
+            "[AgentWebSocketService] ✔ Invalidated unhealthy runtime (async shutdown) runtimeId=${runtime.runtimeId}"
+        )
+    }
+
+    /**
+     * 仅【同步】把 runtime 及其会话从所有注册表摘除(全是快操作,无阻塞 IO),并注销进程登记。
+     * 不含 bridge.shutdown()。调用方必须持有 runtimeMutex。摘表后该 runtime 立即不可被复用。
+     */
+    private fun detachRuntime(runtime: AgentProcessRuntime) {
         val runtimeSessionIds = sessionsByRuntimeId.remove(runtime.runtimeId).orEmpty().toList()
         runtimeSessionIds.forEach { sessionId ->
             activeSessions.remove(sessionId)
             cleanupSessionBookkeeping(sessionId)
         }
         runtimesByUserId.remove(runtime.userId, runtime)
-        runtime.bridge.shutdown()
         org.shiroumi.server.agent.AgentProcessRegistry.unregister(runtime.runtimeId)
-        logger.info(
-            "[AgentWebSocketService] ✔ Invalidated and shut down unhealthy runtime runtimeId=${runtime.runtimeId}"
-        )
     }
 
     fun closeSession(sessionId: String) {
@@ -967,14 +1021,71 @@ object AgentWebSocketService {
         }
     }
 
+    /**
+     * 重置某用户的 ACP runtime(模型切换等)。返回时该 runtime 已【同步摘表】(立即不可被复用),
+     * 但底层进程的强杀走 invalidateRuntime 内的 recoveryScope 异步收口——返回不代表进程已死。
+     * 这是有意为之:避免持 runtimeMutex 等最多 5s 的阻塞强杀。下一次 getOrCreateRuntime 因表中已无该
+     * runtime 必走新建,不会复用残体。
+     */
     suspend fun resetUserRuntime(userId: UUID) {
         runtimeMutex.withLock {
             val runtime = runtimesByUserId[userId] ?: return
             invalidateRuntime(runtime)
             logger.info(
-                "[AgentWebSocketService] ✔ Reset runtime after Agent model switch userId=$userId runtimeId=${runtime.runtimeId}"
+                "[AgentWebSocketService] ✔ Reset runtime after Agent model switch (async shutdown) userId=$userId runtimeId=${runtime.runtimeId}"
             )
         }
+    }
+
+    /**
+     * 冷启动旁路预热(USER 档)。把 node 冷加载 / claude SDK 首次初始化 / kimi 首包握手 /
+     * sandbox-exec 首跑这四项首跑尾延迟在【无真实流量】时吃掉,使线上首批真实连接落 warm 路径
+     * (直击 first-launch-vs-warm 放大因子 —— 本次故障的真卡点 launch 握手正是冷启动最慢)。
+     *
+     * 严格旁路,与线上链路逐点一致:用合成 UUID + 专用 `__warmup__` workDir,完全【不进】
+     * runtimesByUserId/runtimeMutex/sessionsByRuntimeId/activeSessions 任一注册表,onProcessStarted=null
+     * 不污染 AgentProcessRegistry 孤儿清扫,跑完即 shutdown 丢弃。真实 getOrCreateRuntime 观察到的状态
+     * 与无 warmup 时逐字相同;configKey 含 workDir,`__warmup__` 与任何真实 runtime 不相等,杜绝误复用。
+     *
+     * 守卫 isEnabled(USER):当前 disable 止血态 / guard TRIPPED 时 warmup 自动不跑,OFF 态零侵入。
+     * 整段 withTimeout(45s) + 步骤1 的 OS 强杀兜底,卡死不延迟服务可用(调用方 fire-and-forget 不 join)。
+     */
+    suspend fun warmup() {
+        if (!org.shiroumi.agent.acp.SandboxProfile.isEnabled(org.shiroumi.agent.acp.SandboxTier.USER)) {
+            logger.info("[AgentWebSocketService] warmup skipped — sandbox(USER) not enabled")
+            return
+        }
+        val agentConfig = ConfigManager.getConfig().agent
+        val warmupWorkDir = File(System.getProperty("user.home"), ".quant_agents/__warmup__").absolutePath
+        File(warmupWorkDir).mkdirs()
+        val model = AgentModelConfigResolver.resolve(quantConfig = ConfigManager.getConfig(), userConfig = null)
+        val bridge = AgentBridgeImpl()
+        logger.info("[AgentWebSocketService] ▶ warmup(USER) workDir=$warmupWorkDir model=${model.modelId ?: "default"}")
+        runCatching {
+            kotlinx.coroutines.withTimeout(45_000L) {
+                bridge.launch(
+                    AgentBridge.Config(
+                        workDir = warmupWorkDir,
+                        claudeCommand = agentConfig.claudeCommand,
+                        isolated = true,
+                        backtestMode = false,
+                        sandboxTier = org.shiroumi.agent.acp.SandboxTier.USER,
+                        apiKey = model.apiKey,
+                        configDir = agentConfig.configDir,
+                        modelId = model.modelId,
+                        baseUrl = model.baseUrl,
+                        provider = model.provider,
+                        onProcessStarted = null, // 不注册 registry,纯旁路
+                    )
+                )
+                val sid = bridge.createSession(warmupWorkDir)
+                bridge.closeSession(sid)
+            }
+            logger.info("[AgentWebSocketService] ✔ warmup(USER) complete — cold-start paths temperatured")
+        }.onFailure { e ->
+            logger.warning("[AgentWebSocketService] warmup(USER) failed (non-fatal): ${e.message}")
+        }
+        recoveryScope.launch { runCatching { bridge.shutdown() } }
     }
 
     fun shutdown() {

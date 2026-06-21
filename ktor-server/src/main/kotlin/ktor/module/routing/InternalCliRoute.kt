@@ -523,9 +523,55 @@ fun Route.internalCliRoutes() {
             }
         }
 
+        /**
+         * 沙箱灰度回退运维端点(仅 127.0.0.1 loopback)。复用本 route 既有 loopback intercept。
+         *
+         * GET  /api/internal/cli/sandbox/rollout            查 per-tier 状态与窗口计数
+         * POST /api/internal/cli/sandbox/rollout/trip?tier=USER   手动秒退某档到 OFF(不重启)
+         * POST /api/internal/cli/sandbox/rollout/rearm?tier=USER  手动重新武装某档
+         */
+        get("/sandbox/rollout") {
+            try {
+                val snap = org.shiroumi.agent.acp.SandboxRolloutGuard.snapshot()
+                // snapshot 值类型混合(String/Long/Int),转成 String 以走 ApiResponse 的稳定序列化。
+                val flat = snap.mapValues { (_, m) -> m.mapValues { it.value.toString() } }
+                call.respond(ApiResponse.success(flat))
+            } catch (e: Exception) {
+                call.respond(
+                    HttpStatusCode.InternalServerError,
+                    ApiResponse.error<Unit>("INTERNAL_ERROR", e.message ?: "服务器内部错误")
+                )
+            }
+        }
+        post("/sandbox/rollout/trip") {
+            val tier = parseSandboxTier(call.request.queryParameters["tier"])
+            if (tier == null) {
+                call.respond(HttpStatusCode.BadRequest, ApiResponse.error<Unit>("BAD_TIER", "tier 仅支持 USER / BACKFILL"))
+                return@post
+            }
+            org.shiroumi.agent.acp.SandboxRolloutGuard.forceTrip(tier)
+            call.respond(ApiResponse.success(mapOf("message" to "tier=$tier 已秒退到 OFF(沙箱裸跑,新连接生效)")))
+        }
+        post("/sandbox/rollout/rearm") {
+            val tier = parseSandboxTier(call.request.queryParameters["tier"])
+            if (tier == null) {
+                call.respond(HttpStatusCode.BadRequest, ApiResponse.error<Unit>("BAD_TIER", "tier 仅支持 USER / BACKFILL"))
+                return@post
+            }
+            org.shiroumi.agent.acp.SandboxRolloutGuard.rearm(tier)
+            call.respond(ApiResponse.success(mapOf("message" to "tier=$tier 已重新武装(新连接走沙箱)")))
+        }
+
         // L0 地基层：历史取数 endpoint（回测专用，强制 as_of 截断，绝不读 live 快照）。
         internalCliAsofRoutes()
     }
+}
+
+/** 解析 tier 查询参数为 [org.shiroumi.agent.acp.SandboxTier]（仅 USER/BACKFILL 可运维，OFF 不接受）。 */
+private fun parseSandboxTier(raw: String?): org.shiroumi.agent.acp.SandboxTier? = when (raw?.uppercase()) {
+    "USER" -> org.shiroumi.agent.acp.SandboxTier.USER
+    "BACKFILL" -> org.shiroumi.agent.acp.SandboxTier.BACKFILL
+    else -> null
 }
 
 /**

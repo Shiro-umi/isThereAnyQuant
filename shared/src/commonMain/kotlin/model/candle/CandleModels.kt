@@ -176,6 +176,8 @@ data class StrategyTrackingStockNode(
     val section: StrategyTrackingSection,
     val slotIndex: Int,
     val modelScore: Double? = null,
+    /** 选股节点：agent 量价分析给出的次日目标买点价（QFQ 口径）；null = 无买点（回退开盘价无条件建仓）。 */
+    val entryHint: Float? = null,
     val buyDate: String? = null,
     val buyPrice: Float? = null,
     val actualPnl: Float? = null,

@@ -8,7 +8,6 @@ import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.types.int
 import com.github.ajalt.clikt.parameters.types.long
 import com.github.ajalt.clikt.parameters.types.path
-import java.io.File
 import java.nio.file.Path
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,7 +18,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.datetime.LocalDate
-import org.shiroumi.cli.batch.AgentEntryPriceAnalyzer
+import org.shiroumi.agententry.AgentEntryBackfiller
+import org.shiroumi.agententry.AgentEntryPriceAnalyzer
 import org.shiroumi.config.AgentModelResolution
 import org.shiroumi.config.ConfigManager
 import org.shiroumi.database.strategy.daily.repository.DailyProfitPredictionSelectionRepository
@@ -108,11 +108,8 @@ class AgentEntryBackfillCommand : CliktCommand(
                 )
             }
 
-        val runId = "entry-backfill-${targetDate}"
-        val workspaceBase = (workspaceBaseDir?.toFile()
-            ?: File(System.getProperty("user.home"), ".quant_entry_backfill"))
-            .let { File(it, runId) }
-        val projectRoot = File(System.getProperty("quant.project.root") ?: System.getProperty("user.dir"))
+        val workspaceBase = AgentEntryBackfiller.workspaceFor(targetDate, workspaceBaseDir?.toFile())
+        val projectRoot = AgentEntryBackfiller.resolveProjectRoot()
 
         echo("[entry-backfill] target_date=$targetDate 候选=${selections.size} 待跑=${tasks.size} 并发=$effectiveParallelism" +
             (if (parallelism <= 0) "（自动=CPU $cpuCores 核）" else ""))
@@ -127,26 +124,17 @@ class AgentEntryBackfillCommand : CliktCommand(
         val results = tasks.map { task ->
             scope.async {
                 gate.withPermit {
-                    val result = AgentEntryPriceAnalyzer.analyzeOneStock(
+                    AgentEntryBackfiller.backfillOne(
+                        targetDate = targetDate,
+                        signalDate = task.signalDate,
+                        tsCode = task.tsCode,
                         projectRoot = projectRoot,
                         workspaceBase = workspaceBase,
                         serverPort = serverPort,
                         model = model,
-                        task = task,
                         perStockTimeoutSec = perStockTimeoutSec,
                         onLog = { echo("[entry-backfill]   $it") },
                     )
-                    // 成功则解析买点回填 DB；失败/无买点不写（持仓推进回退开盘价无条件建仓）。
-                    val limit = result.perStockFile?.let(AgentEntryPriceAnalyzer::parseBuyPoint)
-                    if (result.ok && limit != null) {
-                        val rows = DailyProfitPredictionSelectionRepository
-                            .updateLimitPrice(targetDate, task.tsCode, limit)
-                        echo("[entry-backfill]   ✔ ${task.tsCode} 买点=$limit 回填行数=$rows")
-                        rows > 0
-                    } else {
-                        echo("[entry-backfill]   ✘ ${task.tsCode} 无买点（失败或未产出），回退开盘价建仓")
-                        false
-                    }
                 }
             }
         }.awaitAll()

@@ -73,6 +73,13 @@ interface AgentBridge {
         val isolated: Boolean = true,
         /** 回测模式：true 时底层命令白名单切换为回测专用白名单（仅 as-of 历史取数 + bc）。默认 false。 */
         val backtestMode: Boolean = false,
+        /**
+         * OS 层沙箱档位（与 [backtestMode] 正交）：
+         *  - [org.shiroumi.agent.acp.SandboxTier.OFF]：无沙箱（默认，老调用方零侵入）。
+         *  - [org.shiroumi.agent.acp.SandboxTier.BACKFILL]：回填档，禁实时外网（盘后回填 agent）。
+         *  - [org.shiroumi.agent.acp.SandboxTier.USER]：放网客，放实时外网仍锁 exec/write/signal/no-inbound（用户交互 agent）。
+         */
+        val sandboxTier: org.shiroumi.agent.acp.SandboxTier = org.shiroumi.agent.acp.SandboxTier.OFF,
         val preferZedAcpAgent: Boolean = true,
         /** 注入到 claude 进程的 ANTHROPIC_API_KEY，空字符串时不覆盖环境变量 */
         val apiKey: String = "",

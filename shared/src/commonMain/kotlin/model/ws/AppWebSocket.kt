@@ -439,7 +439,9 @@ data class TargetPosition(
     val postMarketSelected: Boolean? = null,
     val postMarketWeight: Double? = null,
     val action: String? = null,
-    val actionReason: String? = null
+    val actionReason: String? = null,
+    /** Agent 量价分析买点限价（QFQ 口径）；沿用盘后目标组合，null = 无买点。 */
+    val limitPrice: Double? = null
 )
 
 /**
@@ -484,6 +486,8 @@ enum class PositionSource {
 data class StrategySelectionSnapshot(
     val tsCode: String,
     val modelScore: Double,
+    /** Agent 量价分析给出的次日目标买点价（QFQ 口径）；null = 无买点。 */
+    val limitPrice: Double? = null,
 )
 
 @Serializable

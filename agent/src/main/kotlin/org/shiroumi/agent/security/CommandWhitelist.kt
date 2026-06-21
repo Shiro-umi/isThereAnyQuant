@@ -12,6 +12,12 @@ package org.shiroumi.agent.security
  *
  * 工具产物本身按方案 A 指向 *-asof 二进制，但 toolName 保持 get-candles 等不变，
  * 因此白名单仍按 `./get-candles` 之类的名字匹配，无需感知底层是否 asof。
+ *
+ * 注意(本机实测固化):claude SDK 在内部自行 spawn Bash 执行工具命令,ACP client 的 terminal 通道
+ * (`AcpClient.QuantClientSessionOperations.terminalCreate`)从未被 @zed-industries/claude-agent-acp
+ * 调用 → 本白名单当前不在任何执行路径上拦命令,属语义文档 + 纵深保留(规则被 CommandWhitelistBacktestTest 锁定)。
+ * 回测回填 agent 的真正 OS 层关押由 [org.shiroumi.agent.acp.SandboxProfile] 承担:process-exec 白名单
+ * 拦 projectRoot 根下脚本(start-release.sh/deploy.sh/gradlew),无 network-inbound 让 JVM 绑不了监听端口。
  */
 object CommandWhitelist {
 

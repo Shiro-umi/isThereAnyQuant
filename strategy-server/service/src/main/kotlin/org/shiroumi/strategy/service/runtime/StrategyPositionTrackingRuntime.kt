@@ -236,7 +236,8 @@ class StrategyPositionTrackingRuntime(
                         stockNames = stockNames,
                         section = StrategyTrackingSection.SELECTION,
                         slotIndex = idx,
-                        modelScore = selection.modelScore
+                        modelScore = selection.modelScore,
+                        entryHint = selection.limitPrice
                     )
                 }
             // 持仓列：当日仍在持有的票，buyDate 取状态机 entryDate（用于跨多日连线追溯）
@@ -324,7 +325,8 @@ class StrategyPositionTrackingRuntime(
                         stockNames = stockNames,
                         section = StrategyTrackingSection.SELECTION,
                         slotIndex = idx,
-                        modelScore = selection.modelScore
+                        modelScore = selection.modelScore,
+                        entryHint = selection.limitPrice
                     )
                 },
             holdings = currentPositions.mapIndexed { idx, code ->
@@ -352,6 +354,7 @@ class StrategyPositionTrackingRuntime(
         section: StrategyTrackingSection,
         slotIndex: Int,
         modelScore: Double? = null,
+        entryHint: Double? = null,
         buyDate: String? = null
     ) = StrategyTrackingStockNode(
         stockCode = code,
@@ -359,6 +362,7 @@ class StrategyPositionTrackingRuntime(
         section = section,
         slotIndex = slotIndex,
         modelScore = modelScore,
+        entryHint = entryHint?.toFloat(),
         buyDate = buyDate
     )
 

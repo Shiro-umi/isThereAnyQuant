@@ -12,6 +12,8 @@ dependencies {
     implementation(projects.database)
     // batch-agent-driver 复用 AgentBridge 并发驱动回测 agent（agent 模块仅依赖 shared，边界干净）。
     implementation(projects.agent)
+    // agent 量价买点分析共享内核（回测对照 + 生产回填共用），下沉到 :agent-entry 模块。
+    implementation(projects.agentEntry)
 
     // Logging
     implementation(libs.logback)

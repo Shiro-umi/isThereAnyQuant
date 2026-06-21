@@ -114,6 +114,8 @@ class AcpClient(
         val isolated: Boolean = true,
         /** 回测模式：true 时命令白名单切换为回测专用白名单（仅 as-of 历史取数 + bc）。默认 false。 */
         val backtestMode: Boolean = false,
+        /** OS 层沙箱档位（与 [backtestMode] 正交）：OFF=无沙箱；BACKFILL=回填档禁实时外网；USER=放网客放实时外网。默认 OFF。 */
+        val sandboxTier: SandboxTier = SandboxTier.OFF,
         val preferZedAcpAgent: Boolean = true,
         val apiKey: String = "",
         val configDir: String? = null,
@@ -142,7 +144,19 @@ class AcpClient(
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
         val workDir = java.io.File(config.workDir).also { it.mkdirs() }
+
+        // agent 走 macOS sandbox-exec 把整棵子进程树关进 OS 层沙箱(档位见 SandboxTier):
+        // process-exec 白名单拦 projectRoot 根下脚本(start-release.sh/deploy.sh/gradlew → exit 126)、
+        // 无 network-inbound 让 JVM 绑不了监听端口(起不了 server)、file-write 关押到 workDir、
+        // signal target self 让它杀不了别的进程。锁死「agent 起脱缰进程弄挂生产 server」的事故面。
+        // 档位只决定 network 一段:BACKFILL 禁实时外网、USER 放实时外网,其余四道关两档相同。
+        // OFF(默认,LIVE 实盘等)零侵入:sandboxPrefix 为空、args 字节等价、env 不收窄。
+        val sandboxOn = SandboxProfile.isEnabled(config.sandboxTier)
+        val sandboxPrefix = if (sandboxOn) SandboxProfile.execPrefix(workDir, config.sandboxTier, claudeCmd) else emptyList()
+        logger.info { "[AcpClient] sandbox=${if (sandboxPrefix.isNotEmpty()) "ON" else "OFF"} (tier=${config.sandboxTier})" }
+
         val args = buildList {
+            addAll(sandboxPrefix)
             add(claudeCmd)
             add("--dangerously-skip-permissions")
             if (config.isolated) {
@@ -158,9 +172,34 @@ class AcpClient(
             .directory(workDir)
             .redirectError(ProcessBuilder.Redirect.INHERIT)
 
+        // 沙箱启用时收窄子进程环境:PATH 只留取数链必需目录、HOME 指向 workDir、剔除注入型 dylib。
+        // 必须在 CLAUDE_CONFIG_DIR 与 injectAuthEnv 回填鉴权之前——二者是覆盖式写,鉴权 env 不会被抹。
+        // 判据用 sandboxPrefix.isNotEmpty()(非 sandboxOn):execPrefix 写失败降级返回空前缀时,
+        // args 不带 sandbox、env 也不收窄,与裸跑完全一致,不出现「裸跑却收窄 PATH」的分裂态。
+        if (sandboxPrefix.isNotEmpty()) {
+            val env = processBuilder.environment()
+            env["PATH"] = "/usr/bin:/bin:/opt/homebrew/bin"
+            env["HOME"] = workDir.absolutePath
+            env.remove("DYLD_INSERT_LIBRARIES")
+            env.remove("DYLD_LIBRARY_PATH")
+            env.remove("DYLD_FRAMEWORK_PATH")
+            // JAVA_HOME 不动:保留则取数启动器走首选分支;即便缺失,SandboxProfile 已放行
+            // /usr/bin/java + /usr/libexec + $JAVA_HOME 子树兜底。
+        }
+
         if (config.isolated) {
-            val resolvedConfigDir = config.configDir?.let { java.io.File(it) }
-                ?: workDir.resolve(".claude-isolated")
+            // configDir 的 `~` / `~/` 展开为 $HOME —— JVM 不像 shell 那样展开 `~`,
+            // 否则 config.yaml 写的 `~/.quant_agents/config_isolated` 会落成相对 cwd 的字面
+            // `~` 目录(沙箱真开时不在 file-write 白名单,每次 initialize 产 deny 噪声)。
+            // 仅支持当前用户家目录(`~` 与 `~/`),不处理 `~otheruser/`。
+            val resolvedConfigDir = config.configDir?.let { raw ->
+                val expanded = when {
+                    raw == "~" -> System.getProperty("user.home")
+                    raw.startsWith("~/") -> System.getProperty("user.home") + raw.substring(1)
+                    else -> raw
+                }
+                java.io.File(expanded)
+            } ?: workDir.resolve(".claude-isolated")
             resolvedConfigDir.mkdirs()
             processBuilder.environment()["CLAUDE_CONFIG_DIR"] = resolvedConfigDir.absolutePath
             logger.info { "[AcpClient] 🛡 Isolated mode active, CLAUDE_CONFIG_DIR=${resolvedConfigDir.absolutePath}" }
@@ -315,14 +354,10 @@ class AcpClient(
         clientOperations = null
         config = null
 
-        try {
-            protocol?.close()
-            logger.info { "[AcpClient] Protocol closed" }
-        } catch (e: Exception) {
-            logger.error(e) { "[AcpClient] Error closing protocol" }
-        }
-
-        // 递归杀掉整个进程树
+        // 收口顺序(实测固化):先 OS 级强杀整棵子进程树,再 protocol.close()。
+        // 反例(旧顺序先 close 再 kill):若 protocol.close() 因 transport read/write job 卡死而 hang,
+        // OS 强杀永远到不了,"OS 强杀一定能收口"的承诺破产 —— launch/newSession 握手卡死时正是此态。
+        // 子进程被 kill 后其 stdout 关闭,transport read-loop 自然结束,protocol.close 反而更容易返回。
         val p = process
         if (p != null && p.isAlive) {
             val pid = p.pid()
@@ -365,6 +400,14 @@ class AcpClient(
             }
 
             logger.info { "[AcpClient] Process tree terminated" }
+        }
+
+        // 进程树已被强杀,此时 close 不会被卡死的 read/write job 永久阻塞。
+        try {
+            protocol?.close()
+            logger.info { "[AcpClient] Protocol closed" }
+        } catch (e: Exception) {
+            logger.error(e) { "[AcpClient] Error closing protocol" }
         }
 
         scope?.cancel()

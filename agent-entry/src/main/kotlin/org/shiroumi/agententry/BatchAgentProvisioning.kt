@@ -1,4 +1,4 @@
-package org.shiroumi.cli.batch
+package org.shiroumi.agententry
 
 import java.io.File
 import org.shiroumi.agent.impl.SkillManager
@@ -8,8 +8,8 @@ import org.shiroumi.agent.impl.SkillManager
  *
  * 业务背景：生产链路里同一套隔离装配由 ktor-server 的 `BacktestAgentProvisioning`（internal）承担，
  * 在 WebSocket 建会话时给 agent 布 skill 软链、CLAUDE.md、禁联网 settings.json、历史取数工具 wrapper。
- * 本驱动跑在 cli 模块，按 KMP 模块依赖边界 cli 不允许依赖 ktor-server，因此把这段「应用层隔离装配」逻辑
- * 在 cli 侧等价落地（与 ktor-server 同口径），不破坏边界、也不缩水。
+ * 本驱动跑在 agent-entry 模块（按 KMP 模块依赖边界不允许依赖 ktor-server），因此把这段「应用层隔离装配」
+ * 逻辑在此等价落地（与 ktor-server 同口径），不破坏边界、也不缩水。
  *
  * 与生产装配的唯一差异：
  *  - wrapper 在 exec 历史取数二进制前写死注入 `--as-of={信号日T}`，把每个信号日的工作空间锁死在该信号日，

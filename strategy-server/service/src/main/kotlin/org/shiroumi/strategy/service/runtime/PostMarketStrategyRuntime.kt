@@ -5,12 +5,12 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import model.ws.PositionSource
-import model.ws.StrategySelectionSnapshot
 import model.ws.StrategyPositionSnapshot
 import org.shiroumi.database.common.repository.TradingCalendarRepository
 import org.shiroumi.database.strategy.daily.repository.DailyProfitPredictionSelectionRepository
 import org.shiroumi.database.strategy.daily.repository.DailyStrategyHoldingRepository
 import org.shiroumi.database.strategy.daily.repository.ProfitPredictionSelection
+import org.shiroumi.database.strategy.daily.repository.toSelectionSnapshot
 import org.shiroumi.database.strategy.daily.repository.DailyStrategyAuditRepository
 import org.shiroumi.strategy.client.LocalStrategySnapshotHub
 import org.shiroumi.strategy.contract.StrategyTopic
@@ -167,9 +167,7 @@ class PostMarketStrategyRuntime(
             currentPositions = currentPositions,
             source = PositionSource.DAILY_AUDIT_COMPLETE,
             nextSessionSelections = nextSessionSelectionCodes,
-            nextSessionSelectionDetails = nextSessionSelections.map {
-                StrategySelectionSnapshot(tsCode = it.tsCode, modelScore = it.modelScore)
-            },
+            nextSessionSelectionDetails = nextSessionSelections.map { it.toSelectionSnapshot() },
             newlySelected = newlySelected
         )
     }

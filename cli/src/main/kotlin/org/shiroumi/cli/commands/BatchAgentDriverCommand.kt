@@ -29,7 +29,7 @@ import org.shiroumi.backtest.domain.Side
 import org.shiroumi.backtest.domain.StrategyDecision
 import org.shiroumi.backtest.feed.DecisionFile
 import org.shiroumi.backtest.feed.DecisionFileJson
-import org.shiroumi.cli.batch.AgentEntryPriceAnalyzer
+import org.shiroumi.agententry.AgentEntryPriceAnalyzer
 import org.shiroumi.config.AgentModelResolution
 import org.shiroumi.config.ConfigManager
 import org.shiroumi.database.common.repository.TradingCalendarRepository

@@ -19,7 +19,9 @@ data class TargetPosition(
     val postMarketSelected: Boolean?,
     val postMarketWeight: Double?,
     val action: String?,
-    val actionReason: String?
+    val actionReason: String?,
+    /** Agent 量价分析买点限价；沿用盘后目标组合，盘中不重算。null = 无买点。 */
+    val limitPrice: Double? = null
 )
 
 /**
@@ -80,7 +82,8 @@ object IntradayPortfolioGenerator {
                 postMarketSelected = true,
                 postMarketWeight = postMarketPosition.targetWeight,
                 action = null,
-                actionReason = null
+                actionReason = null,
+                limitPrice = postMarketPosition.limitPrice
             )
         }
 

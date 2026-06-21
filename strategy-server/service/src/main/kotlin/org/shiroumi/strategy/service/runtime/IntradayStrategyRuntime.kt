@@ -407,7 +407,13 @@ class IntradayStrategyRuntime(
         val selectedDetails = payload.portfolio
             .filter { it.selected }
             .sortedWith(compareByDescending<TargetPosition> { it.rankScore }.thenBy { it.tsCode })
-            .map { StrategySelectionSnapshot(tsCode = it.tsCode, modelScore = it.rankScore) }
+            .map {
+                StrategySelectionSnapshot(
+                    tsCode = it.tsCode,
+                    modelScore = it.rankScore,
+                    limitPrice = it.limitPrice,
+                )
+            }
         val selectedCodes = selectedDetails.map { it.tsCode }
         val currentPositions = dataSource.loadCurrentPositionCodes(tradeDate)
         return StrategyPositionSnapshot(
@@ -479,7 +485,8 @@ class IntradayStrategyRuntime(
         postMarketSelected = postMarketSelected,
         postMarketWeight = postMarketWeight,
         action = action,
-        actionReason = actionReason
+        actionReason = actionReason,
+        limitPrice = limitPrice
     )
 
     private fun String.toPriceBasisOrNull(): PriceBasis? =

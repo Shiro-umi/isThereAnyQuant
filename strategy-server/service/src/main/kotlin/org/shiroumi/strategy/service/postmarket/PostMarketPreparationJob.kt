@@ -435,6 +435,21 @@ object PostMarketPreparationJob {
             positions = targets,
         )
 
+        // agent 买点回填：对刚选出的 target_date=nextTradeDate 这批 selected Top-N 票并发跑 agent 量价分析，
+        // 回填 daily_profit_prediction_selection.limit_price。买点同时生效于跟踪页「目标买点」展示与
+        // 次日盘后 advanceHoldings 的 LIMIT 入场口径（当日 advanceHoldings 读的是 target_date=tradeDate
+        // 那批，不是本批，故回填本批不影响当日入场）。覆盖率不足时阻断盘后走补偿队列重跑。
+        val backfillConfig = AgentEntryBackfillConfig.fromSystemProperties()
+        if (backfillConfig.enabled) {
+            val outcome = AgentEntryBackfillStep.backfill(targetDate = nextTradeDate, config = backfillConfig)
+            if (outcome.coverage < backfillConfig.minCoverage) {
+                throw AgentEntryBackfillInsufficientCoverageException(
+                    "买点回填覆盖率不足 target_date=$nextTradeDate filled=${outcome.filled}/${outcome.candidates} " +
+                        "coverage=${outcome.coverage} min=${backfillConfig.minCoverage}"
+                )
+            }
+        }
+
         // 持仓状态机推进：用前一交易日选股（target_date=tradeDate 的 selected 票）作为当日新入场候选，
         // 对前一交易日持仓做止盈止损判定，产出当日持仓快照。
         val holdingResult = advanceHoldings(

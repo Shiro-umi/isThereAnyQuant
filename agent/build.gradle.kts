@@ -42,6 +42,11 @@ kotlin {
 
 tasks.test {
     useJUnitPlatform()
+    // 透传线上链路复现实验所需的系统属性到 fork 的 test JVM（密钥仅手动传入，不入仓）
+    listOf("runLiveSandbox", "quant.project.root", "kimiToken", "liveSandboxWorkDir").forEach { key ->
+        System.getProperty(key)?.let { systemProperty(key, it) }
+    }
+    testLogging { showStandardStreams = true }
 }
 
 application {

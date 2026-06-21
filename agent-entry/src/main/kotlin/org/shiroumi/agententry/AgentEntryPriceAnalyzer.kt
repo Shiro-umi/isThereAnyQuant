@@ -1,4 +1,4 @@
-package org.shiroumi.cli.batch
+package org.shiroumi.agententry
 
 import java.io.File
 import kotlinx.coroutines.flow.first
@@ -24,6 +24,11 @@ import org.shiroumi.config.AgentModelResolution
  * 并提供 [parseBuyPoint] 把文件解析为 limitPrice（与 [org.shiroumi.backtest.feed.AgentEntryPriceFeed] 口径一致）。
  */
 object AgentEntryPriceAnalyzer {
+
+    /** ACP launch(initialize 握手)硬超时:沙箱真开 + 冷启动握手卡死的兜底上界,与 USER 档一致。 */
+    private const val LAUNCH_TIMEOUT_MS = 30_000L
+    /** ACP createSession(newSession)硬超时:单 attempt 卡死上界,与 USER 档一致。 */
+    private const val CREATE_SESSION_TIMEOUT_MS = 10_000L
 
     /** 单只分析任务：信号日（as-of 锚）、执行日（产物命名/回填键）、股票代码。 */
     data class StockTask(
@@ -74,24 +79,45 @@ object AgentEntryPriceAnalyzer {
 
         val bridge = AgentBridgeImpl()
         try {
-            bridge.launch(
-                AgentBridge.Config(
-                    workDir = workDir.absolutePath,
-                    claudeCommand = null,
-                    isolated = true,
-                    backtestMode = true, // 回测命令白名单：禁日期参数 / 禁 market-emotion / 禁研报
-                    preferZedAcpAgent = true,
-                    apiKey = model.apiKey,
-                    configDir = null,
-                    modelId = model.modelId,
-                    baseUrl = model.baseUrl,
-                    provider = model.provider,
+            // BACKFILL 档同走 sandbox-exec,launch(initialize 握手)与 createSession(newSession)在沙箱真开 +
+            // 冷启动下可能永久阻塞。盘后无人值守批量回填里单票卡死会无限占线程/句柄、拖死整批并泄漏进程。
+            // 补硬超时使单票卡死有界:launch 超时→本票启动失败(走最终 false);createSession 超时→本 attempt
+            // 失败进下一次重试。guard 因 BACKFILL 批量超时 TRIP 后,后续票自动 OFF 裸跑,保住回填覆盖率。
+            val launched = withTimeoutOrNull(LAUNCH_TIMEOUT_MS) {
+                bridge.launch(
+                    AgentBridge.Config(
+                        workDir = workDir.absolutePath,
+                        claudeCommand = null,
+                        isolated = true,
+                        backtestMode = true, // 回测命令白名单：禁日期参数 / 禁 market-emotion / 禁研报
+                        sandboxTier = org.shiroumi.agent.acp.SandboxTier.BACKFILL, // OS 层沙箱回填档：禁实时外网
+                        preferZedAcpAgent = true,
+                        apiKey = model.apiKey,
+                        configDir = null,
+                        modelId = model.modelId,
+                        baseUrl = model.baseUrl,
+                        provider = model.provider,
+                    )
                 )
-            )
+                true
+            }
+            if (launched == null) {
+                org.shiroumi.agent.acp.SandboxRolloutGuard.recordTimeout(org.shiroumi.agent.acp.SandboxTier.BACKFILL)
+                onLog("✘ $tsCode launch 超时(${LAUNCH_TIMEOUT_MS}ms)，本票启动失败")
+                return StockResult(signalDate, tsCode, ok = false, perStockFile = null)
+            }
+            org.shiroumi.agent.acp.SandboxRolloutGuard.recordSuccess(org.shiroumi.agent.acp.SandboxTier.BACKFILL)
             repeat(2) { attempt ->
                 try {
                     perStockFile.delete() // 重试前清残留，确保产出判定干净
-                    val sessionId = bridge.createSession(workDir.absolutePath)
+                    val sessionId = withTimeoutOrNull(CREATE_SESSION_TIMEOUT_MS) {
+                        bridge.createSession(workDir.absolutePath)
+                    }
+                    if (sessionId == null) {
+                        org.shiroumi.agent.acp.SandboxRolloutGuard.recordTimeout(org.shiroumi.agent.acp.SandboxTier.BACKFILL)
+                        onLog("✘ $tsCode 第 ${attempt + 1} 次 createSession 超时(${CREATE_SESSION_TIMEOUT_MS}ms)")
+                        return@repeat
+                    }
                     try {
                         bridge.sendCommand(
                             sessionId,

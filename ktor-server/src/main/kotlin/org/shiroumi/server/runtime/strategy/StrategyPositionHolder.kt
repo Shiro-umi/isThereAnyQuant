@@ -4,10 +4,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import model.ws.PositionSource
-import model.ws.StrategySelectionSnapshot
 import model.ws.StrategyPositionSnapshot
 import org.shiroumi.database.common.repository.TradingCalendarRepository
 import org.shiroumi.database.strategy.daily.repository.DailyProfitPredictionSelectionRepository
+import org.shiroumi.database.strategy.daily.repository.toSelectionSnapshot
 import org.shiroumi.database.strategy.daily.repository.DailyStrategyAuditRepository
 import org.shiroumi.server.runtime.market.resolveEffectiveTradeDate
 import utils.logger
@@ -91,9 +91,7 @@ object StrategyPositionHolder {
             currentPositions = positions,
             source = PositionSource.HISTORICAL_AUDIT,
             nextSessionSelections = nextSessionSelections,
-            nextSessionSelectionDetails = nextSessionSelectionRecords.map {
-                StrategySelectionSnapshot(tsCode = it.tsCode, modelScore = it.modelScore)
-            },
+            nextSessionSelectionDetails = nextSessionSelectionRecords.map { it.toSelectionSnapshot() },
             newlySelected = newlySelected,
         )
     }

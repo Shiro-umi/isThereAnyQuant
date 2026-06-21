@@ -63,6 +63,7 @@ class AgentBridgeImpl : AgentBridge {
                     workDir = config.workDir,
                     isolated = config.isolated,
                     backtestMode = config.backtestMode,
+                    sandboxTier = config.sandboxTier,
                     preferZedAcpAgent = config.preferZedAcpAgent,
                     apiKey = config.apiKey,
                     configDir = config.configDir,

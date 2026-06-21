@@ -109,6 +109,13 @@ fun Application.module() {
         DataUpdateService.startScheduler()
     }
 
+    // 沙箱真开时旁路预热 USER 档 agent 冷启动链路(node/SDK/kimi握手/sandbox-exec 首跑),
+    // 使首批真实连接落 warm。fire-and-forget:不 join、不进 embeddedServer().start(wait=true) 关键路径;
+    // isEnabled(USER) 守卫使 disable 止血态下自动不跑,OFF 态零侵入。
+    launch {
+        org.shiroumi.server.websocket.service.AgentWebSocketService.warmup()
+    }
+
     contentNegotiation()
     configureStaticContent()
     compression()

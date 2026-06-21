@@ -54,6 +54,8 @@ APP_OPTS="${APP_OPTS:-"
     -Dquant.project.root=${PROJECT_ROOT}
     -Dquant.profitPrediction.servicePort=${PROFIT_PREDICTION_INFER_PORT}
     -Dquant.strategy.holding.breakdownRerank=true
+    -Dquant.strategy.entryBackfill.enabled=true
+    -Dquant.strategy.entryBackfill.modelKey=deepseek-v4-flash
 "}"
 
 mkdir -p "$LOG_DIR"
