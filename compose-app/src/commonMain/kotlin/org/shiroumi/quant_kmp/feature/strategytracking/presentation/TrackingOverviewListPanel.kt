@@ -492,6 +492,17 @@ private fun TrackingSelectionListRow(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                // 模型买点：agent 量价分析给出的次日目标买入价，是用户参考下单的核心信号。
+                // 文案与详情卡统一为「目标买点」，区别于「买点（买入日期）」，避免价格与日期撞名。
+                // 无买点（entryHint == null）的票不渲染该行——这类票按开盘价无条件建仓，无价可参考。
+                node.entryHint?.let {
+                    Text(
+                        text = "目标买点 ${formatListPrice(it)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.quantColors.bullish,
+                    )
+                }
             }
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 node.currentPrice?.let {
