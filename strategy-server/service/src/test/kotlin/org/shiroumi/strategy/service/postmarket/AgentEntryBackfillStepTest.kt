@@ -117,15 +117,16 @@ class AgentEntryBackfillStepTest {
 
     @Test
     fun `topN 截断 只回填前N只`() = runTest {
-        val selections = (1..5).map { selection("00000$it.SZ", 1.0 - it * 0.01) }
+        // 候选 6 只，topN=5 → 取模型分前 5 只回填（第 6 只不进入回填范围）。
+        val selections = (1..6).map { selection("00000$it.SZ", 1.0 - it * 0.01) }
         val outcome = AgentEntryBackfillStep.backfill(
             targetDate = targetDate,
-            config = config.copy(topN = 3),
+            config = config.copy(topN = 5),
             loadSelections = { selections },
             backfillOne = { _, _, _ -> true },
         )
-        assertEquals(3, outcome.candidates)
-        assertEquals(3, outcome.filled)
+        assertEquals(5, outcome.candidates)
+        assertEquals(5, outcome.filled)
     }
 
     @Test
@@ -155,8 +156,8 @@ class AgentEntryBackfillStepTest {
         val cfg = AgentEntryBackfillConfig.fromSystemProperties()
         assertTrue(cfg.enabled)
         assertEquals(1.0, cfg.minCoverage)
-        assertEquals(3, cfg.topN)
-        assertEquals(3, cfg.parallelism)
+        assertEquals(5, cfg.topN)
+        assertEquals(5, cfg.parallelism)
         assertEquals(300L, cfg.perStockTimeoutSec)
         assertEquals(null, cfg.modelKey)
     }

@@ -68,7 +68,7 @@ object AgentEntryBackfillStep {
         },
         backfillOne: SingleBackfill = defaultBackfillOne(config, targetDate),
     ): Outcome {
-        // 当日 selected 票（已按模型分降序），取前 topN——即生产实盘等权 Top3 的入场候选。
+        // 当日 selected 票（已按模型分降序），取前 topN（默认 5，即全部 selected 票）。
         val selections = loadSelections(targetDate).take(config.topN)
         if (selections.isEmpty()) {
             logger.info("[买点回填] target_date=$targetDate 无 selected 票，跳过")

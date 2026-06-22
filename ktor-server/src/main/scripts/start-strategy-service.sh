@@ -54,9 +54,15 @@ APP_OPTS="${APP_OPTS:-"
     -Dquant.project.root=${PROJECT_ROOT}
     -Dquant.profitPrediction.servicePort=${PROFIT_PREDICTION_INFER_PORT}
     -Dquant.strategy.holding.breakdownRerank=true
+    -Dquant.strategy.holding.maxDailyEntries=0
     -Dquant.strategy.entryBackfill.enabled=true
     -Dquant.strategy.entryBackfill.modelKey=deepseek-v4-flash
 "}"
+# maxDailyEntries=0：放开每日入场上限——选股 Top5 全部回填买点（entryBackfill 默认 topN=5），
+# 实际入场由 LIMIT 触达判定（当日股价触碰买点才建仓），触价即买、不限只数（最多 Top5），
+# 使前端展示的 5 个买点与实际可建仓只数一致。回滚 Top3 集中口径：删除本行或设为 3。
+# 注：入场上限关闭后 breakdownRerank 自动失效（破位重排仅在入场上限开启时参与排序），
+# 保留该开关仅为回滚 Top3 时复用，当前为空操作。
 
 mkdir -p "$LOG_DIR"
 mkdir -p "$DATA_DIR"

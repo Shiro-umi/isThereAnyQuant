@@ -2,10 +2,12 @@ package org.shiroumi.strategy.service.postmarket
 
 /**
  * 盘后选股后自动回填 agent 买点的配置（系统属性口径，与 [HoldingStateMachine.ExitRules.fromSystemProperties]
- * 同范式）。全部缺省 = 自动回填开启、Top3 全成功才放行。
+ * 同范式）。全部缺省 = 自动回填开启、Top5 全成功才放行。
  *
  * 业务定位：选股写库后、持仓推进前，对 target_date 的 selected Top-N 票并发跑 agent 量价分析产出买点限价，
- * 回填 `daily_profit_prediction_selection.limit_price`。买点同时生效于跟踪页展示与次日盘后 LIMIT 入场口径。
+ * 回填 `daily_profit_prediction_selection.limit_price`。默认 Top-N = 5，即回填全部 selected 票，
+ * 前端选股结果页展示全部 5 只买入价；实际是否入场由次日盘后 LIMIT 触达判定（当日股价触碰买点才建仓），
+ * 是否买入与回填几只解耦。
  *
  * 阻断语义：回填覆盖率低于 [minCoverage] 时由 [AgentEntryBackfillStep] 抛
  * [AgentEntryBackfillInsufficientCoverageException]，盘后链路失败 → 该日不标 strategyUpdated →
@@ -24,12 +26,12 @@ data class AgentEntryBackfillConfig(
 ) {
     companion object {
         /**
-         * 从系统属性装配，缺省 = 开启 / 覆盖率 1.0（Top3 全成功）/ Top3 / 并发 3 / 单只 300s / 默认模型。
+         * 从系统属性装配，缺省 = 开启 / 覆盖率 1.0（Top5 全成功）/ Top5 / 并发 5 / 单只 300s / 默认模型。
          *
          * - `quant.strategy.entryBackfill.enabled`         默认 true
          * - `quant.strategy.entryBackfill.minCoverage`     默认 1.0（[0,1]，1.0=全成功才放行）
-         * - `quant.strategy.entryBackfill.topN`            默认 3（贴生产实盘等权 Top3 入场候选）
-         * - `quant.strategy.entryBackfill.parallelism`     默认 3（每只独立 ACP 子进程，固定小值防 OOM）
+         * - `quant.strategy.entryBackfill.topN`            默认 5（回填全部 selected 票，前端展示 5 只买入价）
+         * - `quant.strategy.entryBackfill.parallelism`     默认 5（每只独立 ACP 子进程，与 topN 对齐避免串行排队）
          * - `quant.strategy.entryBackfill.perStockTimeoutSec` 默认 300
          * - `quant.strategy.entryBackfill.modelKey`        默认空 → 回退 config.yaml agent.defaultModelKey
          */
@@ -40,8 +42,8 @@ data class AgentEntryBackfillConfig(
             return AgentEntryBackfillConfig(
                 enabled = prop("enabled")?.toBooleanStrictOrNull() ?: true,
                 minCoverage = prop("minCoverage")?.toDoubleOrNull()?.coerceIn(0.0, 1.0) ?: 1.0,
-                topN = prop("topN")?.toIntOrNull()?.coerceAtLeast(1) ?: 3,
-                parallelism = prop("parallelism")?.toIntOrNull()?.coerceAtLeast(1) ?: 3,
+                topN = prop("topN")?.toIntOrNull()?.coerceAtLeast(1) ?: 5,
+                parallelism = prop("parallelism")?.toIntOrNull()?.coerceAtLeast(1) ?: 5,
                 perStockTimeoutSec = prop("perStockTimeoutSec")?.toLongOrNull()?.coerceAtLeast(1) ?: 300,
                 modelKey = prop("modelKey"),
             )
@@ -54,6 +56,7 @@ data class AgentEntryBackfillConfig(
  *
  * 由 [AgentEntryBackfillStep] 抛出，[PostMarketOrchestrator.executeTradeDatesCatching] 捕获后置该日 failedDate
  * → 该日不标 strategyUpdated → 上游补偿队列重跑。重跑时 selection 由 [SelectionDriftGuard] 保证可复现幂等，
- * `updateLimitPrice` 覆盖写幂等，整体安全。
+ * `updateLimitPrice` 覆盖写幂等；重跑前 [PostMarketPreparationJob] 通过 `findLimitPricesByTradeDate` 保留
+ * 上一轮已成功的买点（避免被整行覆盖抹回 null），故重跑只补失败的票、不全量重跑 agent，整体安全且省算力。
  */
 class AgentEntryBackfillInsufficientCoverageException(message: String) : IllegalStateException(message)

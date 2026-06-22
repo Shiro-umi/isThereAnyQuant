@@ -28,6 +28,7 @@ import org.shiroumi.strategy.core.daily.MarketSentimentRollingState
 import org.shiroumi.strategy.core.daily.MarketSentimentSnapshot
 import org.shiroumi.strategy.core.daily.StockFactorCalculator
 import org.shiroumi.strategy.core.daily.StockFactorSnapshot
+import org.shiroumi.strategy.core.daily.TargetPosition
 import org.shiroumi.strategy.core.daily.preprocessing.PreparedBarFactory
 import org.shiroumi.strategy.core.daily.seed.toRuntimeSeed
 import org.shiroumi.strategy.service.model.ProfitPredictionModelSelector
@@ -429,10 +430,16 @@ object PostMarketPreparationJob {
         // selection 复现断言：全链重算会覆盖 daily_profit_prediction_selection；覆盖前先与历史落库逐票比对，
         // 不一致时由 SelectionDriftGuard 决策（默认拒绝写库并抛错，除非显式放行漂移）。
         SelectionDriftGuard.assertReproducible(tradeDate, targets)
+        // 重算买点保留：delete 前快照本批已落库的非空买点，覆盖写时回填，使下方 agent 买点回填的
+        // 「跳过已有买点」幂等优化在跨重算（数据更新追平/补偿重跑）场景仍生效——否则 replaceForDate
+        // 整行覆盖把 limit_price 抹回 null，每次重算都对全部 selected 票重跑 agent（浪费算力且买点价漂移）。
+        // 复用安全性由上方 SelectionDriftGuard 保证：selected 集合与历史一致才放行覆盖，旧买点对应同一只票。
+        val priorLimitPrices = DailyProfitPredictionSelectionRepository.findLimitPricesByTradeDate(tradeDate)
+        val targetsWithLimit = mergePriorLimitPrices(targets, priorLimitPrices)
         DailyProfitPredictionSelectionRepository.deleteByDate(tradeDate)
         DailyProfitPredictionSelectionRepository.replaceForDate(
             tradeDate = tradeDate,
-            positions = targets,
+            positions = targetsWithLimit,
         )
 
         // agent 买点回填：对刚选出的 target_date=nextTradeDate 这批 selected Top-N 票并发跑 agent 量价分析，
@@ -598,6 +605,30 @@ object PostMarketPreparationJob {
                     " 仅生产离场=${onlyProd.ifEmpty { setOf("无") }} 仅影子离场=${onlyShadow.ifEmpty { setOf("无") }}"
             )
         }.onFailure { logger.warning("[影子对照] 推演失败（不影响生产链路）| ${it.message}") }
+    }
+
+    /**
+     * 将上一轮已落库的非空买点回填进本轮重算的目标仓位——仅对当前 limitPrice 为 null 的票生效，
+     * 已带买点的票（理论上重算产出恒为 null，留作防御）不覆盖。
+     *
+     * 业务意义：全链重算 [replaceForDate] 是整行覆盖，会把 limit_price 抹回 null；本合并在覆盖前把旧买点
+     * 带进新行，使 [AgentEntryBackfillStep] 的「跳过已有买点」幂等优化在跨重算场景生效（重跑只补缺失，
+     * 不全量重跑 agent）。调用方须先经 [SelectionDriftGuard] 确认 selected 集合与历史一致，旧买点才对应同一只票。
+     *
+     * 纯函数无副作用，抽出便于单测覆盖「保留/不覆盖/无旧值/空快照」四种分支。
+     */
+    internal fun mergePriorLimitPrices(
+        targets: List<TargetPosition>,
+        priorLimitPrices: Map<String, Double>,
+    ): List<TargetPosition> {
+        if (priorLimitPrices.isEmpty()) return targets
+        return targets.map { position ->
+            if (position.limitPrice == null) {
+                priorLimitPrices[position.tsCode]?.let { position.copy(limitPrice = it) } ?: position
+            } else {
+                position
+            }
+        }
     }
 
     private fun persistNextTradeDateSentimentSeed(

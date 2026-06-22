@@ -52,8 +52,8 @@ class AgentEntryBackfillCommand : CliktCommand(
         help = "执行日（库 target_date，= 选股生效买入日 T+1）。回填该日 selected 票的买点。",
     ).required()
 
-    private val topN by option("--top-n", help = "每日取模型分前 N 只回填买点，默认 3（贴生产实盘等权 Top3）。")
-        .int().default(3)
+    private val topN by option("--top-n", help = "每日取模型分前 N 只回填买点，默认 5（回填全部 selected 票，与盘后自动回填同口径）。")
+        .int().default(5)
 
     private val parallelism by option(
         "--parallelism",
@@ -89,7 +89,7 @@ class AgentEntryBackfillCommand : CliktCommand(
         val effectiveParallelism = if (parallelism <= 0) cpuCores else parallelism
         val targetDate = LocalDate.parse(targetDateOpt)
 
-        // 当日 selected 票（已按模型分降序），取前 topN——即生产实盘等权 Top3 的入场候选。
+        // 当日 selected 票（已按模型分降序），取前 topN（默认 5，即全部 selected 票）。
         val selections = DailyProfitPredictionSelectionRepository
             .findSelectionsByTargetDate(targetDate)
             .take(topN)

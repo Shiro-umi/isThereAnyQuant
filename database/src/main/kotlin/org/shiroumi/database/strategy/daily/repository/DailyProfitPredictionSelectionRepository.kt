@@ -52,6 +52,25 @@ object DailyProfitPredictionSelectionRepository {
         }
     }
 
+    /**
+     * 读某选股日（trade_date）已落库的非空买点快照（tsCode → limit_price）。
+     *
+     * 用途：全链重算前先快照旧买点，重算覆盖写时回填，使 agent 买点回填的「跳过已有买点」幂等优化在
+     * 跨重算场景仍生效（[replaceForDate] 整行覆盖会把 limit_price 抹回 null，否则每次重算都全量重跑 agent）。
+     * 复用前提由 [SelectionDriftGuard] 保证：重算 selected 集合与历史一致才放行覆盖，旧买点对应同一只票。
+     */
+    fun findLimitPricesByTradeDate(tradeDate: LocalDate): Map<String, Double> {
+        return stockDb.transaction(DailyProfitPredictionSelectionTable, log = false) {
+            DailyProfitPredictionSelectionTable.selectAll()
+                .where { DailyProfitPredictionSelectionTable.tradeDate eq tradeDate }
+                .mapNotNull { row ->
+                    val limit = row[DailyProfitPredictionSelectionTable.limitPrice] ?: return@mapNotNull null
+                    row[DailyProfitPredictionSelectionTable.tsCode] to limit
+                }
+                .toMap()
+        }
+    }
+
     fun replaceForDate(
         tradeDate: LocalDate,
         positions: List<TargetPosition>,
