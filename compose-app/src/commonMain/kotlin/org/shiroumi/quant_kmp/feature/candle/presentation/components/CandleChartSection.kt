@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -217,6 +218,14 @@ private fun StockSummaryCard(
         animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
         label = "summary_arrow_rotation"
     )
+    // 宽屏：elevation 在父层统一动画，折叠/展开都有不透明背景，阴影渐变自然
+    // 手机：折叠态背景透明，elevation 不能在父层跑——折叠时透明背景有阴影视觉突兀；
+    //       elevation 下沉到 ExpandedStockSummaryCard 内部自行启动（从 0 爬升，与 fade-in 同步）
+    val shadowElevation by animateDpAsState(
+        targetValue = if (!isCompact && expanded) AgentTheme.Elevation.level3 else AgentTheme.Elevation.level0,
+        animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+        label = "summary_shadow_elevation"
+    )
     StockSummarySharedCard(
         stockInfo = stockInfo,
         marketStatus = marketStatus,
@@ -224,6 +233,7 @@ private fun StockSummaryCard(
         expanded = expanded,
         onToggleExpanded = { expanded = !expanded },
         arrowRotation = arrowRotation,
+        shadowElevation = shadowElevation,
         displayPrice = displayPrice,
         displayChangeAmount = displayChangeAmount,
         displayChangePercent = displayChangePercent,
@@ -244,6 +254,7 @@ private fun StockSummarySharedCard(
     expanded: Boolean,
     onToggleExpanded: () -> Unit,
     arrowRotation: Float,
+    shadowElevation: androidx.compose.ui.unit.Dp,
     displayPrice: Float,
     displayChangeAmount: Float,
     displayChangePercent: Float,
@@ -280,6 +291,7 @@ private fun StockSummarySharedCard(
                     hoverCandleIndex = hoverCandleIndex,
                     onToggleExpanded = onToggleExpanded,
                     arrowRotation = arrowRotation,
+                    shadowElevation = shadowElevation,
                     displayPrice = displayPrice,
                     displayChangeAmount = displayChangeAmount,
                     displayChangePercent = displayChangePercent,
@@ -306,6 +318,7 @@ private fun StockSummarySharedCard(
                     onToggleExpanded = onToggleExpanded,
                     onCollapsedHeightMeasured = onCollapsedHeightMeasured,
                     arrowRotation = arrowRotation,
+                    shadowElevation = shadowElevation,
                     displayPrice = displayPrice,
                     displayChangePercent = displayChangePercent,
                     cardSharedState = cardSharedState,
@@ -337,6 +350,7 @@ private fun CollapsedStockSummaryCard(
     onToggleExpanded: () -> Unit,
     onCollapsedHeightMeasured: (Int) -> Unit,
     arrowRotation: Float,
+    shadowElevation: androidx.compose.ui.unit.Dp,
     displayPrice: Float,
     displayChangePercent: Float,
     cardSharedState: SharedTransitionScope.SharedContentState,
@@ -368,12 +382,11 @@ private fun CollapsedStockSummaryCard(
     // 手机：摘要折叠条背景透明（无卡）、Material3 标准水平内边距贴页边距；宽屏：surfaceContainerLow 卡。
     val summaryColor = if (isCompact) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerLow
 
-    // 折叠态保持平贴（level0 无阴影），与展开态的升起形成 elevation 对比。
     Surface(
         modifier = cardModifier,
         shape = cardShape,
         color = summaryColor,
-        shadowElevation = AgentTheme.Elevation.level0,
+        shadowElevation = shadowElevation,
         tonalElevation = AgentTheme.Elevation.level0
     ) {
         Row(
@@ -483,6 +496,7 @@ private fun ExpandedStockSummaryCard(
     hoverCandleIndex: Int,
     onToggleExpanded: () -> Unit,
     arrowRotation: Float,
+    shadowElevation: androidx.compose.ui.unit.Dp,
     displayPrice: Float,
     displayChangeAmount: Float,
     displayChangePercent: Float,
@@ -501,6 +515,20 @@ private fun ExpandedStockSummaryCard(
     onShowStockList: (() -> Unit)?,
     isCompact: Boolean
 ) = with(sharedTransitionScope) {
+    // 手机展开态：elevation 在本 composable 内从 0 起跑，与 AnimatedContent 的 fade-in 同步，
+    // 避免在透明折叠背景上先出现阴影再消失的突兀感。
+    val compactShadowElevation by animateDpAsState(
+        targetValue = if (isCompact) AgentTheme.Elevation.level3 else AgentTheme.Elevation.level0,
+        animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+        label = "expanded_shadow_elevation"
+    )
+    val compactTonalElevation by animateDpAsState(
+        targetValue = if (isCompact) AgentTheme.Elevation.level2 else AgentTheme.Elevation.level0,
+        animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+        label = "expanded_tonal_elevation"
+    )
+    val effectiveShadow = if (isCompact) compactShadowElevation else shadowElevation
+    val effectiveTonal = compactTonalElevation
     val cardModifier = Modifier
         .fillMaxWidth()
         .sharedBounds(
@@ -513,13 +541,12 @@ private fun ExpandedStockSummaryCard(
     // 展开抽屉盖住图表，必须用不透明面（否则蜡烛透出、阴影浮在透明面失真）。
     val summaryColor = MaterialTheme.colorScheme.surfaceContainerLow
 
-    // 展开态抬起（level3 阴影 + compact 下叠一档 tonal），对比折叠态的 level0 形成升起观感。
     Surface(
         modifier = cardModifier,
         shape = cardShape,
         color = summaryColor,
-        shadowElevation = AgentTheme.Elevation.level3,
-        tonalElevation = if (isCompact) AgentTheme.Elevation.level2 else AgentTheme.Elevation.level0
+        shadowElevation = effectiveShadow,
+        tonalElevation = effectiveTonal
     ) {
         Column(
             modifier = Modifier
