@@ -143,7 +143,7 @@ internal fun TrackingOverviewListPanel(
 
                 item(key = "selection-header") {
                     TrackingListSectionHeader(
-                        title = "选股结果",
+                        title = if (isRealtime) "选股结果 · 盘后确认" else "选股结果",
                         tint = MaterialTheme.colorScheme.secondary,
                         caption = "次日开盘按评分优先买入，最多 3 只",
                     )

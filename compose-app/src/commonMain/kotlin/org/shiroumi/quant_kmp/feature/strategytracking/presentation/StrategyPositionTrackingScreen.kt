@@ -1753,7 +1753,7 @@ private fun TrackingDayCard(
             Spacer(modifier = Modifier.height(geometry.dateBottomGap))
 
             TrackingSectionCard(
-                title = "选股结果",
+                title = if (isRealtime) "选股结果 · 盘后确认" else "选股结果",
                 section = StrategyTrackingSection.SELECTION,
                 nodes = day.selection,
                 geometry = geometry,
