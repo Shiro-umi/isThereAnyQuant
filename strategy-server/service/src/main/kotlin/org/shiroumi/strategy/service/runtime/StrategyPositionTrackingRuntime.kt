@@ -75,8 +75,7 @@ class StrategyPositionTrackingRuntime(
         positionSnapshot: StrategyPositionSnapshot,
     ): StrategySnapshotEnvelope<JsonElement>? {
         val tracking = when (positionSnapshot.source) {
-            PositionSource.HISTORICAL_AUDIT -> null
-            PositionSource.INTRADAY_REALTIME -> null
+            PositionSource.HISTORICAL_AUDIT, PositionSource.INTRADAY_REALTIME -> null
             PositionSource.DAILY_AUDIT_COMPLETE -> buildHistoricalSnapshot()
         } ?: return null
 
