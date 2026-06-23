@@ -15,7 +15,6 @@ import org.shiroumi.strategy.core.daily.FactorRollingState
 import org.shiroumi.strategy.core.daily.MarketSentimentSnapshot
 import org.shiroumi.strategy.core.daily.StockFactorSnapshot
 import org.shiroumi.strategy.core.daily.TargetPosition
-import org.shiroumi.strategy.service.model.ProfitPredictionTargetSelector
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -50,7 +49,6 @@ class IntradayStrategyRuntimeTest {
                     target("000003.SZ", 0.89),
                 )
             ),
-            intradayModelSelectionEnabled = false,
         )
 
         val result = runtime.refresh("test")
@@ -83,7 +81,6 @@ class IntradayStrategyRuntimeTest {
                 historicalSentiments = listOf(sentiment(tradeDate, reason = "historical-fallback")),
                 factors = listOf(factor("000001.SZ", rankScore = 1.0))
             ),
-            intradayModelSelectionEnabled = false,
         )
 
         val result = runtime.refresh("missing-seed")
@@ -111,7 +108,6 @@ class IntradayStrategyRuntimeTest {
                 realtimeCandles = mapOf("000001.SZ" to candle("000001.SZ", close = 20f)),
                 firstAdj = emptyMap()
             ),
-            intradayModelSelectionEnabled = false,
         )
 
         val result = runtime.refresh("missing-first-adj")
@@ -150,7 +146,6 @@ class IntradayStrategyRuntimeTest {
                     )
                 )
             ),
-            intradayModelSelectionEnabled = false,
         )
 
         val result = runtime.refresh("qfq-sentiment")
@@ -180,7 +175,6 @@ class IntradayStrategyRuntimeTest {
                 realtimeCandles = mapOf("000001.SZ" to candle("000001.SZ", close = 12f, adj = 3f)),
                 adjByTradeDate = mapOf(previousDate to mapOf("000001.SZ" to 2f))
             ),
-            intradayModelSelectionEnabled = false,
         )
 
         val result = runtime.refresh("qfq-factor")
@@ -192,47 +186,6 @@ class IntradayStrategyRuntimeTest {
         )
         assertEquals(18.0, payload.topStocks.first().close)
         assertEquals(28.5, payload.topStocks.first().open)
-    }
-
-    @Test
-    fun `intraday model selection overrides post market targets in runtime snapshot`() = runTest {
-        val hub = LocalStrategySnapshotHub<kotlinx.serialization.json.JsonElement>("test-service")
-        val runtime = IntradayStrategyRuntime(
-            snapshotHub = hub,
-            json = json,
-            dataSource = FakeRuntimeDataSource(
-                tradeDate = tradeDate,
-                previousDate = previousDate,
-                historicalSentiments = listOf(sentiment(tradeDate, reason = "historical")),
-                factors = listOf(
-                    factor("000001.SZ", rankScore = 3.0),
-                    factor("000002.SZ", rankScore = 2.0),
-                    factor("000003.SZ", rankScore = 1.0)
-                ),
-                realtimeCandles = mapOf(
-                    "000001.SZ" to candle("000001.SZ", close = 11f),
-                    "000002.SZ" to candle("000002.SZ", close = 12f),
-                    "000003.SZ" to candle("000003.SZ", close = 13f),
-                ),
-                postMarketTargets = listOf(target("000001.SZ", 0.93))
-            ),
-            profitPredictionSelector = FixedProfitPredictionTargetSelector(
-                intradayTargets = listOf(
-                    target("000003.SZ", 0.97),
-                    target("000002.SZ", 0.95),
-                )
-            ),
-            intradayModelSelectionEnabled = true,
-        )
-
-        val result = runtime.refresh("intraday-model")
-
-        assertTrue(result.accepted)
-        val payload = json.decodeFromJsonElement(
-            IntradaySnapshotPayload.serializer(),
-            assertNotNull(hub.current(StrategyTopic.INTRADAY)).payload
-        )
-        assertEquals(listOf("000003.SZ", "000002.SZ"), payload.portfolio.map { it.tsCode })
     }
 
     private fun sentiment(
@@ -419,22 +372,4 @@ private class FakeRuntimeDataSource(
         postMarketTargets.filter { it.targetDate == targetDate }
     override fun loadSentimentByDate(tradeDate: LocalDate): MarketSentimentSnapshot? =
         historicalSentiments.firstOrNull { it.tradeDate == tradeDate }
-}
-
-private class FixedProfitPredictionTargetSelector(
-    private val intradayTargets: List<TargetPosition>
-) : ProfitPredictionTargetSelector {
-    override suspend fun generateTargets(
-        tradeDate: LocalDate,
-        targetDate: LocalDate,
-        universeSymbols: List<String>,
-        sentiment: MarketSentimentSnapshot,
-    ): List<TargetPosition> = emptyList()
-
-    override suspend fun generateIntradayTargets(
-        tradeDate: LocalDate,
-        universeSymbols: List<String>,
-        realtimeDailyCandles: Map<String, Candle>,
-        sentiment: MarketSentimentSnapshot,
-    ): List<TargetPosition> = intradayTargets
 }

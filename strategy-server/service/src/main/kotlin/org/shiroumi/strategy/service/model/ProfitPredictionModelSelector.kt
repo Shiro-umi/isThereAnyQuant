@@ -7,7 +7,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.datetime.LocalDate
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import model.Candle
 import org.shiroumi.database.common.repository.TradingCalendarRepository
 import org.shiroumi.database.stock.ProductionOhlcvWindowRow
 import org.shiroumi.database.stock.StockDailyCandleRepository
@@ -60,9 +59,6 @@ internal class ProfitPredictionModelSelector(
     private val thresholdName: String = System.getProperty("quant.profitPrediction.thresholdName", "recall_0_2"),
     private val candidateMode: CandidateMode = CandidateMode.fromProperty(
         System.getProperty("quant.profitPrediction.candidateMode", CandidateMode.ALL_UNIVERSE.propertyValue)
-    ),
-    private val intradayCandidateMode: CandidateMode = CandidateMode.fromProperty(
-        System.getProperty("quant.profitPrediction.intradayCandidateMode", CandidateMode.ALL_UNIVERSE.propertyValue)
     ),
     private val marketGatedSampleSize: Int = System.getProperty(
         "quant.profitPrediction.marketGatedSampleSize",
@@ -170,99 +166,6 @@ internal class ProfitPredictionModelSelector(
         }
     }
 
-    override suspend fun generateIntradayTargets(
-        tradeDate: LocalDate,
-        universeSymbols: List<String>,
-        realtimeDailyCandles: Map<String, Candle>,
-        sentiment: MarketSentimentSnapshot,
-    ): List<TargetPosition> {
-        val previousTradeDate = dataSource.findPreviousTradingDate(tradeDate)
-            ?: error("profit prediction intraday blocked: no previous trading date for $tradeDate")
-        val candidateSymbols = dataSource.loadCandidateSymbols(
-            tradeDate = tradeDate,
-            universeSymbols = universeSymbols,
-            mode = intradayCandidateMode,
-            marketGatedSampleSize = marketGatedSampleSize,
-            requireTopListCandidates = false,
-        )
-        if (candidateSymbols.size < topN) {
-            error(
-                "profit prediction intraday candidate pool too small tradeDate=$tradeDate " +
-                    "mode=${intradayCandidateMode.propertyValue} candidates=${candidateSymbols.size} topN=$topN"
-            )
-        }
-
-        val historicalWindows = dataSource.loadRecentOhlcvWindows(
-            tsCodes = candidateSymbols,
-            endDateInclusive = previousTradeDate,
-            limitPerStock = seqLen - 1 + featureContextDays,
-        )
-        val windows = buildIntradayWindows(
-            tradeDate = tradeDate,
-            candidateSymbols = candidateSymbols,
-            historicalWindows = historicalWindows,
-            realtimeDailyCandles = realtimeDailyCandles,
-        )
-        val request = buildRequest(tradeDate, candidateSymbols, windows)
-        validateCoverage(tradeDate, request)
-        val scored = infer(request)
-        
-        val finalSelected = scored.predictions
-            .asSequence()
-            .filterNot { isLimitUp(tradeDate, it.tsCode, windows) }
-            .sortedWith(compareByDescending<ProfitPredictionOutput.Prediction> { it.score }.thenBy { it.tsCode })
-            .take(topN)
-            .toList()
-
-        val weightPerStock = if (finalSelected.isEmpty()) 0.0 else 1.0 / finalSelected.size
-        val exposure = sentiment.sentimentExposure
-        logger.info(
-            "[盘中盈利预测选股] tradeDate=$tradeDate model=${scored.modelId} mode=${intradayCandidateMode.propertyValue} " +
-                "candidates=${candidateSymbols.size} scored=${scored.coverage.scored} " +
-                "skipped=${scored.coverage.skipped} selected=${finalSelected.size} exposure=$exposure"
-        )
-        return finalSelected.map { prediction ->
-            TargetPosition(
-                tradeDate = tradeDate,
-                targetDate = tradeDate,
-                tsCode = prediction.tsCode,
-                selectionScore = prediction.score,
-                selected = true,
-                targetWeight = weightPerStock,
-                sentimentExposure = exposure,
-                selectionReason = "intraday-profit-prediction-v3:${scored.modelId}:${intradayCandidateMode.propertyValue}:Top$topN score=${"%.6f".format(prediction.score)}",
-            )
-        }
-    }
-
-    private fun isLimitUp(tradeDate: LocalDate, tsCode: String, windows: Map<String, List<ProductionOhlcvWindowRow>>): Boolean {
-        val rows = windows[tsCode].orEmpty()
-        if (rows.size < 2) return false
-        val todayRow = rows.last()
-        val prevRow = rows[rows.size - 2]
-        if (todayRow.tradeDate != tradeDate) return false
-
-        val limitPct = limitFor(tsCode)
-        val upper = round2(prevRow.closeQfq * (1.0 + limitPct))
-        return todayRow.closeQfq + 1e-6 >= upper
-    }
-
-    private fun limitFor(tsCode: String): Double {
-        val code = tsCode.substringBefore(".")
-        val market = tsCode.substringAfter(".", "")
-        return when {
-            market.equals("BJ", ignoreCase = true) -> 0.20
-            code.startsWith("688") -> 0.20
-            code.startsWith("300") -> 0.20
-            code.startsWith("301") -> 0.20
-            else -> 0.10
-        }
-    }
-
-    private fun round2(v: Double): Double {
-        return Math.round(v * 100.0) / 100.0
-    }
-
     private fun validateDailyReadiness(tradeDate: LocalDate) {
         val readiness = dataSource.loadDailyReadiness(tradeDate)
         if (!readiness.stockDailyUpdated || !readiness.stockDailyFqUpdated) {
@@ -307,26 +210,6 @@ internal class ProfitPredictionModelSelector(
             universe = universeSymbols.sorted(),
             stocks = stocks,
         )
-    }
-
-    private fun buildIntradayWindows(
-        tradeDate: LocalDate,
-        candidateSymbols: List<String>,
-        historicalWindows: Map<String, List<ProductionOhlcvWindowRow>>,
-        realtimeDailyCandles: Map<String, Candle>,
-    ): Map<String, List<ProductionOhlcvWindowRow>> {
-        val result = linkedMapOf<String, List<ProductionOhlcvWindowRow>>()
-        candidateSymbols.forEach { tsCode ->
-            val fetched = historicalWindows[tsCode].orEmpty()
-            val lastIncomplete = fetched.indexOfLast { !it.adjustedComplete }
-            val historical = if (lastIncomplete >= 0) fetched.drop(lastIncomplete + 1) else fetched
-            if (historical.size < seqLen - 1) {
-                return@forEach
-            }
-            val realtime = realtimeDailyCandles[tsCode]?.toIntradayOhlcvWindowRow(tradeDate) ?: return@forEach
-            result[tsCode] = historical.takeLast(seqLen - 1 + featureContextDays) + realtime
-        }
-        return result
     }
 
     private fun validateCoverage(tradeDate: LocalDate, request: ProfitPredictionInput) {
@@ -492,13 +375,6 @@ interface ProfitPredictionTargetSelector {
         universeSymbols: List<String>,
         sentiment: MarketSentimentSnapshot,
     ): List<TargetPosition>
-
-    suspend fun generateIntradayTargets(
-        tradeDate: LocalDate,
-        universeSymbols: List<String>,
-        realtimeDailyCandles: Map<String, Candle>,
-        sentiment: MarketSentimentSnapshot,
-    ): List<TargetPosition>
 }
 
 @Serializable
@@ -577,7 +453,6 @@ internal data class DailyDataReadiness(
 
 internal interface ProfitPredictionDataSource {
     fun loadDailyReadiness(tradeDate: LocalDate): DailyDataReadiness
-    fun findPreviousTradingDate(tradeDate: LocalDate): LocalDate?
 
     fun loadCandidateSymbols(
         tradeDate: LocalDate,
@@ -600,9 +475,6 @@ internal class DatabaseProfitPredictionDataSource : ProfitPredictionDataSource {
             stockDailyUpdated = TradingCalendarRepository.isStockDailyUpdated(tradeDate),
             stockDailyFqUpdated = TradingCalendarRepository.isStockDailyFqUpdated(tradeDate),
         )
-
-    override fun findPreviousTradingDate(tradeDate: LocalDate): LocalDate? =
-        TradingCalendarRepository.findPreviousTradingDate(tradeDate)
 
     override fun loadCandidateSymbols(
         tradeDate: LocalDate,
@@ -646,33 +518,6 @@ internal class DatabaseProfitPredictionDataSource : ProfitPredictionDataSource {
         return if (hash == Int.MIN_VALUE) Int.MAX_VALUE else abs(hash)
     }
 }
-
-private fun Candle.toIntradayOhlcvWindowRow(tradeDate: LocalDate): ProductionOhlcvWindowRow? {
-    if (date != tradeDate) return null
-    val openValue = positiveQfqOrRaw(openQfq, open) ?: return null
-    val highValue = positiveQfqOrRaw(highQfq, high) ?: return null
-    val lowValue = positiveQfqOrRaw(lowQfq, low) ?: return null
-    val closeValue = positiveQfqOrRaw(closeQfq, close) ?: return null
-    val volumeValue = positiveQfqOrRaw(volumeQfq, volume) ?: return null
-    return ProductionOhlcvWindowRow(
-        tsCode = tsCode,
-        tradeDate = tradeDate,
-        openQfq = openValue,
-        highQfq = highValue,
-        lowQfq = lowValue,
-        closeQfq = closeValue,
-        volumeQfq = volumeValue,
-        turnoverReal = turnoverReal.coerceAtLeast(0f).toDouble(),
-        adjustedComplete = true,
-    )
-}
-
-private fun positiveQfqOrRaw(qfq: Float, raw: Float): Double? =
-    when {
-        qfq > 0f -> qfq.toDouble()
-        raw > 0f -> raw.toDouble()
-        else -> null
-    }
 
 internal data class ProcessExecutionResult(
     val exitCode: Int,

@@ -37,8 +37,6 @@ import org.shiroumi.strategy.core.daily.StockFactorCalculator
 import org.shiroumi.strategy.core.daily.preprocessing.PreparedBarFactory
 import org.shiroumi.strategy.core.daily.seed.toRollingState
 import org.shiroumi.strategy.core.intraday.IntradayPortfolioGenerator
-import org.shiroumi.strategy.service.model.ProfitPredictionModelSelector
-import org.shiroumi.strategy.service.model.ProfitPredictionTargetSelector
 import org.shiroumi.strategy.service.universe.MainBoardUniverseProvider
 import utils.logger
 import kotlin.uuid.ExperimentalUuidApi
@@ -53,11 +51,6 @@ class IntradayStrategyRuntime(
     private val scope: String = MainBoardUniverseProvider.UNIVERSE_TYPE,
     private val dataSource: IntradayStrategyRuntimeDataSource,
     private val trackingRuntime: StrategyPositionTrackingRuntime? = null,
-    private val profitPredictionSelector: ProfitPredictionTargetSelector = ProfitPredictionModelSelector(),
-    private val intradayModelSelectionEnabled: Boolean = System.getProperty(
-        "quant.profitPrediction.intradayEnabled",
-        "true"
-    ).toBoolean(),
 ) : IntradayRuntime {
     private val logger by logger("IntradayStrategyRuntime")
 
@@ -85,7 +78,6 @@ class IntradayStrategyRuntime(
 
         val intradayPayload = buildIntradayPayload(
             tradeDate = tradeDate,
-            universe = universe,
             sentiment = sentiment,
             factors = factors,
             totalMs = System.currentTimeMillis() - startedAt
@@ -337,25 +329,21 @@ class IntradayStrategyRuntime(
         )
     }
 
-    private suspend fun buildIntradayPayload(
+    private fun buildIntradayPayload(
         tradeDate: LocalDate,
-        universe: List<String>,
         sentiment: DomainSentimentSnapshot,
         factors: List<DomainFactorSnapshot>,
         totalMs: Long
     ): IntradaySnapshotPayload {
-        val modelTargets = loadIntradayTargetPositions(
-            tradeDate = tradeDate,
-            universe = universe,
-            sentiment = sentiment,
-            factors = factors,
-        )
+        // 盘中不再做独立模型选股投影，目标组合恒为盘后确认组合，
+        // 盘中只用实时因子补充价格/量能展示。
+        val postMarketTargets = dataSource.loadPostMarketTargetPositions(tradeDate)
         val portfolio = IntradayPortfolioGenerator.generate(
             tradeDate = tradeDate,
             timestamp = System.currentTimeMillis(),
             factors = factors,
             sentiment = sentiment,
-            postMarketPositions = modelTargets,
+            postMarketPositions = postMarketTargets,
         )
         return IntradaySnapshotPayload(
             timestamp = System.currentTimeMillis(),
@@ -367,37 +355,6 @@ class IntradayStrategyRuntime(
                 stockCount = factors.size
             )
         )
-    }
-
-    private suspend fun loadIntradayTargetPositions(
-        tradeDate: LocalDate,
-        universe: List<String>,
-        sentiment: DomainSentimentSnapshot,
-        factors: List<DomainFactorSnapshot>,
-    ): List<DomainTargetPosition> {
-        val postMarketTargets = dataSource.loadPostMarketTargetPositions(tradeDate)
-        if (!intradayModelSelectionEnabled) return postMarketTargets
-
-        val realtimeCandles = dataSource.loadRealtimeDailyCandles(
-            tsCodes = factors.map { it.tsCode },
-            tradeDate = tradeDate
-        )
-        if (realtimeCandles.isEmpty()) return postMarketTargets
-
-        return runCatching {
-            profitPredictionSelector.generateIntradayTargets(
-                tradeDate = tradeDate,
-                universeSymbols = universe,
-                realtimeDailyCandles = realtimeCandles,
-                sentiment = sentiment,
-            )
-        }.getOrElse { error ->
-            logger.warning(
-                "intraday profit prediction selection failed tradeDate=$tradeDate reason=${error.message}; " +
-                    "falling back to post-market targets"
-            )
-            postMarketTargets
-        }
     }
 
     private fun buildPositionSnapshot(

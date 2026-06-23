@@ -3,7 +3,6 @@ package org.shiroumi.strategy.service.model
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.LocalDate
 import kotlinx.serialization.json.Json
-import model.Candle
 import org.shiroumi.database.stock.ProductionOhlcvWindowRow
 import org.shiroumi.strategy.core.daily.MarketSentimentSnapshot
 import java.io.File
@@ -178,50 +177,6 @@ class ProfitPredictionModelSelectorTest {
     }
 
     @Test
-    fun `intraday targets append realtime day candle to historical window`() = runTest {
-        val candidates = listOf("000001.SZ", "000002.SZ")
-        val processRunner = FakeProcessRunner(
-            stdout = """
-                {
-                  "modelId": "unit-model",
-                  "topic": "profit_prediction_7pct",
-                  "tradeDate": "2026-04-30",
-                  "thresholdName": "recall_0_2",
-                  "threshold": 0.5,
-                  "topN": 1,
-                  "predictions": [
-                    {"tsCode": "000002.SZ", "score": 0.88, "selectedByThreshold": true, "selectedByTopN": true},
-                    {"tsCode": "000001.SZ", "score": 0.81, "selectedByThreshold": true, "selectedByTopN": false}
-                  ],
-                  "skipped": [],
-                  "coverage": {"requested": 2, "scored": 2, "skipped": 0}
-                }
-            """.trimIndent()
-        )
-        val selector = selector(
-            dataSource = FakeDataSource(
-                candidates = candidates,
-                windows = candidates.associateWith { historicalWindow19(it) },
-            ),
-            processRunner = processRunner,
-            topN = 1,
-        )
-
-        val targets = selector.generateIntradayTargets(
-            tradeDate = tradeDate,
-            universeSymbols = candidates,
-            realtimeDailyCandles = candidates.associateWith { candle(it, close = 11f, turnoverReal = 0f) },
-            sentiment = sentiment(exposure = 1.0),
-        )
-
-        assertEquals(listOf("000002.SZ"), targets.map { it.tsCode })
-        val input = json.decodeFromString(ProfitPredictionInput.serializer(), processRunner.stdin)
-        assertEquals(20, input.stocks.first().rows.size)
-        assertEquals("2026-04-30", input.stocks.first().rows.last().tradeDate)
-        assertEquals(0.0, input.stocks.first().rows.last().turnoverReal)
-    }
-
-    @Test
     fun `default process runner drains stderr while waiting for process`() = runTest {
         val workDir = Files.createTempDirectory("profit-process-runner").toFile()
         val command = listOf(
@@ -289,45 +244,6 @@ class ProfitPredictionModelSelectorTest {
             )
         }
 
-    private fun historicalWindow19(tsCode: String): List<ProductionOhlcvWindowRow> =
-        (18 downTo 0).map { offset ->
-            val date = LocalDate(2026, 4, 29 - offset)
-            ProductionOhlcvWindowRow(
-                tsCode = tsCode,
-                tradeDate = date,
-                openQfq = 10.0 + offset,
-                highQfq = 11.0 + offset,
-                lowQfq = 9.0 + offset,
-                closeQfq = 10.5 + offset,
-                volumeQfq = 1000.0 + offset,
-                turnoverReal = 100_000.0 + offset,
-                adjustedComplete = true,
-            )
-        }
-
-    private fun candle(
-        tsCode: String,
-        close: Float,
-        turnoverReal: Float,
-    ) = Candle(
-        tsCode = tsCode,
-        date = tradeDate,
-        open = 10f,
-        high = 13f,
-        low = 9f,
-        close = close,
-        adj = 1f,
-        volume = 1000f,
-        turnoverReal = turnoverReal,
-        pe = 0f,
-        peTtm = 0f,
-        pb = 0f,
-        ps = 0f,
-        psTtm = 0f,
-        mvTotal = 0f,
-        mvCirc = 0f,
-    )
-
     private fun sentiment(exposure: Double = 1.0) = MarketSentimentSnapshot(
         tradeDate = tradeDate,
         signalBasis = "HFQ",
@@ -363,8 +279,6 @@ private class FakeDataSource(
         private set
 
     override fun loadDailyReadiness(tradeDate: LocalDate): DailyDataReadiness = readiness
-
-    override fun findPreviousTradingDate(tradeDate: LocalDate): LocalDate? = LocalDate(2026, 4, 29)
 
     override fun loadCandidateSymbols(
         tradeDate: LocalDate,

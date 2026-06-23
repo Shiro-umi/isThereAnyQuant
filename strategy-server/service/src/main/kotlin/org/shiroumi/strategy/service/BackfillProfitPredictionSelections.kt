@@ -55,7 +55,6 @@ fun main() = runBlocking {
         )
         val dataSource = BackfillProfitPredictionDataSource(
             rows = ohlcvRows,
-            openDates = allOpenDates,
         )
         val selector = ProfitPredictionModelSelector(dataSource = dataSource)
         logger.info(
@@ -129,7 +128,6 @@ private fun neutralSentiment(tradeDate: LocalDate) = MarketSentimentSnapshot(
 
 private class BackfillProfitPredictionDataSource(
     rows: List<ProductionOhlcvWindowRow>,
-    private val openDates: List<LocalDate>,
     private val fallback: DatabaseProfitPredictionDataSource = DatabaseProfitPredictionDataSource(),
 ) : ProfitPredictionDataSource {
     private val rowsByCode: Map<String, List<ProductionOhlcvWindowRow>> =
@@ -137,15 +135,6 @@ private class BackfillProfitPredictionDataSource(
 
     override fun loadDailyReadiness(tradeDate: LocalDate): DailyDataReadiness =
         DailyDataReadiness(stockDailyUpdated = true, stockDailyFqUpdated = true)
-
-    override fun findPreviousTradingDate(tradeDate: LocalDate): LocalDate? {
-        val index = openDates.binarySearch(tradeDate)
-        return when {
-            index > 0 -> openDates[index - 1]
-            index < -1 -> openDates[-index - 2]
-            else -> null
-        }
-    }
 
     override fun loadCandidateSymbols(
         tradeDate: LocalDate,
