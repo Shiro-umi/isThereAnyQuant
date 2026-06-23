@@ -748,7 +748,7 @@ object GlobalWebSocketClient {
 
     /**
      * 订阅策略持仓跟踪数据（STRATEGY_POSITION_TRACKING topic）
-     * 接收预计算的完整时间线（含历史 PNL + 盘中实时数据）
+     * 接收预计算的完整时间线（逐日确认交易日 + 历史 PNL）
      */
     fun subscribeStrategyPositionTracking(owner: String = "default") {
         strategyPositionTrackingOwners.add(owner)

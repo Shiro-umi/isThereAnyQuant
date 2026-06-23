@@ -102,7 +102,6 @@ class StrategyPositionTrackingRuntimeTest {
         assertEquals(listOf(0.93), payload.days.last().selection.map { it.modelScore })
         assertEquals(setOf("000002.SZ", "000005.SZ"), payload.days.last().holdings.map { it.stockCode }.toSet())
         assertEquals(StrategyTopic.POSITION_TRACKING, envelope.topic)
-        assertEquals(null, payload.realtimeTradeDate)
 
         // 清仓节点：服务端按生产规则重建离场判决——止盈触价 +7%，而非收盘口径 +2%
         val clearedNode = assertNotNull(payload.days.last().cleared.singleOrNull())
@@ -142,7 +141,8 @@ class StrategyPositionTrackingRuntimeTest {
         assertEquals(50.225f, assertNotNull(holdingNext.profitProtectPrice), absoluteTolerance = 0.01f)
         assertEquals(3, holdingNext.timeStopInTradingDays)
 
-        runtime.publishFromPositions(
+        // 盘中实时快照不再覆盖跟踪页：INTRADAY_REALTIME 来源返回 null，跟踪快照保持盘后确认结果不变。
+        val intradayEnvelope = runtime.publishFromPositions(
             StrategyPositionSnapshot(
                 tradeDate = day2.toString(),
                 currentPositions = listOf("000002.SZ"),
@@ -152,14 +152,15 @@ class StrategyPositionTrackingRuntimeTest {
                 newlySelected = listOf("000004.SZ")
             )
         )
+        assertEquals(null, intradayEnvelope)
 
-        val updated = json.decodeFromJsonElement(
+        val afterIntraday = json.decodeFromJsonElement(
             StrategyPositionTrackingResponse.serializer(),
             assertNotNull(hub.current(StrategyTopic.POSITION_TRACKING)).payload
         )
-        assertEquals(listOf("000004.SZ"), updated.days.last().selection.map { it.stockCode })
-        assertEquals(listOf(0.97), updated.days.last().selection.map { it.modelScore })
-        assertEquals(day2.toString(), updated.realtimeTradeDate)
+        // 选股列仍为盘后确认的 000003.SZ，未被盘中投影的 000004.SZ 覆盖
+        assertEquals(listOf("000003.SZ"), afterIntraday.days.last().selection.map { it.stockCode })
+        assertEquals(listOf("2026-04-29", "2026-04-30"), afterIntraday.days.map { it.tradeDate })
     }
 
     private fun audit(

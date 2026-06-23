@@ -11,7 +11,6 @@ import org.shiroumi.quant_kmp.ui.utils.formatPriceRaw
 // 6 = 每日入场 3 只 × H3（持仓存活 daysSinceEntry 0/1，第 2 日离场）→ 同一交易日并发在手最多 6 只。
 // selection 仍是 Top5（≤6）、cleared 一日离场亦 ≤6，统一用 6 覆盖三列上限，避免第 6 只持仓被静默截断。
 internal const val TrackingSlotCount = 6
-internal const val TrackingRealtimeDayLabel = "今天"
 
 /**
  * 最早可校准跟随起始日的下界（业务硬约束，与后端一致）。
@@ -27,7 +26,6 @@ internal const val CalibrationMinTradeDate = "2026-05-18"
 data class StrategyPositionTrackingTimeline(
     val days: List<StrategyPositionTrackingDay>,
     val edges: List<StrategyTrackingEdge>,
-    val realtimeTradeDate: String? = null,
     val followStartDate: String? = null,
 )
 
@@ -46,7 +44,6 @@ fun StrategyPositionTrackingResponse.toTimeline(): StrategyPositionTrackingTimel
     return StrategyPositionTrackingTimeline(
         days = normalizedDays,
         edges = edges.filter { it.fromSlotIndex < TrackingSlotCount && it.toSlotIndex < TrackingSlotCount },
-        realtimeTradeDate = realtimeTradeDate,
         followStartDate = followStartDate,
     )
 }
@@ -57,19 +54,14 @@ private fun StrategyPositionTrackingDay.limitSlots(): StrategyPositionTrackingDa
     cleared = cleared.sortedBy { it.slotIndex }.take(TrackingSlotCount),
 )
 
-internal fun StrategyPositionTrackingTimeline.isRealtimeDay(day: StrategyPositionTrackingDay): Boolean =
-    realtimeTradeDate != null && day.tradeDate == realtimeTradeDate
-
 /**
- * 校准可选交易日：完整审计窗口去掉盘中实时投影日与早于下界的日子，最新在上。
+ * 校准可选交易日：完整审计窗口去掉早于下界的日子，最新在上。
  *
- * 审计窗口的 [days] 集合不随校准激活收缩，是稳定数据源；盘中实时投影日不在后端
- * 已确认交易日窗口内（校准会被拒），必须排除；早于 [CalibrationMinTradeDate] 的日子
- * 同样不可校准。倒序使最新交易日置顶，贴合用户多选近几日的习惯。
+ * 审计窗口的 [days] 集合不随校准激活收缩，是稳定数据源；逐日均为已确认交易日；
+ * 早于 [CalibrationMinTradeDate] 的日子不可校准。倒序使最新交易日置顶，贴合用户多选近几日的习惯。
  */
 internal fun StrategyPositionTrackingTimeline.calibratableTradeDates(): List<String> =
-    days.filterNot { isRealtimeDay(it) }
-        .map { it.tradeDate }
+    days.map { it.tradeDate }
         .filter { it >= CalibrationMinTradeDate }
         .asReversed()
 

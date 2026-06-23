@@ -53,7 +53,7 @@ private const val ClearedHistoryLimit = 8
 /**
  * 持仓跟踪总览列表（左栏 / 移动端默认形态）。
  *
- * 展示选定观察日（默认最新交易日 / 盘中实时日）的持有 / 选股 / 清仓三组列表，
+ * 展示选定观察日（默认最新交易日）的持有 / 选股 / 清仓三组列表，
  * 顶部日期导航条可在窗口内确认交易日之间翻页。
  * 全部盈亏与价格由云端计算下发：持有行 = 成本→现价 + 浮动/最高收益 + 持有天数 + 下一卖点；
  * 选股行 = 模型分 + 现价与当日涨跌；清仓行 = 离场原因 + 规则口径已实现收益。
@@ -81,7 +81,6 @@ internal fun TrackingOverviewListPanel(
         ?.let { date -> days.indexOfLast { it.tradeDate == date }.takeIf { it >= 0 } }
         ?: latestIndex
     val observedDay = days[observedIndex]
-    val isRealtime = timeline.isRealtimeDay(observedDay)
     val isLatest = observedIndex == latestIndex
 
     // 近端清仓记录：从观察日往回收集（含清仓发生日）
@@ -92,7 +91,6 @@ internal fun TrackingOverviewListPanel(
     Column(modifier = modifier) {
         TrackingDateNavigator(
             label = when {
-                isRealtime -> "$TrackingRealtimeDayLabel · 盘中实时"
                 isLatest -> "${observedDay.tradeDate} · 最新"
                 else -> observedDay.tradeDate
             },
@@ -143,7 +141,7 @@ internal fun TrackingOverviewListPanel(
 
                 item(key = "selection-header") {
                     TrackingListSectionHeader(
-                        title = if (isRealtime) "选股结果 · 盘后确认" else "选股结果",
+                        title = "选股结果",
                         tint = MaterialTheme.colorScheme.secondary,
                         caption = "次日开盘按评分优先买入，最多 3 只",
                     )

@@ -50,7 +50,6 @@ class IntradayStrategyRuntime(
     private val json: Json,
     private val scope: String = MainBoardUniverseProvider.UNIVERSE_TYPE,
     private val dataSource: IntradayStrategyRuntimeDataSource,
-    private val trackingRuntime: StrategyPositionTrackingRuntime? = null,
 ) : IntradayRuntime {
     private val logger by logger("IntradayStrategyRuntime")
 
@@ -94,36 +93,8 @@ class IntradayStrategyRuntime(
                 positionSnapshot
             )
         )
-        // 持仓跟踪实时日的盈亏/流转边在 strategy-service 云端计算，注入相关标的的实时日 K。
-        // ①重新 prefetch：本调用位于 refresh 末尾，开头那次 prefetch 可能已超过实时事实源 TTL，
-        //   且在持票可能已不在 active universe（停牌/状态变更）从未被预取；
-        // ②重锚：实时 K 是当日锚 raw 价，DB QFQ 序列锚在上一交易日 adj，必须经 withRuntimeQfq
-        //   折算到同一锚，否则除权除息日盘中全部实时盈亏失真；adj 缺失的票丢弃（宁缺毋错）。
-        val trackingEnvelope = trackingRuntime?.let { tracking ->
-            val trackingCodes =
-                (positionSnapshot.currentPositions + positionSnapshot.nextSessionSelections).distinct()
-            val trackingRealtimeCandles = if (trackingCodes.isEmpty()) {
-                emptyMap()
-            } else {
-                dataSource.prefetchRealtimeDailyCandles(trackingCodes, tradeDate)
-                val rawCandles = dataSource.loadRealtimeDailyCandles(trackingCodes, tradeDate)
-                val anchorAdj = dataSource.findPreviousTradingDate(tradeDate)
-                    ?.let { anchorDate -> dataSource.loadAdjByTradeDate(anchorDate, rawCandles.keys.toList()) }
-                    .orEmpty()
-                val rebased = rawCandles.mapNotNull { (code, candle) ->
-                    candle.withRuntimeQfq(sourceTradeDateAdj = anchorAdj[code], required = true)
-                        ?.let { code to it }
-                }.toMap()
-                if (rebased.size < trackingCodes.size) {
-                    logger.warning(
-                        "tracking realtime candles partial tradeDate=$tradeDate " +
-                            "requested=${trackingCodes.size} realtime=${rawCandles.size} rebased=${rebased.size}"
-                    )
-                }
-                rebased
-            }
-            tracking.publishFromPositions(positionSnapshot, trackingRealtimeCandles)
-        }
+        // 盘中只发布 INTRADAY / POSITIONS 投影。持仓跟踪时间线（POSITION_TRACKING）只由盘后确认链路
+        // 与最早跟随日校准生成，盘中不再覆盖/追加实时日，避免当日盘后确认列被盘中投影顶替。
 
         logger.info(
             "strategy-service intraday refreshed reason=$reason tradeDate=$tradeDate " +
@@ -134,8 +105,7 @@ class IntradayStrategyRuntime(
             accepted = true,
             message = "intraday snapshot refreshed tradeDate=$tradeDate",
             intradayEnvelope = intradayEnvelope,
-            positionsEnvelope = positionsEnvelope,
-            trackingEnvelope = trackingEnvelope
+            positionsEnvelope = positionsEnvelope
         )
     }
 
@@ -454,8 +424,7 @@ data class IntradayRefreshResult(
     val accepted: Boolean,
     val message: String,
     val intradayEnvelope: StrategySnapshotEnvelope<JsonElement>? = null,
-    val positionsEnvelope: StrategySnapshotEnvelope<JsonElement>? = null,
-    val trackingEnvelope: StrategySnapshotEnvelope<JsonElement>? = null
+    val positionsEnvelope: StrategySnapshotEnvelope<JsonElement>? = null
 )
 
 interface IntradayStrategyRuntimeDataSource {

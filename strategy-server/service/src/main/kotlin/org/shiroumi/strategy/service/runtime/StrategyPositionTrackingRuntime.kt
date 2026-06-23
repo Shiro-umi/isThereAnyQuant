@@ -5,7 +5,6 @@ import kotlinx.datetime.LocalDate
 import kotlinx.datetime.plus
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import model.Candle
 import model.candle.StrategyPositionTrackingDay
@@ -42,8 +41,9 @@ private const val MAX_TRACKING_SLOT_COUNT = 6
 /**
  * 持仓跟踪时间线 runtime——`STRATEGY_POSITION_TRACKING` 快照的唯一 owner。
  *
+ * 时间线逐日均为已确认交易日（由盘后确认链路构建），盘中投影不覆盖/追加实时日。
  * 展示链路的全部业务计算在此完成，前端只负责渲染：
- * - 节点盈亏：持有/清仓节点的成本（入场日开盘）、现价（历史日收盘 / 盘中实时价）、
+ * - 节点盈亏：持有/清仓节点的成本（入场日开盘）、现价（观察日收盘）、
  *   浮动收益与持有期最高收益；选股节点的观察日价格与当日涨跌幅。
  * - 离场判决重建：清仓节点通过 [HoldingStateMachine.evaluateExit] 按生产持仓规则
  *   （[HoldingStateMachine.ExitRules.fromSystemProperties]，与盘后推进同一装配入口）
@@ -54,8 +54,6 @@ private const val MAX_TRACKING_SLOT_COUNT = 6
  * 行情口径：统一前复权（QFQ），全部经 [Candle.getOpen] 系访问器（默认 useAdjusted=true，优先取 *_qfq 列，
  * *_qfq=0 缺失时回退原始列）。与生产推进 advanceHoldings（findByTradeDate 原样 Candle，getLow 取 lowQfq）、
  * agent 买点 limitPrice 同口径——三方都读 DB 同一份 *_qfq 列（同源、同锚），入场 LIMIT 触达/跳空过滤/离场判决与生产持仓完全一致。
- * 盘中实时 K 由注入方（IntradayStrategyRuntime）经 withRuntimeQfq 重锚到同一基准后传入：实时 K 是当日 adj 锚，
- * DB QFQ 序列锚在库内最新行 adj，不重锚则除权除息日盘中实时盈亏失真（adj 缺失的票丢弃，宁缺毋错）。
  * 价格止损（生产默认关闭）的判决重建不还原信号日最低价，无法命中 PRICE_STOP 的清仓节点按收盘口径回退展示且不带原因标签。
  */
 class StrategyPositionTrackingRuntime(
@@ -69,22 +67,17 @@ class StrategyPositionTrackingRuntime(
     private val holdingStateMachine = HoldingStateMachine(exitRules)
 
     /**
-     * @param realtimeCandles 盘中实时日 K（tsCode -> 当日实时 Candle），仅
-     *   [PositionSource.INTRADAY_REALTIME] 时由盘中 runtime 注入，用于实时日盈亏与流转边计算。
+     * 持仓跟踪时间线只由盘后确认链路（[PositionSource.DAILY_AUDIT_COMPLETE]）构建，逐日均为确认交易日。
+     * 盘中投影不再覆盖/追加实时日：[PositionSource.INTRADAY_REALTIME] 与 [PositionSource.HISTORICAL_AUDIT]
+     * 不发布跟踪快照。
      */
     suspend fun publishFromPositions(
         positionSnapshot: StrategyPositionSnapshot,
-        realtimeCandles: Map<String, Candle> = emptyMap(),
     ): StrategySnapshotEnvelope<JsonElement>? {
         val tracking = when (positionSnapshot.source) {
             PositionSource.HISTORICAL_AUDIT -> null
+            PositionSource.INTRADAY_REALTIME -> null
             PositionSource.DAILY_AUDIT_COMPLETE -> buildHistoricalSnapshot()
-            PositionSource.INTRADAY_REALTIME -> {
-                val current = currentTracking()
-                    ?: buildHistoricalSnapshot()
-                    ?: return null
-                updateRealtimeDay(current, positionSnapshot, realtimeCandles)
-            }
         } ?: return null
 
         val envelope = snapshotHub.publish(
@@ -99,15 +92,6 @@ class StrategyPositionTrackingRuntime(
         return envelope
     }
 
-    private suspend fun currentTracking(): StrategyPositionTrackingResponse? =
-        snapshotHub.current(StrategyTopic.POSITION_TRACKING)
-            ?.payload
-            ?.let { payload ->
-                runCatching {
-                    json.decodeFromJsonElement(StrategyPositionTrackingResponse.serializer(), payload)
-                }.getOrNull()
-            }
-
     private fun buildHistoricalSnapshot(): StrategyPositionTrackingResponse? {
         val records = dataSource.loadAuditSummaries(trackingLimit).reversed()
         if (records.isEmpty()) return null
@@ -118,7 +102,7 @@ class StrategyPositionTrackingRuntime(
             selectionsByTradeDate = dataSource.loadSelectionsByTradeDate(tradeDates),
             holdingsByTradeDate = dataSource.loadHoldingsByTradeDate(tradeDates),
         )
-        return enrich(days, realtimeCandles = emptyMap(), realtimeTradeDate = null)
+        return enrich(days)
     }
 
     /**
@@ -206,7 +190,7 @@ class StrategyPositionTrackingRuntime(
             selectionsByTradeDate = dataSource.loadSelectionsByTradeDate(tradeDates),
             holdingsByTradeDate = replayedHoldings,
         )
-        return enrich(days, realtimeCandles = emptyMap(), realtimeTradeDate = null)
+        return enrich(days)
             .copy(followStartDate = followStartDate.toString())
     }
 
@@ -279,75 +263,6 @@ class StrategyPositionTrackingRuntime(
         }
     }
 
-    private fun updateRealtimeDay(
-        current: StrategyPositionTrackingResponse,
-        positionSnapshot: StrategyPositionSnapshot,
-        realtimeCandles: Map<String, Candle>,
-    ): StrategyPositionTrackingResponse {
-        val tradeDate = positionSnapshot.tradeDate
-        val currentDays = current.days
-        if (
-            positionSnapshot.source == PositionSource.INTRADAY_REALTIME &&
-            currentDays.lastOrNull()?.tradeDate?.let {
-                LocalDate.parse(tradeDate) < LocalDate.parse(it)
-            } == true
-        ) {
-            return current
-        }
-
-        val baseDays = when {
-            currentDays.isEmpty() -> emptyList()
-            currentDays.last().tradeDate == tradeDate -> currentDays.dropLast(1)
-            else -> currentDays
-        }
-        val currentPositions = positionSnapshot.currentPositions.take(MAX_TRACKING_SLOT_COUNT)
-        val currentPositionCodes = currentPositions.toSet()
-        val previousHoldingNodes = baseDays.lastOrNull()?.holdings.orEmpty()
-        val previousHoldings = previousHoldingNodes.map { it.stockCode }.toSet()
-        // 实时持仓 buyDate 继承上一交易日同票的 entryDate；若是当日新进则记为当日
-        val buyDateByCode = previousHoldingNodes.associate { it.stockCode to it.buyDate }
-        val realtimeSelections = positionSnapshot.nextSessionSelectionDetails
-            .takeIf { it.isNotEmpty() }
-            ?: positionSnapshot.nextSessionSelections.map {
-                model.ws.StrategySelectionSnapshot(tsCode = it, modelScore = 0.0)
-            }
-        val codes = (currentPositions + previousHoldings + realtimeSelections.map { it.tsCode }).distinct()
-        val stockNames = dataSource.loadStockNames(codes)
-
-        val realtimeDay = StrategyPositionTrackingDay(
-            tradeDate = tradeDate,
-            selection = realtimeSelections
-                .filterNot { it.tsCode in currentPositionCodes }
-                .take(MAX_TRACKING_SLOT_COUNT)
-                .mapIndexed { idx, selection ->
-                    trackingNode(
-                        code = selection.tsCode,
-                        stockNames = stockNames,
-                        section = StrategyTrackingSection.SELECTION,
-                        slotIndex = idx,
-                        modelScore = selection.modelScore,
-                        entryHint = selection.limitPrice
-                    )
-                },
-            holdings = currentPositions.mapIndexed { idx, code ->
-                trackingNode(
-                    code, stockNames, StrategyTrackingSection.HOLDINGS, idx,
-                    buyDate = buyDateByCode[code] ?: tradeDate
-                )
-            },
-            cleared = previousHoldingNodes
-                .filterNot { it.stockCode in currentPositionCodes }
-                .take(MAX_TRACKING_SLOT_COUNT)
-                .mapIndexed { idx, node ->
-                    trackingNode(
-                        node.stockCode, stockNames, StrategyTrackingSection.CLEARED, idx,
-                        buyDate = node.buyDate
-                    )
-                }
-        )
-        return enrich(baseDays + realtimeDay, realtimeCandles, realtimeTradeDate = tradeDate)
-    }
-
     private fun trackingNode(
         code: String,
         stockNames: Map<String, String>,
@@ -372,8 +287,6 @@ class StrategyPositionTrackingRuntime(
      */
     private fun enrich(
         days: List<StrategyPositionTrackingDay>,
-        realtimeCandles: Map<String, Candle>,
-        realtimeTradeDate: String?,
     ): StrategyPositionTrackingResponse {
         if (days.isEmpty()) return StrategyPositionTrackingResponse(emptyList())
         val allCodes = days.flatMap { day -> day.selection + day.holdings + day.cleared }
@@ -386,17 +299,8 @@ class StrategyPositionTrackingRuntime(
             .mapNotNull { node -> node.buyDate?.let(LocalDate::parse) }
             .minOrNull()
         val startDate = minOf(firstTradeDate, earliestBuyDate ?: firstTradeDate)
-        val dbCandles = dataSource.loadCandles(allCodes, startDate, endDate)
-        // 实时日 K 覆盖到同一份序列上，下游统一按日期取价
-        val realtimeDate = realtimeTradeDate?.let(LocalDate::parse)
-        val candles: Map<String, Map<LocalDate, Candle>> = if (realtimeDate == null) {
-            dbCandles
-        } else {
-            allCodes.associateWith { code ->
-                val base = dbCandles[code].orEmpty()
-                realtimeCandles[code]?.let { base + (realtimeDate to it) } ?: base
-            }
-        }
+        // 跟踪页逐日均为已确认交易日，行情统一取 DB 前复权序列（无盘中实时日覆盖）。
+        val candles: Map<String, Map<LocalDate, Candle>> = dataSource.loadCandles(allCodes, startDate, endDate)
 
         val enrichedDays = days.mapIndexed { index, day ->
             val observationDate = LocalDate.parse(day.tradeDate)
@@ -420,7 +324,6 @@ class StrategyPositionTrackingRuntime(
         return StrategyPositionTrackingResponse(
             days = enrichedDays,
             edges = buildEdges(enrichedDays, candles),
-            realtimeTradeDate = realtimeTradeDate,
         )
     }
 
@@ -495,7 +398,7 @@ class StrategyPositionTrackingRuntime(
         )
     }
 
-    /** 选股节点：观察日价格与当日涨跌幅（盘中实时日即实时价/实时涨跌）。 */
+    /** 选股节点：观察日收盘价与当日涨跌幅。 */
     private fun fillSelectionQuote(
         node: StrategyTrackingStockNode,
         observationDate: LocalDate,

@@ -182,7 +182,7 @@ data class StrategyTrackingStockNode(
     val buyPrice: Float? = null,
     val actualPnl: Float? = null,
     val maxPnl: Float? = null,
-    /** 观察日价格：历史日为收盘价，盘中实时日为最新价。 */
+    /** 观察日收盘价（前复权口径）。 */
     val currentPrice: Float? = null,
     /** 观察日当日涨跌幅 %，选股节点填充，用于判断次日入场的跳空空间。 */
     val dayChangePct: Float? = null,
@@ -257,8 +257,6 @@ data class StrategyPositionTrackingResponse(
     val days: List<StrategyPositionTrackingDay>,
     /** 跨日流转边（含盈亏百分比），服务端计算产物。 */
     val edges: List<StrategyTrackingEdge> = emptyList(),
-    /** 最后一日为盘中实时投影时的交易日；null 表示全部为确认交易日。 */
-    val realtimeTradeDate: String? = null,
     /**
      * 最早跟随日校准视图的跟随起始交易日（第一笔跟随买入发生的交易日）；
      * null 表示模型自身持仓流。校准视图由服务端以该日空仓起步重放生产持仓规则生成。

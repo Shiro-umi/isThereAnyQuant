@@ -101,8 +101,7 @@ private class StrategySocketService(
         json = json,
         dataSource = DefaultIntradayStrategyRuntimeDataSource(
             realtimeFactSource = KtorSnapshotStrategyRealtimeDailyFactSource(ktorRealtimeClient)
-        ),
-        trackingRuntime = positionTrackingRuntime
+        )
     )
     private val postMarketRuntime = PostMarketStrategyRuntime(
         snapshotHub = snapshotHub,

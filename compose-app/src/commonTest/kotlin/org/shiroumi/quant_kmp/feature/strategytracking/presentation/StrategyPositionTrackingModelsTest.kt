@@ -13,7 +13,7 @@ import model.candle.StrategyTrackingStockNode
 class StrategyPositionTrackingModelsTest {
 
     @Test
-    fun toTimelinePassesThroughCloudEdgesAndRealtimeFlag() {
+    fun toTimelinePassesThroughCloudEdges() {
         val timeline = StrategyPositionTrackingResponse(
             days = listOf(
                 day(
@@ -33,14 +33,11 @@ class StrategyPositionTrackingModelsTest {
                     pnlPct = 1.25f,
                 ),
             ),
-            realtimeTradeDate = "2026-04-15",
         ).toTimeline()
 
         assertEquals(1, timeline.edges.size)
         assertEquals(1.25f, timeline.edges.single().pnlPct)
-        assertEquals("2026-04-15", timeline.realtimeTradeDate)
-        assertEquals(true, timeline.isRealtimeDay(timeline.days.last()))
-        assertEquals(false, timeline.isRealtimeDay(timeline.days.first()))
+        assertEquals(listOf("2026-04-14", "2026-04-15"), timeline.days.map { it.tradeDate })
     }
 
     @Test
@@ -68,7 +65,6 @@ class StrategyPositionTrackingModelsTest {
 
         assertEquals(2, timeline.days.size)
         assertEquals(0, timeline.edges.size)
-        assertEquals(null, timeline.realtimeTradeDate)
     }
 
     @Test
@@ -110,23 +106,22 @@ class StrategyPositionTrackingModelsTest {
     }
 
     @Test
-    fun calibratableTradeDatesExcludesRealtimeAndBelowFloorThenReversed() {
+    fun calibratableTradeDatesExcludesBelowFloorThenReversed() {
         val timeline = StrategyPositionTrackingResponse(
             days = listOf(
                 day(tradeDate = "2026-05-15"), // 早于下界，剔除
                 day(tradeDate = "2026-05-18"), // 下界当日，保留
                 day(tradeDate = "2026-05-19"),
-                day(tradeDate = "2026-05-20"), // 末日为盘中实时投影日，剔除
+                day(tradeDate = "2026-05-20"),
             ),
-            realtimeTradeDate = "2026-05-20",
         ).toTimeline()
 
-        // 已确认且不早于下界的交易日，最新在上
-        assertEquals(listOf("2026-05-19", "2026-05-18"), timeline.calibratableTradeDates())
+        // 不早于下界的交易日，最新在上
+        assertEquals(listOf("2026-05-20", "2026-05-19", "2026-05-18"), timeline.calibratableTradeDates())
     }
 
     @Test
-    fun calibratableTradeDatesKeepsAllConfirmedDaysWhenNoRealtime() {
+    fun calibratableTradeDatesKeepsAllConfirmedDays() {
         val timeline = StrategyPositionTrackingResponse(
             days = listOf(
                 day(tradeDate = "2026-05-18"),

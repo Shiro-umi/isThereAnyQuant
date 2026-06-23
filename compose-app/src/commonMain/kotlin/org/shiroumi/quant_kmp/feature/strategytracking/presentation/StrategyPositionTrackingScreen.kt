@@ -738,8 +738,7 @@ private fun TrackingCalibrationControl(
 
 private const val CalibrationPickerHint =
     "选择你第一笔跟随买入发生的交易日。系统以该日空仓起步，按生产持仓规则重放之后的买入与卖出，" +
-        "排除模型在你跟随之前已有持仓的影响，使跟踪流与你的真实持仓对齐。" +
-        "校准视图仅包含已确认交易日，不含盘中实时列。"
+        "排除模型在你跟随之前已有持仓的影响，使跟踪流与你的真实持仓对齐。"
 
 /**
  * 校准日期选择列表。顶部固定说明，其下「跟随全程」与全部可校准交易日同款行渲染，
@@ -1361,7 +1360,6 @@ private fun TrackingTimelineContent(
                                 dayRevealProgress = dayRevealProgress,
                                 revealStartDayIndex = revealStartDayIndex,
                                 isLatest = index == timeline.days.lastIndex,
-                                isRealtime = timeline.isRealtimeDay(day),
                                 isFollowStart = day.tradeDate == timeline.followStartDate,
                                 geometry = geometry,
                                 sharedTransitionScope = sharedTransitionScope,
@@ -1409,7 +1407,6 @@ private fun TrackingTimelineContent(
                             dayRevealProgress = dayRevealProgress,
                             revealStartDayIndex = revealStartDayIndex,
                             isLatest = index == timeline.days.lastIndex,
-                            isRealtime = timeline.isRealtimeDay(day),
                             isFollowStart = day.tradeDate == timeline.followStartDate,
                             geometry = geometry,
                             sharedTransitionScope = sharedTransitionScope,
@@ -1662,7 +1659,6 @@ private fun TrackingDayCard(
     dayRevealProgress: Float,
     revealStartDayIndex: Int,
     isLatest: Boolean,
-    isRealtime: Boolean,
     isFollowStart: Boolean,
     geometry: TimelineGeometry,
     sharedTransitionScope: SharedTransitionScope,
@@ -1693,7 +1689,7 @@ private fun TrackingDayCard(
             .height(geometry.cardHeight)
             .then(revealModifier)
             .semantics {
-                contentDescription = day.accessibilityDescription(isLatest, isRealtime)
+                contentDescription = day.accessibilityDescription(isLatest)
             },
     ) {
         if (isLatest) {
@@ -1722,7 +1718,7 @@ private fun TrackingDayCard(
                 verticalArrangement = Arrangement.Center
             ) {
                 Text(
-                    text = if (isRealtime) TrackingRealtimeDayLabel else day.tradeDate,
+                    text = day.tradeDate,
                     style = when (geometry.dateTextScale) {
                         TrackingTextScale.COMPACT -> MaterialTheme.typography.headlineSmall
                         TrackingTextScale.REGULAR -> MaterialTheme.typography.headlineMedium
@@ -1732,7 +1728,6 @@ private fun TrackingDayCard(
                 )
                 Text(
                     text = when {
-                        isRealtime -> "盘中实时"
                         isFollowStart -> "跟随起点"
                         isLatest -> "最新交易日"
                         else -> "历史交易日"
@@ -1742,7 +1737,7 @@ private fun TrackingDayCard(
                         TrackingTextScale.REGULAR -> MaterialTheme.typography.titleMedium
                         TrackingTextScale.LARGE -> MaterialTheme.typography.titleLarge
                     },
-                    color = if (isFollowStart && !isRealtime) {
+                    color = if (isFollowStart) {
                         MaterialTheme.colorScheme.primary
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
@@ -1753,7 +1748,7 @@ private fun TrackingDayCard(
             Spacer(modifier = Modifier.height(geometry.dateBottomGap))
 
             TrackingSectionCard(
-                title = if (isRealtime) "选股结果 · 盘后确认" else "选股结果",
+                title = "选股结果",
                 section = StrategyTrackingSection.SELECTION,
                 nodes = day.selection,
                 geometry = geometry,
@@ -2291,14 +2286,12 @@ private fun StrategyTrackingSection.label(): String = when (this) {
 
 private fun StrategyPositionTrackingDay.accessibilityDescription(
     isLatest: Boolean,
-    isRealtime: Boolean,
 ): String =
     buildString {
-        append(if (isRealtime) TrackingRealtimeDayLabel else tradeDate)
+        append(tradeDate)
         append("，")
         append(
             when {
-                isRealtime -> "盘中实时"
                 isLatest -> "最新交易日"
                 else -> "历史交易日"
             }
