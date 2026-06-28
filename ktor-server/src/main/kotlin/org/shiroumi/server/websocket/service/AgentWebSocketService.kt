@@ -176,9 +176,12 @@ object AgentWebSocketService {
                 // 回测模式强制隔离：无论 db / 全局配置如何，回测会话一律 isolated=true，
                 // 覆盖 dbConfig.isolated，确保只加载 workDir/.claude 下的隔离配置与禁联网 settings。
                 val isolated = if (backtestMode) true else (dbConfig?.isolated ?: agentConfig.isolated)
-                // fail-fast 不变式：回测模式必须隔离，违反即抛出，杜绝隔离被意外关闭后 agent 读到全局配置或联网。
-                check(!backtestMode || isolated) {
-                    "backtestMode 必须隔离运行：isolated 被解析为 false，回测会话拒绝启动"
+                // fail-fast 不变式：隔离是 agent 权限收口的硬前提。只有 isolated 才加 --setting-sources project、
+                // claude 才从 workDir/.claude/settings.json 读取 permissions（禁内置写工具 + Bash 白名单 + dontAsk
+                // 默认拒）。isolated=false 会让 settings.json 不被读取、agent 回落全局 ~/.claude 配置，
+                // 权限收口静默失效。故回测与实盘都要求 isolated，违反即拒绝启动而非静默裸跑。
+                check(isolated) {
+                    "agent 必须隔离运行：isolated 被解析为 false，权限收口（settings.json）将失效，会话拒绝启动"
                 }
                 val effectiveModel = AgentModelConfigResolver.resolve(
                     quantConfig = ConfigManager.getConfig(),
@@ -600,6 +603,13 @@ object AgentWebSocketService {
                             1. 极度精简重点：绝对不要说"好的"、"收到"、"我这就去"、"请稍等"等凑字数的废话。
                             2. 结果导向：在被要求查询数据或执行计算动作时，你**必须**第一步直接且静默地调用相关的能力工具。只有在拿到底层工具的返回结果后，再组织并输出唯一一次完整专业的结论。
                         """.trimIndent()
+                        )
+                        // 实盘交互写 .claude/settings.json：deny 内置写工具 + 兜底 Bash 钉死 workDir、禁读系统信息，
+                        // allow 精确放行 6 取数 CLI + bc + Read/Glob/Grep + WebSearch/WebFetch。与 isolated 的
+                        // --setting-sources project 配合生效（live isolated 默认 true）。报告走 ACP 文本流不依赖 Write。
+                        val liveSettingsFile = BacktestAgentProvisioning.writeLiveSettingsJson(resolvedWorkDir)
+                        logger.info(
+                            "[AgentWebSocketService] Wrote live permissions settings.json at ${liveSettingsFile.absolutePath}"
                         )
                         }
 

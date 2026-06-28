@@ -108,6 +108,67 @@ class BacktestAgentProvisioningTest {
     }
 
     @Test
+    fun `实盘 settings_json deny 内置写工具且 Bash 不进 deny`() {
+        val json = BacktestAgentProvisioning.liveSettingsJson()
+        // 禁全部内置写盘工具（裸名 deny 把工具从 claude 上下文彻底移除）
+        assertTrue(json.contains("\"Write\""))
+        assertTrue(json.contains("\"Edit\""))
+        assertTrue(json.contains("\"MultiEdit\""))
+        assertTrue(json.contains("\"NotebookEdit\""))
+        assertTrue(json.contains("\"deny\""))
+        // 关键：Bash 绝不能进 deny。裸 Bash deny 会让所有更具体的 Bash(./xxx:*) allow 失效（取数全断）。
+        // deny 段（allow 之前）内不应出现裸 Bash。
+        val denySegment = json.substringAfter("\"deny\"").substringBefore("\"allow\"")
+        assertFalse(denySegment.contains("\"Bash\""))
+    }
+
+    @Test
+    fun `实盘 settings_json 用 dontAsk 默认拒并精确 allow 6 取数 CLI 与 bc 与读工具与联网`() {
+        val json = BacktestAgentProvisioning.liveSettingsJson()
+        // defaultMode=dontAsk：未命中 allow 的工具自动拒绝、不弹 ask（无人审批的 ACP 场景刚需）
+        assertTrue(json.contains("\"defaultMode\""))
+        assertTrue(json.contains("\"dontAsk\""))
+        assertTrue(json.contains("\"allow\""))
+        // 6 个取数 CLI（语义对齐 CommandWhitelist.LIVE）
+        assertTrue(json.contains("\"Bash(./get-candles:*)\""))
+        assertTrue(json.contains("\"Bash(./get-intraday-candles:*)\""))
+        assertTrue(json.contains("\"Bash(./get-research-reports:*)\""))
+        assertTrue(json.contains("\"Bash(./get-industry-research-reports:*)\""))
+        assertTrue(json.contains("\"Bash(./get-limit-list:*)\""))
+        assertTrue(json.contains("\"Bash(./market-emotion:*)\""))
+        // bc 形态
+        assertTrue(json.contains("\"Bash(echo:*)\""))
+        // 报告链路所需读工具（读 SKILL.md 学报告块格式）
+        assertTrue(json.contains("\"Read\""))
+        assertTrue(json.contains("\"Glob\""))
+        assertTrue(json.contains("\"Grep\""))
+        // 交互保留实时取数（区别于回测禁联网）
+        assertTrue(json.contains("\"WebSearch\""))
+        assertTrue(json.contains("\"WebFetch\""))
+    }
+
+    @Test
+    fun `实盘 settings_json 不照搬回测禁联网 deny`() {
+        val json = BacktestAgentProvisioning.liveSettingsJson()
+        // 实盘 deny 段不应出现 WebFetch/WebSearch（它们在 allow 中保留实时取数）
+        val denySegment = json.substringAfter("\"deny\"").substringBefore("\"allow\"")
+        assertFalse(denySegment.contains("WebFetch"))
+        assertFalse(denySegment.contains("WebSearch"))
+    }
+
+    @Test
+    fun `写实盘 settings_json 落盘到 dotclaude 目录`() {
+        val workDir = Files.createTempDirectory("quant-l2-live-settings").toFile()
+        workDir.deleteOnExit()
+        val file = BacktestAgentProvisioning.writeLiveSettingsJson(workDir.absolutePath)
+        assertEquals(File(workDir, ".claude/settings.json").absolutePath, file.absolutePath)
+        assertTrue(file.exists())
+        val content = file.readText()
+        assertTrue(content.contains("\"Write\""))
+        assertTrue(content.contains("\"Bash(./get-candles:*)\""))
+    }
+
+    @Test
     fun `写回测 settings_json 落盘到 dotclaude 目录`() {
         val workDir = Files.createTempDirectory("quant-l2-settings").toFile()
         workDir.deleteOnExit()

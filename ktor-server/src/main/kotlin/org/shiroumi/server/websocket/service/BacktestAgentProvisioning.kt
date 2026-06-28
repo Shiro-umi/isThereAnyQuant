@@ -250,17 +250,80 @@ internal object BacktestAgentProvisioning {
         """.trimIndent()
 
     /**
-     * 写回测禁联网 settings.json 到 {workDir}/.claude/settings.json。
+     * 实盘交互 agent 的 settings.json 内容（permissions 白名单收口）。
      *
-     * 实测结论：claude-agent-acp 不解析 --disallowedTools 启动参数，必须用 settings.json 的 permissions.deny。
-     * 与 isolated 的 --setting-sources project 配合：进程只从 {workDir}/.claude/settings.json 读取设置，
-     * deny 项即时生效，覆盖 WebFetch / WebSearch / Bash(curl) / Bash(wget) / chrome-devtools MCP 全部联网通道。
+     * 两条硬约束落地：
+     *  1. 禁 agent 写盘：deny 全部内置写工具（Write / Edit / MultiEdit / NotebookEdit）。deny 裸工具名把工具
+     *     从 claude 上下文彻底移除，且 deny 在 --dangerously-skip-permissions（bypassPermissions）下仍强制执行。
+     *     报告产出走 ACP 文本流（StateManager 累积 AgentMessageChunk → contentMd），零 Write 依赖，禁写不影响报告。
+     *  2. 钉死 workDir、禁读系统信息：defaultMode=dontAsk 让未命中 allow 的工具调用一律自动拒绝（不弹 ask，
+     *     无人审批的 ACP 场景下 ask 会挂起），agent 默认跑不了 cat /etc/passwd、dscl、ls 等读系统命令；
+     *     allow 精确放行 6 个取数 CLI（语义对齐 [org.shiroumi.agent.security.CommandWhitelist] 的 LIVE 白名单）+ bc。
+     *     claude 经 ACP 读写文件已被 AcpClient.resolveWorkspacePath 钉死在 workDir 内，与本白名单正交叠加。
+     *
+     * 关键：Bash 不能用裸名 deny。claude 权限语义里 deny 永远先于 allow 求值且不带例外，裸 Bash deny 会把整个
+     * Bash 工具移除、让所有更具体的 Bash(./get-candles:*) allow 失效（取数全断）。故 Bash 收口靠 dontAsk 默认拒
+     * + 精确 allow，不写裸 Bash deny。
+     *
+     * allow 保留 Read / Glob / Grep：agent 触发 skill 时按 CLAUDE.md 约定先读 SKILL.md 学报告块格式
+     * （quant-kline / quant-header 等），读已被 ACP 限死 workDir，安全。区别于回测：交互保留 WebSearch / WebFetch
+     * 做实时取数，故不照搬回测的禁联网 deny。
+     *
+     * bc 形态是 `echo "scale=4; ..." | bc`，首 token 为 echo，命中 Bash(echo:*)。管道 `| bc` 的匹配语义以
+     * live 会话实测为准：若被拦则追加 Bash(bc:*)。
      */
-    fun writeBacktestSettingsJson(workDir: String): File {
+    fun liveSettingsJson(): String =
+        """
+        {
+          "defaultMode": "dontAsk",
+          "permissions": {
+            "deny": [
+              "Write",
+              "Edit",
+              "MultiEdit",
+              "NotebookEdit"
+            ],
+            "allow": [
+              "Read",
+              "Glob",
+              "Grep",
+              "WebSearch",
+              "WebFetch",
+              "Bash(./get-candles:*)",
+              "Bash(./get-intraday-candles:*)",
+              "Bash(./get-research-reports:*)",
+              "Bash(./get-industry-research-reports:*)",
+              "Bash(./get-limit-list:*)",
+              "Bash(./market-emotion:*)",
+              "Bash(echo:*)"
+            ]
+          }
+        }
+        """.trimIndent()
+
+    /**
+     * 把 settings.json 内容落盘到 {workDir}/.claude/settings.json，返回写入的文件。
+     *
+     * 实测结论：claude-agent-acp 不解析 --disallowedTools 启动参数，工具级权限必须走 settings.json 的 permissions。
+     * 与 isolated 的 --setting-sources project 配合：进程只从 {workDir}/.claude/settings.json 读取设置，即时生效。
+     */
+    private fun writeSettingsJson(workDir: String, content: String): File {
         val claudeDir = File(workDir, ".claude")
         claudeDir.mkdirs()
         val settingsFile = File(claudeDir, "settings.json")
-        settingsFile.writeText(backtestSettingsJson())
+        settingsFile.writeText(content)
         return settingsFile
     }
+
+    /**
+     * 写回测禁联网 settings.json 到 {workDir}/.claude/settings.json。
+     * deny 覆盖 WebFetch / WebSearch / Bash(curl) / Bash(wget) / chrome-devtools MCP 全部联网通道。
+     */
+    fun writeBacktestSettingsJson(workDir: String): File = writeSettingsJson(workDir, backtestSettingsJson())
+
+    /**
+     * 写实盘交互 settings.json 到 {workDir}/.claude/settings.json。
+     * deny 全部内置写工具 + 兜底 Bash，allow 精确放行 6 取数 CLI + bc + Read/Glob/Grep + WebSearch/WebFetch。
+     */
+    fun writeLiveSettingsJson(workDir: String): File = writeSettingsJson(workDir, liveSettingsJson())
 }
