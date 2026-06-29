@@ -139,7 +139,7 @@ class AgentEntryBackfillCommand : CliktCommand(
             }
         }.awaitAll()
 
-        val filled = results.count { it }
+        val filled = results.count { it.ok }
         echo("[entry-backfill] 完成：回填 $filled / ${tasks.size}（缺买点 ${tasks.size - filled} 只回退开盘价）")
     }
 }

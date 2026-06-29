@@ -2,6 +2,7 @@ package org.shiroumi.strategy.service.postmarket
 
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.LocalDate
+import org.shiroumi.agententry.BackfillResult
 import org.shiroumi.database.strategy.daily.repository.ProfitPredictionSelection
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -9,7 +10,10 @@ import kotlin.test.assertTrue
 
 /**
  * [AgentEntryBackfillStep] 纯逻辑测试——注入 selection fixture 与 fake 单只回填器，
- * 不碰数据库与 agent 子进程，只验证覆盖率统计、已有买点跳过、候选为空、阈值判定边界。
+ * 不碰真实 agent 子进程，只验证买点校验、顺位补充、已有买点跳过、候选为空、阈值判定边界。
+ *
+ * 股票代码使用不存在的虚拟代码（TST 前缀），确保 [AgentEntryBackfillStep.loadClosePriceMap]
+ * 查不到真实收盘价，买点校验走"无收盘价→放行"分支，测试只验证编排逻辑不依赖真实行情。
  */
 class AgentEntryBackfillStepTest {
 
@@ -40,18 +44,26 @@ class AgentEntryBackfillStepTest {
         modelKey = null,
     )
 
+    // 不存在于 DB 中的虚拟代码，确保 closePriceMap 查不到 → 校验放行
+    private val c1 = "TST001.SH"
+    private val c2 = "TST002.SH"
+    private val c3 = "TST003.SZ"
+    private val c4 = "TST004.SZ"
+    private val c5 = "TST005.SH"
+    private val c6 = "TST006.SZ"
+
     @Test
     fun `全部成功 覆盖率为1`() = runTest {
         val selections = listOf(
-            selection("301013.SZ", 0.99),
-            selection("603929.SH", 0.98),
-            selection("300088.SZ", 0.97),
+            selection(c1, 0.99),
+            selection(c2, 0.98),
+            selection(c3, 0.97),
         )
         val outcome = AgentEntryBackfillStep.backfill(
             targetDate = targetDate,
             config = config,
             loadSelections = { selections },
-            backfillOne = { _, _, _ -> true },
+            backfillOne = { _, _, _ -> BackfillResult(ok = true, limitPrice = 60.0) },
         )
         assertEquals(3, outcome.candidates)
         assertEquals(3, outcome.attempted)
@@ -62,16 +74,18 @@ class AgentEntryBackfillStepTest {
     @Test
     fun `单只失败 覆盖率不足1`() = runTest {
         val selections = listOf(
-            selection("301013.SZ", 0.99),
-            selection("603929.SH", 0.98),
-            selection("300088.SZ", 0.97),
+            selection(c1, 0.99),
+            selection(c2, 0.98),
+            selection(c3, 0.97),
         )
         // 第三只识别不出买点（agent 失败/无产出）。
         val outcome = AgentEntryBackfillStep.backfill(
             targetDate = targetDate,
             config = config,
             loadSelections = { selections },
-            backfillOne = { _, _, code -> code != "300088.SZ" },
+            backfillOne = { _, _, code ->
+                BackfillResult(ok = code != c3, limitPrice = if (code != c3) 60.0 else null)
+            },
         )
         assertEquals(3, outcome.candidates)
         assertEquals(2, outcome.filled)
@@ -83,23 +97,26 @@ class AgentEntryBackfillStepTest {
     fun `已有买点的票跳过不重复跑`() = runTest {
         var ranCodes = mutableListOf<String>()
         val selections = listOf(
-            selection("301013.SZ", 0.99, limit = 60.0), // 已有买点
-            selection("603929.SH", 0.98),
-            selection("300088.SZ", 0.97),
+            selection(c1, 0.99, limit = 60.0), // 已有买点
+            selection(c2, 0.98),
+            selection(c3, 0.97),
         )
         val outcome = AgentEntryBackfillStep.backfill(
             targetDate = targetDate,
             config = config,
             loadSelections = { selections },
-            backfillOne = { _, _, code -> synchronized(ranCodes) { ranCodes.add(code) }; true },
+            backfillOne = { _, _, code ->
+                synchronized(ranCodes) { ranCodes.add(code) }
+                BackfillResult(ok = true, limitPrice = 60.0)
+            },
         )
-        // 已有买点的 301013 不进 agent，但计入 filled。
+        // 已有买点的 c1 不进 agent，但计入 filled。
         assertEquals(3, outcome.candidates)
         assertEquals(2, outcome.attempted)
         assertEquals(3, outcome.filled)
         assertEquals(1.0, outcome.coverage)
-        assertTrue("301013.SZ" !in ranCodes)
-        assertEquals(setOf("603929.SH", "300088.SZ"), ranCodes.toSet())
+        assertTrue(c1 !in ranCodes)
+        assertEquals(setOf(c2, c3), ranCodes.toSet())
     }
 
     @Test
@@ -116,33 +133,38 @@ class AgentEntryBackfillStepTest {
     }
 
     @Test
-    fun `topN 截断 只回填前N只`() = runTest {
-        // 候选 6 只，topN=5 → 取模型分前 5 只回填（第 6 只不进入回填范围）。
-        val selections = (1..6).map { selection("00000$it.SZ", 1.0 - it * 0.01) }
+    fun `topN 截断且无补充 前N只全有效`() = runTest {
+        // 候选 6 只，topN=5 → 前 5 只全有效，第 6 只不触发补充。
+        val selections = listOf(c1, c2, c3, c4, c5, c6).mapIndexed { i, code ->
+            selection(code, 1.0 - i * 0.01)
+        }
         val outcome = AgentEntryBackfillStep.backfill(
             targetDate = targetDate,
             config = config.copy(topN = 5),
             loadSelections = { selections },
-            backfillOne = { _, _, _ -> true },
+            backfillOne = { _, _, _ -> BackfillResult(ok = true, limitPrice = 60.0) },
         )
         assertEquals(5, outcome.candidates)
         assertEquals(5, outcome.filled)
+        assertEquals(1.0, outcome.coverage)
     }
 
     @Test
     fun `异常单只记为失败不影响其他`() = runTest {
         val selections = listOf(
-            selection("301013.SZ", 0.99),
-            selection("603929.SH", 0.98),
+            selection(c1, 0.99),
+            selection(c2, 0.98),
         )
         val outcome = AgentEntryBackfillStep.backfill(
             targetDate = targetDate,
             config = config,
             loadSelections = { selections },
             backfillOne = { _, _, code ->
-                if (code == "301013.SZ") throw RuntimeException("agent 崩了") else true
+                if (code == c1) throw RuntimeException("agent 崩了")
+                else BackfillResult(ok = true, limitPrice = 60.0)
             },
         )
+        // candidates = min(topN=3, pool=2) = 2；c1 异常失败、c2 成功，无更多候选补充。
         assertEquals(2, outcome.candidates)
         assertEquals(1, outcome.filled)
         assertEquals(0.5, outcome.coverage)
@@ -159,7 +181,7 @@ class AgentEntryBackfillStepTest {
         assertEquals(5, cfg.topN)
         assertEquals(5, cfg.parallelism)
         assertEquals(300L, cfg.perStockTimeoutSec)
-        assertEquals(null, cfg.modelKey)
+        assertEquals("deepseek-v4-pro", cfg.modelKey)
     }
 
     @Test

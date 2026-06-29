@@ -5,6 +5,29 @@ import kotlinx.datetime.LocalDate
 import org.shiroumi.database.strategy.daily.repository.DailyProfitPredictionSelectionRepository
 
 /**
+ * 单只 agent 买点回填的结果。
+ *
+ * [ok] 为 true 时 [limitPrice] 非空表示成功回填的有效买点；[ok] 为 false 时 [limitPrice] 一律为 null。
+ */
+data class BackfillResult(
+    val ok: Boolean,
+    val limitPrice: Double?,
+)
+
+/** 根据 tsCode 前缀判定该股的日涨跌停幅度（小数，如 0.10 = 10%）。 */
+fun dailyPriceLimitPct(tsCode: String): Double {
+    val code = tsCode.substringBefore(".")
+    val market = tsCode.substringAfter(".", "")
+    return when {
+        market.equals("BJ", ignoreCase = true) -> 0.20
+        code.startsWith("688") -> 0.20
+        code.startsWith("300") -> 0.20
+        code.startsWith("301") -> 0.20
+        else -> 0.10
+    }
+}
+
+/**
  * agent 买点回填的共享脚手架——CLI（`agent-entry-backfill` 手动入口）与生产盘后
  * （`AgentEntryBackfillStep`）共用单只「分析 → 解析 → 写库」三步、projectRoot 解析与 workspace 路径派生。
  *
@@ -57,7 +80,7 @@ object AgentEntryBackfiller {
         model: org.shiroumi.config.AgentModelResolution.Resolved,
         perStockTimeoutSec: Long,
         onLog: (String) -> Unit = {},
-    ): Boolean {
+    ): BackfillResult {
         val result = AgentEntryPriceAnalyzer.analyzeOneStock(
             projectRoot = projectRoot,
             workspaceBase = workspaceBase,
@@ -75,10 +98,10 @@ object AgentEntryBackfiller {
         return if (result.ok && limit != null) {
             val rows = DailyProfitPredictionSelectionRepository.updateLimitPrice(targetDate, tsCode, limit)
             onLog("✔ $tsCode 买点=$limit 回填行数=$rows")
-            rows > 0
+            BackfillResult(ok = rows > 0, limitPrice = if (rows > 0) limit else null)
         } else {
             onLog("✘ $tsCode 无买点（失败或未产出），回退开盘价建仓")
-            false
+            BackfillResult(ok = false, limitPrice = null)
         }
     }
 }

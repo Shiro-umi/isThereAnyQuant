@@ -24,6 +24,11 @@ data class AgentEntryBackfillConfig(
     val perStockTimeoutSec: Long,
     val modelKey: String?,
 ) {
+    init {
+        require(topN >= 1) { "topN 必须 >= 1，实际为 $topN" }
+        require(parallelism >= 1) { "parallelism 必须 >= 1（Semaphore($parallelism) 会导致死锁），实际为 $parallelism" }
+    }
+
     companion object {
         /**
          * 从系统属性装配，缺省 = 开启 / 覆盖率 1.0（Top5 全成功）/ Top5 / 并发 5 / 单只 300s / 默认模型。
@@ -33,7 +38,7 @@ data class AgentEntryBackfillConfig(
          * - `quant.strategy.entryBackfill.topN`            默认 5（回填全部 selected 票，前端展示 5 只买入价）
          * - `quant.strategy.entryBackfill.parallelism`     默认 5（每只独立 ACP 子进程，与 topN 对齐避免串行排队）
          * - `quant.strategy.entryBackfill.perStockTimeoutSec` 默认 300
-         * - `quant.strategy.entryBackfill.modelKey`        默认空 → 回退 config.yaml agent.defaultModelKey
+         * - `quant.strategy.entryBackfill.modelKey`        默认 "deepseek-v4-pro"
          */
         fun fromSystemProperties(): AgentEntryBackfillConfig {
             fun prop(name: String): String? =
@@ -45,7 +50,7 @@ data class AgentEntryBackfillConfig(
                 topN = prop("topN")?.toIntOrNull()?.coerceAtLeast(1) ?: 5,
                 parallelism = prop("parallelism")?.toIntOrNull()?.coerceAtLeast(1) ?: 5,
                 perStockTimeoutSec = prop("perStockTimeoutSec")?.toLongOrNull()?.coerceAtLeast(1) ?: 300,
-                modelKey = prop("modelKey"),
+                modelKey = prop("modelKey") ?: "deepseek-v4-pro",
             )
         }
     }
