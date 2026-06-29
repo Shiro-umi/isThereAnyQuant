@@ -78,6 +78,13 @@ class BacktestRunExecutor(
          * T+1 开盘按限价撮合；为 null 时保持 OPEN 入场。仅入场闸门生效时有意义。
          */
         agentEntryPriceFeed: AgentEntryPriceFeed? = null,
+        /**
+         * 外部选股源。非空时用它替代默认的库表选股源 [PreloadedDecisionFeed]（读
+         * `daily_profit_prediction_selection` / `daily_strategy_audit`），用于线下离线选股事实
+         * （如 EMA20 趋势池 Top5，见 [org.shiroumi.backtest.feed.Ema20PoolDecisionFeed]）。
+         * 仍按交易日导出 decisions/ 供复盘。回测是执行层：外部 feed 只承载已确认的选股事实，不重新选股。
+         */
+        externalSelectionFeed: StrategyDecisionFeed? = null,
     ): LocalBacktestResult {
         val dates = calendar.tradingDays(config.startDate, config.endDate)
 
@@ -106,7 +113,16 @@ class BacktestRunExecutor(
             ::noFilter
         }
 
-        if (exportDecisions) {
+        if (externalSelectionFeed != null) {
+            // 外部选股源（线下离线选股事实，如 EMA20 池 Top5）替代库表，仍按交易日导出 decisions/ 供复盘。
+            // 不叠加库表涨停过滤：外部池已是过滤后的确认事实，回测不重新选股。
+            decisionFeed = externalSelectionFeed
+            export = if (exportDecisions) {
+                exportFromPreloaded(workspace, dates, externalSelectionFeed)
+            } else {
+                ExportResult(emptyList())
+            }
+        } else if (exportDecisions) {
             val preloadedFeed = PreloadedDecisionFeed.fromDatabase(
                 executionDates = dates,
                 filterSignalLimitUp = filterLimitUp,

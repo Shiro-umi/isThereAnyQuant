@@ -23,6 +23,7 @@ import org.shiroumi.backtest.domain.Money
 import org.shiroumi.backtest.engine.BacktestRunExecutor
 import org.shiroumi.backtest.engine.EntryOrdering
 import org.shiroumi.backtest.feed.AgentEntryPriceFeed
+import org.shiroumi.backtest.feed.Ema20PoolDecisionFeed
 import org.shiroumi.backtest.engine.ExitRulesConfig
 import org.shiroumi.backtest.engine.LocalBacktestResult
 import org.shiroumi.backtest.feed.ExportResult
@@ -163,6 +164,12 @@ class BacktestRunCommand : CliktCommand(
         help = "Agent 买点价目录（独立于引擎 decisions/）：读取 {dir}/{执行日}.json 中 BUY/LIMIT 决策的 limitPrice，" +
             "入场闸门据此按限价买点（T+1 开盘按限价撮合）入场；不指定则按开盘价入场。仅启用入场闸门时生效。",
     ).path()
+    private val selectionJson by option(
+        "--selection-json",
+        help = "外部 EMA20 趋势池 Top5 选股清单 JSON（{picks:[{signalDate,tsCode,modelScore}]}）：" +
+            "用它替代库表选股源，回测在此池内按模型分（清单已降序）Top N 入场。" +
+            "信号日 T 经日历映射到执行日 T+1，与 --agent-entry-prices 口径一致。",
+    ).path()
 
     override fun run() {
         ConfigManager.load()
@@ -196,6 +203,18 @@ class BacktestRunCommand : CliktCommand(
         if (agentEntryPriceFeed != null) {
             echo("       Agent 买点价目录：$agentEntryPricesDir（按 BUY/LIMIT limitPrice 限价入场）")
         }
+        val externalSelectionFeed = selectionJson?.let {
+            Ema20PoolDecisionFeed(
+                selectionFile = it,
+                nextTradingDay = org.shiroumi.database.common.repository.TradingCalendarRepository::findNextTradingDate,
+            )
+        }
+        if (externalSelectionFeed != null) {
+            echo("       外部选股源：$selectionJson（EMA20 池模型分 Top N，替代库表选股）")
+            if (filterLimitUp) {
+                echo("       注意：外部选股源已是确认事实，--filter-limit-up 不叠加（被忽略）")
+            }
+        }
         val result = executor.runLocal(
             workspace = workspace,
             config = config,
@@ -207,6 +226,7 @@ class BacktestRunCommand : CliktCommand(
             entryOrdering = entryOrder,
             equalWeightAcrossEntries = equalWeightEntries,
             agentEntryPriceFeed = agentEntryPriceFeed,
+            externalSelectionFeed = externalSelectionFeed,
         )
         if (!noExport) {
             echo("       决策导出：${result.export.writtenDays}/${result.export.totalDays} 个交易日，" +

@@ -23,7 +23,9 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.minus
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.shiroumi.backtest.domain.ExecutionHint
 import org.shiroumi.backtest.domain.Side
 import org.shiroumi.backtest.domain.StrategyDecision
@@ -34,6 +36,7 @@ import org.shiroumi.config.AgentModelResolution
 import org.shiroumi.config.ConfigManager
 import org.shiroumi.database.common.repository.TradingCalendarRepository
 import org.shiroumi.database.strategy.daily.repository.DailyProfitPredictionSelectionRepository
+import org.shiroumi.database.strategy.daily.repository.ProfitPredictionSelection
 
 /**
  * `./cli batch-agent-driver` —— 并发驱动回测 agent 为每日选股逐只产出买点价 JSON。
@@ -115,6 +118,14 @@ class BatchAgentDriverCommand : CliktCommand(
             "合并时保留已有买点（已成功的票不重跑、不覆盖）。",
     ).flag(default = false)
 
+    private val selectionJson by option(
+        "--selection-json",
+        help = "外部选股清单 JSON 文件（优先于库 daily_profit_prediction_selection）。" +
+            "用于喂线下研究池（如 EMA20 趋势池 Top5）。格式：" +
+            "{\"picks\":[{\"signalDate\":\"2026-03-03\",\"tsCode\":\"600000.SH\",\"modelScore\":0.95}, ...]}。" +
+            "按 signalDate 分组、modelScore 降序，再由 --top-n 截取。signalDate 必须落在 --start/--end 或 --recent-trading-days 裁出的开市信号日内。",
+    ).path()
+
     override fun run() {
         val quantConfig = ConfigManager.load()
         val serverPort = quantConfig.server.port
@@ -167,8 +178,18 @@ class BatchAgentDriverCommand : CliktCommand(
         echo("[batch] 工作空间基目录=$workspaceBase")
 
         // 批量预取每个信号日的 Top N 已选股票，单次查询替代逐日 N 次。
-        val selectionsBySignalDate = DailyProfitPredictionSelectionRepository
-            .findSelectionsByTargetDates(signalDates)
+        // --selection-json 给定时改读外部研究池清单（EMA20 趋势池 Top5 等），不走生产选股表。
+        val selectionsBySignalDate: Map<LocalDate, List<ProfitPredictionSelection>> = if (selectionJson != null) {
+            val signalDateSet = signalDates.toSet()
+            loadSelectionsFromJson(selectionJson!!, signalDateSet)
+                .also { byDate ->
+                    val picks = byDate.values.sumOf { it.size }
+                    echo("[batch] 选股源=外部清单 $selectionJson（${byDate.size} 个信号日 / $picks 股次）")
+                }
+        } else {
+            echo("[batch] 选股源=库 daily_profit_prediction_selection")
+            DailyProfitPredictionSelectionRepository.findSelectionsByTargetDates(signalDates)
+        }
 
         // 断点续跑：读取输出目录已有 {执行日}.json 中已成功的 (执行日, 票) 集合，用于跳过。
         val existingByDate: Map<LocalDate, Set<String>> = if (skipExisting) {
@@ -237,6 +258,54 @@ class BatchAgentDriverCommand : CliktCommand(
             }
 
         printCoverageReport(coverageRows)
+    }
+
+    /** 外部选股清单 JSON 的单条记录（仅 batch-agent-driver 需要的最小字段）。 */
+    @Serializable
+    private data class ExternalPick(val signalDate: String, val tsCode: String, val modelScore: Double = 0.0)
+
+    /** 外部选股清单 JSON 顶层结构。 */
+    @Serializable
+    private data class ExternalSelectionFile(val picks: List<ExternalPick>)
+
+    /**
+     * 从外部 JSON 清单加载选股，构造为与库口径同形的 Map<信号日, List<ProfitPredictionSelection>>。
+     *
+     * 只填充下游真正用到的字段（tsCode / modelScore / targetDate），其余字段填占位（不被 batch-agent-driver 读取）。
+     * 按 signalDate 分组、组内 modelScore 降序（与库选股下游 .take(topN) 取最高分 N 只的口径一致）。
+     * 落在 signalDates 之外的记录直接丢弃（防止喂入与回测信号日区间错位的票）。
+     */
+    private fun loadSelectionsFromJson(
+        file: Path,
+        signalDates: Set<LocalDate>,
+    ): Map<LocalDate, List<ProfitPredictionSelection>> {
+        val text = File(file.toString()).readText()
+        val parsed = Json { ignoreUnknownKeys = true }.decodeFromString<ExternalSelectionFile>(text)
+        val out = LinkedHashMap<LocalDate, MutableList<ProfitPredictionSelection>>()
+        var dropped = 0
+        for (p in parsed.picks) {
+            val d = LocalDate.parse(p.signalDate)
+            if (d !in signalDates) { dropped++; continue }
+            out.getOrPut(d) { mutableListOf() }.add(
+                ProfitPredictionSelection(
+                    tradeDate = d,
+                    targetDate = d,
+                    tsCode = p.tsCode,
+                    modelScore = p.modelScore,
+                    selected = true,
+                    targetWeight = 0.0,
+                    sentimentExposure = 0.0,
+                    selectionReason = "external-selection-json",
+                    modelId = null,
+                    candidateMode = null,
+                ),
+            )
+        }
+        if (dropped > 0) echo("[batch] 外部清单丢弃 $dropped 股次（signalDate 不在信号日区间内）")
+        // 与库 findSelectionsByTargetDates 同序：modelScore 降序主序、同分 tsCode 升序，保证 take(topN) 选中票一致。
+        return out.mapValues { (_, list) ->
+            list.sortedWith(compareByDescending<ProfitPredictionSelection> { it.modelScore }.thenBy { it.tsCode })
+        }
     }
 
     /** 读取输出目录已有 {执行日}.json 中已成功的 (执行日 -> 票集合)，用于断点续跑跳过。 */

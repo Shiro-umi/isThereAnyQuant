@@ -1075,9 +1075,11 @@ strategy-server (策略层)
   ↓ (适配)
 backtest:engine
   ├── StrategyDecisionFeed
-  │     ├── DbBackedDecisionFeed   读取 daily_profit_prediction_selection / 审计表
-  │     ├── JsonReplayDecisionFeed JSON 决策回放
-  │     └── InMemoryDecisionFeed   单测 / 空输入回放
+  │     ├── DbBackedDecisionFeed    读取 daily_profit_prediction_selection / 审计表
+  │     ├── PreloadedDecisionFeed   库表选股源批量预加载（runLocal 默认）
+  │     ├── Ema20PoolDecisionFeed   外部 EMA20 趋势池 Top5 选股清单（线下离线选股事实，替代库表）
+  │     ├── JsonReplayDecisionFeed  JSON 决策回放
+  │     └── InMemoryDecisionFeed    单测 / 空输入回放
   ├── BacktestMarketDataFeed
   │     └── DatabaseBacktestMarketDataFeed 读取 stock_daily_data RAW 日线
   ├── TradingCalendar
@@ -1410,9 +1412,20 @@ fun runLocal(workspace: BacktestWorkspace, config: BacktestConfig): SimulationRe
 ./cli backtest run \
   --start 2024-01-02 --end 2024-06-30 \
   --equity-curve-csv ./out/my_equity.csv
+
+# 外部 EMA20 趋势池 Top5 选股源 + agent 限价买点（实盘交易路径回测）
+./cli backtest run \
+  --start 2026-03-04 --end 2026-05-30 \
+  --capital 1000000 \
+  --selection-json ./out/ema20_pool_top5.json \
+  --agent-entry-prices ./out/agent-buy/ \
+  --operating-point tp8-h3 \
+  --entry-order model-score
 ```
 
 **`--start` / `--end` 日期语义**：均为**执行日**（与 `BacktestConfig.startDate/endDate` 一致，也与 `BacktestScheduler.runLoop(start, end)` 的参数语义一致）。`--start 2024-01-02` 表示回测从 2024-01-02 这个交易日开始执行。导出器按执行日查询 `daily_profit_prediction_selection.target_date`。
+
+**`--selection-json` 外部选股源语义**：传入线下离线产出的 EMA20 趋势池 Top5 选股清单（`{picks:[{signalDate,tsCode,modelScore}]}`），由 `Ema20PoolDecisionFeed` 替代库表选股源 `PreloadedDecisionFeed`。清单 `signalDate` 是信号日 T，feed 经交易日历映射到执行日 T+1 作为 `effectiveDate`，与 `--agent-entry-prices` 的 `{执行日}.json` 口径严格对齐，杜绝未来函数。清单每个信号日的标的已按 `modelScore` 降序，feed 原样保序填入 `targetWeights`（等权 `1/N`），配合 `--entry-order model-score` 实现"池内模型分 Top N 入场"。回测是执行层：外部 feed 只承载已确认的选股事实，不重新选股、不叠加库表涨停过滤。与 `--selection-json` 同时使用 `--agent-entry-prices` 时，二者标的池一致，agent 限价买点按标的精确匹配入场价。
 
 **`--target-only` 日期/数据语义**：只使用 `daily_profit_prediction_selection` 目标组合确认事实；缺失目标组合的日期导出为空决策，不再降级读取 `daily_strategy_audit`。该口径用于模型 TopN 回测对比，避免把旧审计 BUY/SELL 意图混入模型组合表现。
 
