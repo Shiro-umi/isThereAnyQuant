@@ -2,6 +2,9 @@ package org.shiroumi.server.websocket.service
 
 import java.io.File
 import java.nio.file.Files
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -120,6 +123,17 @@ class BacktestAgentProvisioningTest {
         // deny 段（allow 之前）内不应出现裸 Bash。
         val denySegment = json.substringAfter("\"deny\"").substringBefore("\"allow\"")
         assertFalse(denySegment.contains("\"Bash\""))
+    }
+
+    @Test
+    fun `实盘 settings_json defaultMode 必须嵌在 permissions 内且为 dontAsk`() {
+        // 收口生效的硬前提：claude-agent-acp 适配器与底层 claude 引擎都只读 permissions.defaultMode。
+        // 写在顶层会被读成 undefined、回退 default 模式，deny-by-default 收口静默失效。用结构化解析钉死层级，
+        // 不用脆弱的 contains（顶层与内层的 defaultMode 字符串 contains 无法区分）。
+        val root = Json.parseToJsonElement(BacktestAgentProvisioning.liveSettingsJson()).jsonObject
+        // 顶层不得有 defaultMode
+        assertFalse("defaultMode" in root)
+        assertEquals("dontAsk", root.getValue("permissions").jsonObject.getValue("defaultMode").jsonPrimitive.content)
     }
 
     @Test

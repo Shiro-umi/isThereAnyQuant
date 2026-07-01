@@ -254,12 +254,22 @@ internal object BacktestAgentProvisioning {
      *
      * 两条硬约束落地：
      *  1. 禁 agent 写盘：deny 全部内置写工具（Write / Edit / MultiEdit / NotebookEdit）。deny 裸工具名把工具
-     *     从 claude 上下文彻底移除，且 deny 在 --dangerously-skip-permissions（bypassPermissions）下仍强制执行。
-     *     报告产出走 ACP 文本流（StateManager 累积 AgentMessageChunk → contentMd），零 Write 依赖，禁写不影响报告。
-     *  2. 钉死 workDir、禁读系统信息：defaultMode=dontAsk 让未命中 allow 的工具调用一律自动拒绝（不弹 ask，
-     *     无人审批的 ACP 场景下 ask 会挂起），agent 默认跑不了 cat /etc/passwd、dscl、ls 等读系统命令；
-     *     allow 精确放行 6 个取数 CLI（语义对齐 [org.shiroumi.agent.security.CommandWhitelist] 的 LIVE 白名单）+ bc。
+     *     从 claude 上下文彻底移除。报告产出走 ACP 文本流（StateManager 累积 AgentMessageChunk → contentMd），
+     *     零 Write 依赖，禁写不影响报告。
+     *  2. 钉死 workDir、禁读系统信息：defaultMode=dontAsk 让未命中 allow 的工具调用在底层 claude 引擎内直接
+     *     auto-deny（不弹 ask、不发 ACP 权限请求，无人审批的 ACP 场景下 ask 会挂起），agent 跑不了
+     *     cat /etc/passwd、dscl、ls 等读系统命令；allow 精确放行 6 个取数 CLI（语义对齐
+     *     [org.shiroumi.agent.security.CommandWhitelist] 的 LIVE 白名单）+ bc。
      *     claude 经 ACP 读写文件已被 AcpClient.resolveWorkspacePath 钉死在 workDir 内，与本白名单正交叠加。
+     *
+     * defaultMode 必须嵌在 permissions 对象内（与 deny/allow 平级）。claude-agent-acp 适配器读
+     * settings.permissions?.defaultMode，底层 claude 引擎同样只认 permissions.defaultMode。写在顶层会被读成
+     * undefined、回退 default 模式——default 下未命中 allow 触发 ACP 权限请求，被 AcpClient 的
+     * autoApproveTools=true 无条件批准，收口彻底失效。
+     *
+     * 收口不依赖任何启动 flag：--permission-mode / --dangerously-skip-permissions / --setting-sources 走
+     * claude-agent-acp 时均被适配器静默丢弃，权限模式唯一来源是本 settings.json 的 permissions.defaultMode。
+     * AcpClient 已删除 --dangerously-skip-permissions，避免裸 claude CLI 回退路径被解析成 bypassPermissions 架空本收口。
      *
      * 关键：Bash 不能用裸名 deny。claude 权限语义里 deny 永远先于 allow 求值且不带例外，裸 Bash deny 会把整个
      * Bash 工具移除、让所有更具体的 Bash(./get-candles:*) allow 失效（取数全断）。故 Bash 收口靠 dontAsk 默认拒
@@ -275,8 +285,8 @@ internal object BacktestAgentProvisioning {
     fun liveSettingsJson(): String =
         """
         {
-          "defaultMode": "dontAsk",
           "permissions": {
+            "defaultMode": "dontAsk",
             "deny": [
               "Write",
               "Edit",
@@ -304,8 +314,10 @@ internal object BacktestAgentProvisioning {
     /**
      * 把 settings.json 内容落盘到 {workDir}/.claude/settings.json，返回写入的文件。
      *
-     * 实测结论：claude-agent-acp 不解析 --disallowedTools 启动参数，工具级权限必须走 settings.json 的 permissions。
-     * 与 isolated 的 --setting-sources project 配合：进程只从 {workDir}/.claude/settings.json 读取设置，即时生效。
+     * 实测结论：claude-agent-acp 不解析 --disallowedTools / --permission-mode / --setting-sources 等启动参数
+     * （适配器只识别 --cli / --hide-claude-auth，其余静默丢弃），工具级权限必须走 settings.json 的 permissions。
+     * 适配器固定以 settingSources=[user,project,local] 读取设置：user 层为 CLAUDE_CONFIG_DIR/settings.json，
+     * project 层为 {workDir}/.claude/settings.json（本方法落盘目标），local 层为 {workDir}/.claude/settings.local.json。
      */
     private fun writeSettingsJson(workDir: String, content: String): File {
         val claudeDir = File(workDir, ".claude")
@@ -323,7 +335,8 @@ internal object BacktestAgentProvisioning {
 
     /**
      * 写实盘交互 settings.json 到 {workDir}/.claude/settings.json。
-     * deny 全部内置写工具 + 兜底 Bash，allow 精确放行 6 取数 CLI + bc + Read/Glob/Grep + WebSearch/WebFetch。
+     * permissions.defaultMode=dontAsk 做 deny-by-default，deny 全部内置写工具，
+     * allow 精确放行 6 取数 CLI + bc + Read/Glob/Grep + WebSearch/WebFetch。
      */
     fun writeLiveSettingsJson(workDir: String): File = writeSettingsJson(workDir, liveSettingsJson())
 }

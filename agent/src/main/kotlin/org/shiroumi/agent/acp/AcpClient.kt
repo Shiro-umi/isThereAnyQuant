@@ -167,7 +167,11 @@ class AcpClient(
         val args = buildList {
             addAll(sandboxPrefix)
             add(claudeCmd)
-            add("--dangerously-skip-permissions")
+            // 不注入 --dangerously-skip-permissions:该 flag=bypassPermissions 模式,底层 claude 引擎会在
+            // 权限判决前直接 return allow,架空 settings.json 的 allow/deny/defaultMode,任意 shell 命令放行。
+            // 走 claude-agent-acp 时它被适配器静默丢弃(仅解析 --cli/--hide-claude-auth),不注入零副作用;
+            // 但一旦 claudeCmd 回退成裸 claude CLI,裸 CLI 会真解析成 bypassPermissions 令收口全塌。
+            // 权限收口统一走 {workDir}/.claude/settings.json 的 permissions.defaultMode=dontAsk + allow 白名单。
             if (config.isolated) {
                 add("--setting-sources")
                 add("project")
