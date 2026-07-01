@@ -103,6 +103,16 @@ class StrategyPositionTrackingRuntimeTest {
         assertEquals(setOf("000002.SZ", "000005.SZ"), payload.days.last().holdings.map { it.stockCode }.toSet())
         assertEquals(StrategyTopic.POSITION_TRACKING, envelope.topic)
 
+        // 持仓浮盈基准 = 真实成交价 entry_price，非买入日开盘价（回归防护）。
+        // 000005.SZ：entry_price=10（fixture 刻意 ≠ 买入日 day1 开盘 49），day2 收盘 51
+        //   正确 actualPnl = (51-10)/10 = +410%；若退回 getOpen(49) 基准会算成 (51-49)/49≈+4.08%。
+        //   两值天差地别，锁死"盈亏用开盘价当成本"的 bug 不再回归。
+        val holdingNode5 = assertNotNull(
+            payload.days.last().holdings.singleOrNull { it.stockCode == "000005.SZ" }
+        )
+        assertEquals(10.0f, assertNotNull(holdingNode5.entryPrice), absoluteTolerance = 0.001f)
+        assertEquals(410.0f, assertNotNull(holdingNode5.actualPnl), absoluteTolerance = 0.01f)
+
         // 清仓节点：服务端按生产规则重建离场判决——止盈触价 +7%，而非收盘口径 +2%
         val clearedNode = assertNotNull(payload.days.last().cleared.singleOrNull())
         assertEquals("000001.SZ", clearedNode.stockCode)
@@ -131,14 +141,15 @@ class StrategyPositionTrackingRuntimeTest {
         assertEquals(StrategyTrackingSection.HOLDINGS, holdEdge.fromSection)
         assertEquals(2.0f, assertNotNull(holdEdge.pnlPct), absoluteTolerance = 0.01f)
 
-        // 下一卖点（最新观察日持仓）：000005.SZ 成本=day1 开盘 49，TP7% → 止盈价 52.43；
-        // V5 预设含 1~4 档 2.5% 阶梯，daysSinceEntry=1 命中保盈价 49×1.025=50.225；
-        // 时间止损剩余 = timeStopDays(5) - 1 - daysSinceEntry(1) = 3 个交易日
+        // 下一卖点（最新观察日持仓）：000005.SZ 成本 = 真实成交价 entry_price=10（非买入日开盘 49），
+        // TP7% → 止盈价 10×1.07=10.7；V5 预设含 1~4 档 2.5% 阶梯，daysSinceEntry=1 命中保盈价 10×1.025=10.25；
+        // 时间止损剩余 = timeStopDays(5) - 1 - daysSinceEntry(1) = 3 个交易日。
+        // 注：本 fixture 刻意让 entry_price(10) ≠ 买入日开盘(49)，验证盈亏/卖点基准用真实成交价而非开盘价。
         val holdingNext = assertNotNull(
             payload.days.last().holdings.singleOrNull { it.stockCode == "000005.SZ" }?.nextExit
         )
-        assertEquals(52.43f, holdingNext.takeProfitPrice, absoluteTolerance = 0.01f)
-        assertEquals(50.225f, assertNotNull(holdingNext.profitProtectPrice), absoluteTolerance = 0.01f)
+        assertEquals(10.7f, holdingNext.takeProfitPrice, absoluteTolerance = 0.01f)
+        assertEquals(10.25f, assertNotNull(holdingNext.profitProtectPrice), absoluteTolerance = 0.01f)
         assertEquals(3, holdingNext.timeStopInTradingDays)
 
         // 盘中实时快照不再覆盖跟踪页：INTRADAY_REALTIME 来源返回 null，跟踪快照保持盘后确认结果不变。

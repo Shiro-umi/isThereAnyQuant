@@ -179,6 +179,9 @@ data class StrategyTrackingStockNode(
     /** 选股节点：agent 量价分析给出的次日目标买点价（QFQ 口径）；null = 无买点（回退开盘价无条件建仓）。 */
     val entryHint: Float? = null,
     val buyDate: String? = null,
+    /** 持仓/清仓节点：真实成交成本价（LIMIT 触达价 / 无买点时开盘价，QFQ 口径），来自 daily_strategy_holding.entry_price。
+     *  盈亏计算基准；null = 历史数据无此字段，回退买入日开盘价。 */
+    val entryPrice: Float? = null,
     val buyPrice: Float? = null,
     val actualPnl: Float? = null,
     val maxPnl: Float? = null,

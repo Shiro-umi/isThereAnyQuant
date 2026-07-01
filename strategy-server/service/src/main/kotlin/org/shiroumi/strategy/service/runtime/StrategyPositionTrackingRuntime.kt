@@ -232,7 +232,8 @@ class StrategyPositionTrackingRuntime(
                         stockNames = stockNames,
                         section = StrategyTrackingSection.HOLDINGS,
                         slotIndex = idx,
-                        buyDate = holding.entryDate.toString()
+                        buyDate = holding.entryDate.toString(),
+                        entryPrice = holding.entryPrice,
                     )
                 }
             // 清仓列：前一交易日持仓中，今日已不在持有的票
@@ -249,7 +250,8 @@ class StrategyPositionTrackingRuntime(
                             stockNames = stockNames,
                             section = StrategyTrackingSection.CLEARED,
                             slotIndex = idx,
-                            buyDate = holding.entryDate.toString()
+                            buyDate = holding.entryDate.toString(),
+                            entryPrice = holding.entryPrice,
                         )
                     }
             }
@@ -269,7 +271,8 @@ class StrategyPositionTrackingRuntime(
         slotIndex: Int,
         modelScore: Double? = null,
         entryHint: Double? = null,
-        buyDate: String? = null
+        buyDate: String? = null,
+        entryPrice: Double? = null,
     ) = StrategyTrackingStockNode(
         stockCode = code,
         stockName = stockNames[code] ?: code,
@@ -277,7 +280,8 @@ class StrategyPositionTrackingRuntime(
         slotIndex = slotIndex,
         modelScore = modelScore,
         entryHint = entryHint?.toFloat(),
-        buyDate = buyDate
+        buyDate = buyDate,
+        entryPrice = entryPrice?.toFloat(),
     )
 
     /**
@@ -339,7 +343,11 @@ class StrategyPositionTrackingRuntime(
     ): StrategyTrackingStockNode {
         val buyDate = node.buyDate?.let(LocalDate::parse) ?: return node
         val series = candles[node.stockCode] ?: return node
-        val buyPrice = series[buyDate]?.getOpen()?.takeIf { it > 0f } ?: return node
+        // 成本基准优先取真实成交价（entry_price），回退买入日开盘价兼容历史节点。真实 entry_price 与生产推进
+        // HoldingStateMachine.evaluateExit 读同一份成交成本，用它重建判决比 getOpen 更同源（getOpen 才与生产分叉）。
+        val buyPrice = node.entryPrice?.takeIf { it > 0f }
+            ?: series[buyDate]?.getOpen()?.takeIf { it > 0f }
+            ?: return node
         val bar = series[exitDate] ?: return node
         val daysSinceEntry = dataSource.tradingDaysSince(buyDate, exitDate)
         val verdict = holdingStateMachine.evaluateExit(
@@ -572,7 +580,10 @@ private fun fillPnl(
     val candles = candleMap[node.stockCode] ?: return node
     val buyCandle = candles[buyDate] ?: return node
     val currentCandle = candles[observationDate] ?: return node
-    val buyPrice = buyCandle.getOpen()
+    // 盈亏基准 = 真实成交成本价（LIMIT 触达价 / 无买点时开盘价），来自 daily_strategy_holding.entry_price。
+    // 回退买入日开盘价仅兼容历史无 entryPrice 字段的节点；有买点时开盘价 ≠ 成交价，用它会把限价择时收益算错
+    // （今日入场票退化成当天涨跌幅）。
+    val buyPrice = node.entryPrice?.takeIf { it > 0f } ?: buyCandle.getOpen()
     if (buyPrice <= 0) return node
 
     val currentPrice = currentCandle.getPrice()
