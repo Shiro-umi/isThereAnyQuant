@@ -3,10 +3,12 @@ package org.shiroumi.server.websocket.service
 import java.io.File
 import java.nio.file.Files
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -123,6 +125,37 @@ class BacktestAgentProvisioningTest {
         // deny 段（allow 之前）内不应出现裸 Bash。
         val denySegment = json.substringAfter("\"deny\"").substringBefore("\"allow\"")
         assertFalse(denySegment.contains("\"Bash\""))
+    }
+
+    @Test
+    fun `writeLiveLocalSettingsJson 覆盖 local 为零 allow 零 deny 堵死旁路`() {
+        // claude CLI 会把历史 always-allow 命令持久化进 settings.local.json，local 命中即放行会架空 project 层
+        // dontAsk。provisioning 每次会话把 local 覆盖为空 allow。验证：即便 local 原先有宽 allow，覆盖后归零。
+        val workDir = Files.createTempDirectory("quant-local-test").toFile().also { it.deleteOnExit() }
+        val claudeDir = File(workDir, ".claude").also { it.mkdirs() }
+        // 预置一份"污染" local，模拟历史 695 条 allow 里的危险项
+        File(claudeDir, "settings.local.json")
+            .writeText("""{"permissions":{"allow":["Bash(dscl . list /Users)","Bash(ls)"]}}""")
+
+        val written = BacktestAgentProvisioning.writeLiveLocalSettingsJson(workDir.absolutePath)
+
+        assertEquals(File(claudeDir, "settings.local.json").absolutePath, written.absolutePath)
+        val permissions = Json.parseToJsonElement(written.readText()).jsonObject.getValue("permissions").jsonObject
+        // allow / deny 都归零，污染项被清除
+        assertTrue(permissions.getValue("allow").jsonArray.isEmpty())
+        assertTrue(permissions.getValue("deny").jsonArray.isEmpty())
+        assertFalse(written.readText().contains("dscl"))
+    }
+
+    @Test
+    fun `writeLiveLocalSettingsJson 写盘失败向上抛异常不静默吞掉`() {
+        // 收口 fail-fast 前提：写空 local 失败必须向上传播（由 AgentWebSocketService 包成
+        // SecuritySettingsProvisionException 中止会话），不能在方法内被吞导致旧污染 local 残留放行。
+        // 用一个"workDir 路径本身是普通文件"制造 .claude mkdirs/writeText 失败。
+        val notADir = Files.createTempFile("quant-local-notadir", ".tmp").toFile().also { it.deleteOnExit() }
+        assertFailsWith<Exception> {
+            BacktestAgentProvisioning.writeLiveLocalSettingsJson(notADir.absolutePath)
+        }
     }
 
     @Test

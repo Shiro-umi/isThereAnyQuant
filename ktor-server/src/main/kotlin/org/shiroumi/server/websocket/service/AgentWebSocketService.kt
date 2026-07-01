@@ -43,6 +43,16 @@ import java.util.concurrent.ConcurrentHashMap
  * 2. 订阅 AgentBridgeImpl.observeState() 流，将状态变化实时推送给前端
  * 3. 转发前端的 Prompt / 权限批准 / 拒绝 命令
  */
+
+/**
+ * agent 权限收口文件（settings.json / settings.local.json）写盘失败时抛出。
+ *
+ * provisioning 的其他步骤（skill 软链、CLAUDE.md、CLI 工具）失败仅降级功能，被 catch 吞掉后会话继续；
+ * 但权限收口写盘失败会让 dontAsk 或 local 清空未落地（旧污染 local 残留放行任意命令），必须 fail-fast
+ * 拒绝启动会话，语义对齐 createSession 里 check(isolated) 的"违反即拒绝启动而非静默裸跑"。
+ */
+class SecuritySettingsProvisionException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
 object AgentWebSocketService {
 
     private val logger by logger("AgentWebSocketService")
@@ -604,13 +614,26 @@ object AgentWebSocketService {
                             2. 结果导向：在被要求查询数据或执行计算动作时，你**必须**第一步直接且静默地调用相关的能力工具。只有在拿到底层工具的返回结果后，再组织并输出唯一一次完整专业的结论。
                         """.trimIndent()
                         )
-                        // 实盘交互写 .claude/settings.json：deny 内置写工具 + 兜底 Bash 钉死 workDir、禁读系统信息，
-                        // allow 精确放行 6 取数 CLI + bc + Read/Glob/Grep + WebSearch/WebFetch。与 isolated 的
-                        // --setting-sources project 配合生效（live isolated 默认 true）。报告走 ACP 文本流不依赖 Write。
-                        val liveSettingsFile = BacktestAgentProvisioning.writeLiveSettingsJson(resolvedWorkDir)
-                        logger.info(
-                            "[AgentWebSocketService] Wrote live permissions settings.json at ${liveSettingsFile.absolutePath}"
-                        )
+                        // 实盘交互写权限收口两半（失败 fail-fast，见下方 SecuritySettingsProvisionException catch）：
+                        //  - settings.json：permissions.defaultMode=dontAsk 做 deny-by-default，deny 内置写工具，
+                        //    allow 精确放行 6 取数 CLI + bc + Read/Glob/Grep + WebSearch/WebFetch。报告走 ACP 文本流不依赖 Write。
+                        //  - settings.local.json：写空。claude CLI 会把历史 always-allow 命令持久化进 local，底层引擎按
+                        //    settingSources=[user,project,local] 合并 local 的 allow 命中即放行，架空 project 层 dontAsk。
+                        //    冷启动进程读取该文件，写空使下一次进程启动时 local 无旁路（详见 writeLiveLocalSettingsJson）。
+                        runCatching {
+                            val liveSettingsFile = BacktestAgentProvisioning.writeLiveSettingsJson(resolvedWorkDir)
+                            logger.info(
+                                "[AgentWebSocketService] Wrote live permissions settings.json at ${liveSettingsFile.absolutePath}"
+                            )
+                            val liveLocalSettingsFile = BacktestAgentProvisioning.writeLiveLocalSettingsJson(resolvedWorkDir)
+                            logger.info(
+                                "[AgentWebSocketService] Wrote empty live settings.local.json at ${liveLocalSettingsFile.absolutePath}"
+                            )
+                        }.getOrElse { e ->
+                            // 透传协程取消，不包成收口异常，保持取消语义纯净（writeText 无挂起点、此路径实际罕见）。
+                            if (e is kotlinx.coroutines.CancellationException) throw e
+                            throw SecuritySettingsProvisionException("实盘权限收口写盘失败: ${e.message}", e)
+                        }
                         }
 
                         // Provision CLI tools with correct server port
@@ -644,7 +667,17 @@ object AgentWebSocketService {
                                 )
                             }
                         }
+                    } catch (e: SecuritySettingsProvisionException) {
+                        // 权限收口写盘失败 fail-fast：与 check(isolated) 同策略——settings.json / settings.local.json
+                        // 是 agent 权限收口的两半，任一写盘失败都可能让 dontAsk 或 local 清空未落地（旧污染 local 残留
+                        // 放行任意命令）。此时拒绝启动会话，而非静默裸跑。重新抛出中止 createSession。
+                        logger.error(
+                            "[AgentWebSocketService] 权限收口写盘失败，拒绝启动会话: ${e.message}"
+                        )
+                        throw e
                     } catch (e: Exception) {
+                        // 非收口类 provisioning（skill 软链、CLAUDE.md、CLI 工具）失败仅降级功能，不影响权限收口，
+                        // 记日志后继续起会话。
                         logger.error(
                             "[AgentWebSocketService] Failed to provision skill sandbox: ${e.message}"
                         )

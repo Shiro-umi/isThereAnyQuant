@@ -339,4 +339,37 @@ internal object BacktestAgentProvisioning {
      * allow 精确放行 6 取数 CLI + bc + Read/Glob/Grep + WebSearch/WebFetch。
      */
     fun writeLiveSettingsJson(workDir: String): File = writeSettingsJson(workDir, liveSettingsJson())
+
+    /** 空 local 设置：零 allow、零 deny，让 local 层不放行任何命令。 */
+    private fun emptyLocalSettingsJson(): String =
+        """
+        {
+          "permissions": {
+            "allow": [],
+            "deny": []
+          }
+        }
+        """.trimIndent()
+
+    /**
+     * 写空 settings.local.json 到 {workDir}/.claude/settings.local.json。
+     *
+     * 收口 local 层：claude CLI 自身把用户历史"always allow"命令持久化进 settings.local.json，底层引擎按
+     * settingSources=[user, project, local] 合并 allow/deny，local 命中即放行，会架空 project 层 settings.json
+     * 的 defaultMode=dontAsk（agent 曾靠 local 里的 Bash(dscl . list /Users) 列出系统用户）。provisioning 每次
+     * 会话把 local 覆盖为空 allow，与 writeLiveSettingsJson 成对落盘，堵死这条旁路。
+     *
+     * 覆盖而非删除：settings.js 对 local 目录挂 fs.watch，删除给 CLI 重建带 allow 文件的机会；覆盖为显式空
+     * allow 是幂等占位，CLI 读到确定空集。
+     *
+     * 安全性绑定 dontAsk 常驻：dontAsk 下未命中 allow 的工具在引擎内直接 auto-deny、不弹审批、不回写 local，
+     * 故写空后长期保持干净。若把实盘 defaultMode 改回 default（未命中触发 ACP 权限请求，被 AcpClient 的
+     * autoApproveTools=true 无条件批准），被批准的调用会以 destination=localSettings 回写 local，空覆盖拦不住。
+     * 此约束与 dontAsk 绑定，非本方法引入。
+     */
+    fun writeLiveLocalSettingsJson(workDir: String): File {
+        val claudeDir = File(workDir, ".claude")
+        claudeDir.mkdirs()
+        return File(claudeDir, "settings.local.json").also { it.writeText(emptyLocalSettingsJson()) }
+    }
 }
