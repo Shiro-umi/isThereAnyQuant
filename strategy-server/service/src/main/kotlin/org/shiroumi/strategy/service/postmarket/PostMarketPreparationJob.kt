@@ -31,7 +31,9 @@ import org.shiroumi.strategy.core.daily.StockFactorSnapshot
 import org.shiroumi.strategy.core.daily.TargetPosition
 import org.shiroumi.strategy.core.daily.preprocessing.PreparedBarFactory
 import org.shiroumi.strategy.core.daily.seed.toRuntimeSeed
+import org.shiroumi.strategy.service.model.Ema20SlopeTargetSelector
 import org.shiroumi.strategy.service.model.ProfitPredictionModelSelector
+import org.shiroumi.strategy.service.model.ProfitPredictionTargetSelector
 import org.shiroumi.strategy.service.preprocessing.DefaultStrategyPreprocessor
 import org.shiroumi.strategy.service.universe.MainBoardUniverseProvider
 import utils.logger
@@ -72,7 +74,21 @@ private data class IncrementalPreparedBars(
  * database 仅提供 Repository / schema 等持久化能力。
  */
 object PostMarketPreparationJob {
-    private val profitPredictionSelector = ProfitPredictionModelSelector()
+    /**
+     * 选股引擎装配开关：`quant.selection.engine`。
+     * - 默认 / `profit-prediction`：v5 盈利预测模型 Top-N（现状口径，不变）。
+     * - `ema20-slope`：纯 EMA20 斜率 Top-N 趋势池（2026-06-29 换口径，用户拍板）。
+     *
+     * 两实现同 [ProfitPredictionTargetSelector] 契约，下游写库 / 买点回填 / 持仓推进零差别。
+     * 换口径首日落库需配 `-Dquant.strategy.rebuild.allowSelectionDrift=true` 放行 selection 漂移。
+     */
+    private val profitPredictionSelector: ProfitPredictionTargetSelector =
+        when (System.getProperty("quant.selection.engine", "profit-prediction").lowercase()) {
+            "ema20-slope" -> Ema20SlopeTargetSelector().also {
+                logger.info("[策略预处理] 选股引擎 = EMA20 斜率趋势池（quant.selection.engine=ema20-slope）")
+            }
+            else -> ProfitPredictionModelSelector()
+        }
 
     // 规则装配统一走 ExitRules.fromSystemProperties()，与持仓跟踪展示链路共享同一规则口径
     private val holdingStateMachine = HoldingStateMachine(

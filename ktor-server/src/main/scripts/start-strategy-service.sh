@@ -56,7 +56,8 @@ APP_OPTS="${APP_OPTS:-"
     -Dquant.strategy.holding.breakdownRerank=true
     -Dquant.strategy.holding.maxDailyEntries=0
     -Dquant.strategy.entryBackfill.enabled=true
-    -Dquant.strategy.entryBackfill.modelKey=deepseek-v4-flash
+    -Dquant.strategy.entryBackfill.modelKey=deepseek-v4-pro
+    -Dquant.selection.engine=ema20-slope
 "}"
 # maxDailyEntries=0：放开每日入场上限——选股 Top5 全部回填买点（entryBackfill 默认 topN=5），
 # 实际入场由 LIMIT 触达判定（当日股价触碰买点才建仓），触价即买、不限只数（最多 Top5），
