@@ -279,8 +279,10 @@ internal object BacktestAgentProvisioning {
      * （quant-kline / quant-header 等），读已被 ACP 限死 workDir，安全。区别于回测：交互保留 WebSearch / WebFetch
      * 做实时取数，故不照搬回测的禁联网 deny。
      *
-     * bc 形态是 `echo "scale=4; ..." | bc`，首 token 为 echo，命中 Bash(echo:*)。管道 `| bc` 的匹配语义以
-     * live 会话实测为准：若被拦则追加 Bash(bc:*)。
+     * bc 形态是 `echo "scale=4; ..." | bc`。live 会话实测：claude 引擎对管道命令逐段评估权限，echo 段命中
+     * Bash(echo:*)，bc 段必须独立命中 bc 规则，缺失时整条命令被 dontAsk auto-deny。管道段的 bc 是裸命令
+     * （无参数），Bash(bc:*) 是"以 bc 开头"的前缀匹配，对裸命令的命中随引擎版本有差异；故同时写精确规则
+     * Bash(bc)（命中裸 bc）与前缀规则 Bash(bc:*)（命中 bc -l 等带参形态），两种匹配语义都覆盖。
      */
     fun liveSettingsJson(): String =
         """
@@ -305,7 +307,9 @@ internal object BacktestAgentProvisioning {
               "Bash(./get-industry-research-reports:*)",
               "Bash(./get-limit-list:*)",
               "Bash(./market-emotion:*)",
-              "Bash(echo:*)"
+              "Bash(echo:*)",
+              "Bash(bc)",
+              "Bash(bc:*)"
             ]
           }
         }

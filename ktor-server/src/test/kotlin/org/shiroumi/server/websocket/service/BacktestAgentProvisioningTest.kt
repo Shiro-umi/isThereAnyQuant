@@ -183,8 +183,11 @@ class BacktestAgentProvisioningTest {
         assertTrue(json.contains("\"Bash(./get-industry-research-reports:*)\""))
         assertTrue(json.contains("\"Bash(./get-limit-list:*)\""))
         assertTrue(json.contains("\"Bash(./market-emotion:*)\""))
-        // bc 形态
+        // bc 形态：echo "scale=4; ..." | bc。引擎对管道逐段评估，echo 段与 bc 段各需独立命中；
+        // 管道段的 bc 是裸命令，精确规则 Bash(bc) 与前缀规则 Bash(bc:*) 并列覆盖两种匹配语义。
         assertTrue(json.contains("\"Bash(echo:*)\""))
+        assertTrue(json.contains("\"Bash(bc)\""))
+        assertTrue(json.contains("\"Bash(bc:*)\""))
         // 报告链路所需读工具（读 SKILL.md 学报告块格式）
         assertTrue(json.contains("\"Read\""))
         assertTrue(json.contains("\"Glob\""))
