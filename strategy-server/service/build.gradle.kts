@@ -49,6 +49,7 @@ tasks.register<JavaExec>("rebuildStrategyRange") {
             .filter {
                 it.startsWith("quant.profitPrediction.") || it.startsWith("quant.strategy.rebuild.") ||
                     it.startsWith("quant.strategy.holding.") || it.startsWith("quant.strategy.entryBackfill.") ||
+                    it == "quant.selection.engine" || it.startsWith("quant.ema20Selection.") ||
                     it == "quant.projectRoot" || it == "quant.project.root"
             }
             .associateWith { System.getProperty(it) }
